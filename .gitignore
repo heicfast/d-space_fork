@@ -66,3 +66,6 @@ test-results/
 *.bak
 *.tmp
 .cache/
+
+# Claude Code project-local profile (kept local)
+.claude/
