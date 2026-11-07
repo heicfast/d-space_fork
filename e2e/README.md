@@ -1,13 +1,13 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# D-Space e2e — Sprint 3.5 (Bölüm 20.4)
+# D-Space e2e — Sprint 3.5+ (Bölüm 20.4)
 
 Playwright tabanlı uçtan uca testler. İki kanal var:
 
 | Proje | Çalışma yeri | Tauri IPC | Hız | Amaç |
 |---|---|---|---|---|
-| `web` | Vite dev server | stub (`window.__TAURI_IPC__`) | hızlı | UI flow regresyon, golden path |
-| `webdriver` | `tauri-driver` köprüsü | gerçek backend | yavaş | Bundle düzeyinde smoke (release adayı) |
+| `web` | Vite dev server | stub (`__TAURI_INTERNALS__.invoke`) | hızlı | UI flow regresyon, golden path |
+| `webdriver` | `tauri-driver` köprüsü | gerçek backend | yavaş | Bundle düzeyinde smoke (release adayı) — **opt-in** |
 
 ## Yerel koşum
 
@@ -16,30 +16,34 @@ pnpm test:e2e:install       # Chromium binary, ilk seferlik
 pnpm test:e2e --project=web # Hızlı web kanalı
 ```
 
-`webdriver` projesi tauri-driver gerektirir:
+Not: bazı ortamlarda Vite yalnız `localhost`'a bağlanır (IPv6 çözümlemesi);
+`pnpm dev` 127.0.0.1'den erişilemezse `D_SPACE_E2E_HOST=localhost` ortam
+değişkeniyle koşun.
+
+`webdriver` projesi varsayılan koşuda **dahil değildir** (tauri-driver
+gerektirir); açıkça opt-in edilir:
 
 ```powershell
 cargo install tauri-driver --locked
 pnpm tauri build --debug
+$env:D_SPACE_E2E_WEBDRIVER = "1"
 pnpm test:e2e --project=webdriver
 ```
 
 ## Smoke senaryoları (`web` kanal stub'ları)
 
 `web` kanalı IPC'yi mocklar — `e2e/fixtures/tauri-mock.ts` her `invoke`
-çağrısını deterministik response'larla cevaplar. Smoke testler 5 akışı
-kapsar (master spec Bölüm 20.4'ten):
+çağrısını deterministik response'larla cevaplar. Mock, `onboarding_done`
+settings anahtarını, `withScan: true` ile `scan_full` + `tree_window` +
+`tree_path` verilerini de sağlar (drilldown kartı render olur). Smoke
+testler 6 akışı kapsar:
 
-1. **`onboarding.spec.ts`** — 3 slide ileri/geri, mod seçimi, "Başla"
-2. **`scan-progress.spec.ts`** — Tara: C: → ScanProgress overlay → drilldown
-3. **`view-modes.spec.ts`** — Ctrl+1/2/3/4 görsel mod değişimi
-4. **`detail-panel.spec.ts`** — Dosya seçimi → sağ detay panel görünür
-5. **`staging-undo.spec.ts`** — Staging gönder → undo → tekrar görünür
+1. **`onboarding.spec.ts`** — 4 slide ileri, mod seçimi, "Başla" → kapanış
+2. **`quick-search.spec.ts`** — Ctrl+F arama kutusu fokus + debounce
+3. **`theme-toggle.spec.ts`** — tema butonu üç state döngüsü
+4. **`update-check.spec.ts`** — güncelleme kontrolü + hata mesajı
+5. **`view-modes.spec.ts`** — view-chip tıklama + Ctrl+1..5 görsel mod değişimi
+6. (Aynı dosyada) aktif mod `.view-chip-active` sınıf taşıması
 
 Her smoke yalnız UI akışını doğrular; gerçek backend davranışı
-`tauri-driver` kanalında ayrı koşulur.
-
-## CI
-
-`.github/workflows/e2e.yml` — şimdilik `continue-on-error: true` kabul
-ettirildi. v0.2.0-beta sonrası "must pass" gate'e taşınacak.
+`tauri-driver` kanalında ayrı koşulur (v0.4 planı).

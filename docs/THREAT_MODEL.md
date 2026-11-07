@@ -37,7 +37,7 @@ pen-test sonrası genişletilecek.
 | **RestartManager probe** (Bölüm 34.4) | Sistem handle table reveal | On-demand only, hot-path izolasyonu (Bölüm 34.5.1); RM PID + app name, sistem handle'ları leak etmez | NtQuerySystemInformation derin probe gerekmez (RM yeterli) |
 | **Locked file probe** (`detect.rs`) | DoS via CreateFileW spamming | UI'da explicit user click; spawn_blocking ile asenkron | Rate limit yok (v0.2 — `0.5 saniye debounce`) |
 | **Telemetry endpoint** (opsiyonel) | Data leak | **Yok**: gerçek endpoint v0.2; bu sprint sadece settings flag | HTTPS + cert pinning v0.2 |
-| **Auto-update** (Tauri updater) | Supply chain | **Yok**: updater v0.2 | Ed25519 signature check + tag-based release |
+| **Auto-update** (Tauri updater) | Supply chain | **Aktif** (v0.3.0): Ed25519 imza + latest.json endpoint; `createUpdaterArtifacts` ile .sig üretimi zorunlu | Ed25519 signature check + tag-based release |
 
 ---
 

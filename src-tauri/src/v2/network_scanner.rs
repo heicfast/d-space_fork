@@ -56,15 +56,34 @@ impl Default for WindowsNetworkScanner {
 /// "X MB veri çekildi" izlenimi vermek için kullanışlı tahmin.
 const SMB_METADATA_BYTES_PER_FILE: u64 = 4096;
 
-impl NetworkShareScanner for WindowsNetworkScanner {
-    fn scan_unc(&self, unc_path: &str, _bandwidth_cap_bps: u64) -> Result<NetworkScanResult> {
+impl WindowsNetworkScanner {
+    /// Gemini review (scan_unc_path uncancellable) — iptal bayrağı ve
+    /// progress callback'i içeren zenginleştirilmiş tarama. Trait metodunu
+    /// şekil bozmadan geniştirir; `scan_unc` bu metodu None/None ile
+    /// çağırır. SMB üzerindeki saatler sürebilen walk'lar UI'dan
+    /// durdurulabilir + canlı ilerleme alabilir.
+    pub fn scan_unc_with_progress(
+        &self,
+        unc_path: &str,
+        bandwidth_cap_bps: u64,
+        progress_cb: Option<crate::scan::walk::ProgressCb<'_>>,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> Result<NetworkScanResult> {
         let started = std::time::Instant::now();
-        // `scan_find_first` UNC path'ini doğrudan kabul eder (drive_to_root
-        // `\\server\share` formunu tanır, Sprint 4.4). Burada
-        // wrapper yalnız sayım + bandwidth tahmini yapar.
-        let entries = crate::scan::scan_find_first(unc_path)
+        // `scan_find_first_with_progress` UNC path'ini doğrudan kabul eder
+        // (drive_to_root UNC formunu tanır, Sprint 4.4).
+        let entries = crate::scan::scan_find_first_with_progress(unc_path, progress_cb, cancel)
             .map_err(|e| crate::error::Error::Volume(format!("UNC tarama: {:?}", e)))?;
+        self.summarize(unc_path, bandwidth_cap_bps, entries, started)
+    }
 
+    fn summarize(
+        &self,
+        unc_path: &str,
+        _bandwidth_cap_bps: u64,
+        entries: crate::scan::walk::MftEntries,
+        started: std::time::Instant,
+    ) -> Result<NetworkScanResult> {
         let mut file_count: u64 = 0;
         let mut dir_count: u64 = 0;
         let mut total_bytes: u64 = 0;
@@ -86,6 +105,12 @@ impl NetworkShareScanner for WindowsNetworkScanner {
             elapsed_ms: started.elapsed().as_millis() as u64,
             partial: false,
         })
+    }
+}
+
+impl NetworkShareScanner for WindowsNetworkScanner {
+    fn scan_unc(&self, unc_path: &str, bandwidth_cap_bps: u64) -> Result<NetworkScanResult> {
+        self.scan_unc_with_progress(unc_path, bandwidth_cap_bps, None, None)
     }
 }
 

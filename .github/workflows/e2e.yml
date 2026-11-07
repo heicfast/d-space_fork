@@ -49,10 +49,18 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Playwright browsers (chromium)
-        run: pnpm test:e2e:install
+        # Gemini review W4 — --with-deps: ubuntu runner'da eksik OS
+        # kütüphanesi Chrome'un açılmamasına yol açıyordu.
+        run: pnpm test:e2e:install --with-deps chromium
 
       - name: pnpm test:e2e --project=web
-        run: pnpm test:e2e --project=web --reporter=github
+        # Gemini review W3 — html reporter: aşağıdaki artifact adımı
+        # playwright-report/ üretmiyordu (yüklenen hiçbir şey yoktu).
+        # D_SPACE_E2E_HOST=localhost — vite host=false yalnız localhost'e
+        # bağlanır (bazı ortamlarda 127.0.0.1 IPv6'ya düşer, timeout olur).
+        run: pnpm test:e2e --project=web --reporter=github,html
+        env:
+          D_SPACE_E2E_HOST: localhost
 
       - name: Upload report on failure
         if: failure()

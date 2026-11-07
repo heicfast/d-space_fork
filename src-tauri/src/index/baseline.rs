@@ -161,6 +161,92 @@ pub fn apply_baseline_batch(
 
 // ----------------------- Windows IO -----------------------
 
+/// `FSCTL_QUERY_USN_JOURNAL` — yalnız journal metadata (journal_id +
+/// next_usn). Watcher/incremental sync wraparound kontrolü için kullanır;
+/// tam baseline walker'ı çalıştırmaz.
+#[cfg(windows)]
+pub fn query_journal(volume_id: &str) -> Result<JournalData> {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows::Win32::System::IO::DeviceIoControl;
+
+    use super::usn::FSCTL_QUERY_USN_JOURNAL;
+
+    /// GENERIC_READ ham değer — windows-rs sürüm farklarından bağımsız.
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+
+    struct HandleGuard(HANDLE);
+    impl Drop for HandleGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+
+    let wide: Vec<u16> = OsStr::new(volume_id)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let pcwstr = PCWSTR(wide.as_ptr());
+    let share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+
+    let handle = unsafe {
+        CreateFileW(
+            pcwstr,
+            GENERIC_READ,
+            share,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(FILE_FLAG_BACKUP_SEMANTICS),
+            None,
+        )
+    }
+    .map_err(|e| {
+        Error::Index(format!(
+            "query_journal volume açma ({}): {:?}",
+            volume_id, e
+        ))
+    })?;
+    let _guard = HandleGuard(handle);
+
+    let mut buf = [0u8; JOURNAL_DATA_V0_SIZE];
+    let mut returned: u32 = 0;
+    unsafe {
+        DeviceIoControl(
+            handle,
+            FSCTL_QUERY_USN_JOURNAL,
+            None,
+            0,
+            Some(buf.as_mut_ptr() as *mut _),
+            JOURNAL_DATA_V0_SIZE as u32,
+            Some(&mut returned),
+            None,
+        )
+    }
+    .map_err(|e| Error::Index(format!("query_journal DeviceIoControl: {:?}", e)))?;
+    if (returned as usize) < JOURNAL_DATA_V0_SIZE {
+        return Err(Error::Index(format!(
+            "query_journal kısa yanıt: {} bayt",
+            returned
+        )));
+    }
+    parse_journal_data(&buf)
+}
+
+/// Non-Windows — journal sorgusu desteklenmez.
+#[cfg(not(windows))]
+pub fn query_journal(_volume_id: &str) -> Result<JournalData> {
+    Err(Error::NotImplemented("query_journal yalnız Windows"))
+}
+
 #[cfg(windows)]
 pub fn enumerate_volume_baseline(
     volume_id: &str,
@@ -242,6 +328,17 @@ pub fn enumerate_volume_baseline(
         journal_id = journal.journal_id,
         next_usn = journal.next_usn,
         "USN baseline başlıyor"
+    );
+
+    // Gemini review B6 — full rebuild öncesi eski satırları temizle.
+    // Upsert-only walk, wraparound sonrası silinen dosyaların kayıtlarını
+    // sonsuza dek bırakıyordu (hayalet arama sonuçları). purge_volume
+    // watermark'ı da siler — aşağıda yeniden yazılır. Yarıda kalan walk
+    // watermark yazmaz → sonraki açılış yine full rebuild ile toparlanır.
+    let purged = super::persist::purge_volume(conn, volume_id)?;
+    debug!(
+        volume = volume_id,
+        purged, "baseline öncesi eski index temizlendi"
     );
 
     let mut summary = BaselineSummary {

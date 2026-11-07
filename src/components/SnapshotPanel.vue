@@ -5,7 +5,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import InfoButton from "./InfoButton.vue";
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
+
+// Gemini review — locale-aware tarih/sayı formatı.
+function localeTag(): string {
+  return locale.value === "tr" ? "tr-TR" : "en-US";
+}
 
 interface SnapshotMeta {
   id: number;
@@ -82,7 +87,7 @@ function formatBytes(b: number): string {
 function formatTime(unix: number): string {
   if (!unix) return "—";
   const d = new Date(unix * 1000);
-  return d.toLocaleString("tr-TR");
+  return d.toLocaleString(localeTag());
 }
 
 function formatIpcError(err: unknown): string {
@@ -227,7 +232,7 @@ onMounted(() => {
         <span class="snap-icon">📸</span>
         <span class="snap-time mono">{{ formatTime(s.captured_at_unix) }}</span>
         <span class="snap-count mono">
-          {{ s.entry_count.toLocaleString("tr-TR") }} kayıt
+          {{ s.entry_count.toLocaleString(localeTag()) }} {{ t("snapshot.entriesUnit") }}
         </span>
         <span class="snap-size mono">{{ formatBytes(s.total_size_bytes) }}</span>
         <span
@@ -245,7 +250,7 @@ onMounted(() => {
       {{ selection.length === 1 ? "Bir tane daha seç." : "" }}
     </p>
 
-    <div v-if="deltaLoading" class="muted hint">Delta hesaplanıyor…</div>
+    <div v-if="deltaLoading" class="muted hint">{{ t("snapshot.deltaLoading") }}</div>
     <p v-if="deltaError" class="err">{{ deltaError }}</p>
 
     <div v-if="delta" class="delta-block">
@@ -255,14 +260,14 @@ onMounted(() => {
         </div>
         <div class="delta-net" :class="netClass">{{ netLabel }}</div>
         <div class="delta-meta mono">
-          {{ delta.total_changed_paths.toLocaleString("tr-TR") }} değişen yol
+          {{ delta.total_changed_paths.toLocaleString(localeTag()) }} {{ t("snapshot.changedPaths") }}
         </div>
       </div>
 
       <div class="delta-grid">
         <div class="delta-panel">
           <div class="delta-panel-head">
-            <span class="delta-pill pill-added">🆕 Eklenen</span>
+            <span class="delta-pill pill-added">{{ t("snapshot.added") }}</span>
             <span class="delta-count mono">{{ delta.added.length }}</span>
           </div>
           <ul v-if="delta.added.length" class="delta-list">
@@ -276,7 +281,7 @@ onMounted(() => {
 
         <div class="delta-panel">
           <div class="delta-panel-head">
-            <span class="delta-pill pill-removed">🗑 Silinen</span>
+            <span class="delta-pill pill-removed">{{ t("snapshot.removed") }}</span>
             <span class="delta-count mono">{{ delta.removed.length }}</span>
           </div>
           <ul v-if="delta.removed.length" class="delta-list">
@@ -290,7 +295,7 @@ onMounted(() => {
 
         <div class="delta-panel">
           <div class="delta-panel-head">
-            <span class="delta-pill pill-grew">📈 Büyüyen</span>
+            <span class="delta-pill pill-grew">{{ t("snapshot.grew") }}</span>
             <span class="delta-count mono">{{ delta.grew.length }}</span>
           </div>
           <ul v-if="delta.grew.length" class="delta-list">
@@ -304,7 +309,7 @@ onMounted(() => {
 
         <div class="delta-panel">
           <div class="delta-panel-head">
-            <span class="delta-pill pill-shrunk">📉 Küçülen</span>
+            <span class="delta-pill pill-shrunk">{{ t("snapshot.shrunk") }}</span>
             <span class="delta-count mono">{{ delta.shrunk.length }}</span>
           </div>
           <ul v-if="delta.shrunk.length" class="delta-list">

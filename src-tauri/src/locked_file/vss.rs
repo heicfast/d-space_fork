@@ -120,24 +120,75 @@ pub(crate) unsafe fn uninit_com() {
 
 /// `IVssAsync` operasyonunu tamamlanana kadar bekler. Async pointer her
 /// durumda (hata olsa bile) Release edilir.
+///
+/// Gemini review B9 — eskiden `Wait(u32::MAX)` (INFINITE) kullanılıyordu;
+/// VSS service'i kilitlenirse pool worker thread'i sonsuza kadar bloklanıp
+/// duplicate scan'i donduruyordu. Artık sınırlı timeout ile döngü:
+/// toplam 60 sn sonra `Error::Snapshot("timeout")` döner.
 pub(crate) unsafe fn wait_async(p_async: *mut IVssAsync, ctx: &str) -> Result<()> {
     if p_async.is_null() {
         return Err(Error::Snapshot(format!("VSS {ctx}: async pointer null")));
     }
 
-    // INFINITE — async tamamlanana kadar bekle (DoSnapshotSet 1-3 sn).
-    let wait_hr = (*p_async).Wait(u32::MAX);
+    // 60 × 1 sn bekleyiş — toplam 60 sn tavan. DoSnapshotSet normalde 1-3 sn.
+    const WAIT_SLICE_MS: u32 = 1_000;
+    const MAX_SLICES: u32 = 60;
+
+    let mut wait_hr = S_OK;
+    for _ in 0..MAX_SLICES {
+        wait_hr = (*p_async).Wait(WAIT_SLICE_MS);
+        if wait_hr != S_OK {
+            // WAIT_TIMEOUT = HRESULT_FROM_WIN32(ERROR_TIMEOUT) 0x800705B4 —
+            // dilim tükendi, tekrar dene. Diğer hatalar kalıcı.
+            if wait_hr as u32 == 0x8007_05B4 {
+                continue;
+            }
+            break;
+        }
+        break;
+    }
     if wait_hr != S_OK {
         (*p_async).Release();
         return Err(hresult_to_error(wait_hr, &format!("{ctx} (Wait)")));
     }
 
     let mut status: i32 = 0;
-    let qs_hr = (*p_async).QueryStatus(&mut status, ptr::null_mut());
+    let mut qs_hr = (*p_async).QueryStatus(&mut status, ptr::null_mut());
+
+    // Hâlă tamamlanmadıysa (futur durumlar) kalan süreyi harca — toplam
+    // 60 sn dilim bütçesi içinde status VSS_S_ASYNC_FINISHED olmalı.
+    for _ in 0..MAX_SLICES {
+        if qs_hr != S_OK {
+            break;
+        }
+        if status == VSS_S_ASYNC_FINISHED || status == S_OK {
+            break;
+        }
+        if status == 0x0004_2306 {
+            // VSS_S_ASYNC_CANCELLED — iptal, bekleme anlamsız.
+            break;
+        }
+        if status == 0x0004_2305 {
+            // VSS_S_ASYNC_PENDING — bir dilim daha bekle.
+            std::thread::sleep(std::time::Duration::from_millis(WAIT_SLICE_MS as u64));
+            qs_hr = (*p_async).QueryStatus(&mut status, ptr::null_mut());
+            continue;
+        }
+        break;
+    }
+
     (*p_async).Release();
 
     if qs_hr != S_OK {
         return Err(hresult_to_error(qs_hr, &format!("{ctx} (QueryStatus)")));
+    }
+    if status == 0x0004_2306 {
+        return Err(Error::Snapshot(format!("VSS {ctx}: işlem iptal edildi")));
+    }
+    if status == 0x0004_2305 {
+        return Err(Error::Snapshot(format!(
+            "VSS {ctx}: 60 sn içinde tamamlanmadı (timeout)"
+        )));
     }
     if status != S_OK && status != VSS_S_ASYNC_FINISHED {
         return Err(hresult_to_error(status, &format!("{ctx} (status)")));

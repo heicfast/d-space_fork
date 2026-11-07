@@ -63,6 +63,35 @@ jobs:
       - name: cargo test --lib
         run: cargo test --lib --no-fail-fast
 
+  # Gemini review W5 — `vss` feature'i (9 unit test + winapi COM köprüsü)
+  # varsayılan koşuda hiç derlenmiyordu; kırılma sessizce gidiyordu.
+  rust-vss:
+    name: Rust stable · vss feature · windows-latest
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: cargo clippy --features vss -D warnings
+        run: cargo clippy --lib --no-deps --features vss -- -D warnings
+
+      - name: cargo test --features vss --lib
+        run: cargo test --lib --features vss --no-fail-fast
+
   frontend:
     name: Frontend (vue-tsc + vite) · windows-latest
     runs-on: windows-latest

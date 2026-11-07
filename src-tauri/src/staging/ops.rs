@@ -58,7 +58,8 @@ fn first_drive_letter(_p: &Path) -> Option<char> {
 }
 
 /// Bölüm 12.2 — kullanıcı seçimini staging klasörüne atomik MOVE eder.
-/// Cross-volume henüz desteklenmez (Bölüm 12.3 Katman C v0.2).
+/// Cross-volume (ve UNC kaynaklı) istekler two-phase commit yoluna gider
+/// (Bölüm 12.3 Katman C).
 pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
     let src = PathBuf::from(path);
     if !src.exists() {
@@ -89,10 +90,14 @@ pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
         }
     }
 
-    // Cross-volume kontrol (Bölüm 12.3) — two-phase commit yoluna dispatch
+    // Cross-volume kontrol (Bölüm 12.3) — two-phase commit yoluna dispatch.
+    // Gemini review B11 — UNC kaynakte `first_drive_letter` None döner; eski
+    // kod bunu same-volume sanıp raw rename hatası veriyordu. Artık None
+    // (UNC/rootless) da cross-volume kopya yoluna gider — streaming copy
+    // ağdan lokal staging'e doğru çalışır.
     let src_drive = first_drive_letter(&src);
     let dest_drive = first_drive_letter(&dest);
-    let is_cross = src_drive.is_some() && dest_drive.is_some() && src_drive != dest_drive;
+    let is_cross = src_drive != dest_drive;
 
     if is_cross {
         debug!(
@@ -117,7 +122,10 @@ pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
     fs::rename(&src, &dest).map_err(|e| Error::Staging(format!("rename: {}", e)))?;
 
     let expires_at = staged_at + STAGING_TTL_SECS;
-    conn.execute(
+    // Gemini review B3 — DB insert başarısız olursa rename'i geri al; crash
+    // penceresi daralır (rename→insert arası hard crash hâlâ mümkün, açılış
+    // recovery'si v0.3'te untracked bucket sweep ile kapanacak).
+    if let Err(e) = conn.execute(
         "INSERT INTO staging_items
             (original_path, staged_path, size_bytes, staged_at, expires_at,
              is_dir, reason, fallback_tier)
@@ -130,8 +138,10 @@ pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
             expires_at,
             is_dir as i64,
         ],
-    )
-    .map_err(|e| Error::Staging(format!("DB insert: {}", e)))?;
+    ) {
+        let _ = fs::rename(&dest, &src);
+        return Err(Error::Staging(format!("DB insert: {}", e)));
+    }
 
     let id = conn.last_insert_rowid();
     info!(
@@ -307,14 +317,86 @@ fn delete_staging_row(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// Gemini review B32 — staged dosya bucket'tan çıkınca boş kalan
+/// `staging\<timestamp>` dizinini sessizce temizle (birikmez).
+fn cleanup_bucket_if_empty(staged_path: &Path) {
+    if let Some(bucket) = staged_path.parent() {
+        // remove_dir yalnız BOŞ dizinde başarılı olur — doluysa no-op.
+        if let Err(e) = fs::remove_dir(bucket) {
+            debug!(bucket = %bucket.display(), error = %e, "bucket cleanup atlandı");
+        }
+    }
+}
+
+/// Gemini review B1 — cross-volume undo: `fs::rename` Windows'ta
+/// `MOVEFILE_COPY_ALLOWED` olmadan cross-device hata verir. Staging'ten
+/// orijinal volume'üne geri taşıma, stage'in iki-fazlı protokolünün aynısı:
+/// tmp kopya → Blake3 verify → atomik rename → kaynak sil.
+fn undo_move_across_volumes(src: &Path, dest: &Path) -> Result<()> {
+    let parent = dest
+        .parent()
+        .ok_or_else(|| Error::Staging("undo hedef parent yok".into()))?;
+    ensure_parent(dest)?;
+    let file_name = dest
+        .file_name()
+        .ok_or_else(|| Error::Staging("undo hedef filename yok".into()))?
+        .to_string_lossy()
+        .to_string();
+    let tmp_path = parent.join(format!("{}.dspace_undo_tmp", file_name));
+
+    // Faz 1a: kopya
+    crate::staging::cross_volume::copy_file_streaming(src, &tmp_path)?;
+
+    // Faz 1b: hash verify
+    let src_hash = crate::staging::cross_volume::blake3_file(src)?;
+    let dst_hash = crate::staging::cross_volume::blake3_file(&tmp_path)?;
+    if src_hash != dst_hash {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(Error::Staging(
+            "Undo hash uyuşmazlığı (Blake3) — kopya iptal, staged dosya intact".into(),
+        ));
+    }
+
+    // Faz 2: atomik rename + kaynak sil
+    fs::rename(&tmp_path, dest).map_err(|e| Error::Staging(format!("undo final rename: {}", e)))?;
+    fs::remove_file(src).map_err(|e| {
+        // Hedef yazıldı + kaynak duruyor — kullanıcı iki kopyaya sahip;
+        // veri kaybı yok ama satırı tutmak gerekir.
+        Error::Staging(format!("undo kaynak silinemedi: {}", e))
+    })?;
+    cleanup_bucket_if_empty(src);
+    Ok(())
+}
+
+/// Dosyayı hedefe taşı — same-volume rename, cross-volume copy+verify.
+/// undo / undo_with_resolution ortak yardımcısı (Gemini review B1).
+fn undo_move(src: &Path, dest: &Path) -> Result<()> {
+    let src_drive = first_drive_letter(src);
+    let dest_drive = first_drive_letter(dest);
+    if src_drive != dest_drive {
+        undo_move_across_volumes(src, dest)
+    } else {
+        ensure_parent(dest)?;
+        match fs::rename(src, dest) {
+            Ok(()) => {
+                cleanup_bucket_if_empty(src);
+                Ok(())
+            }
+            Err(e) => Err(Error::Staging(format!("undo rename: {}", e))),
+        }
+    }
+}
+
 /// Bölüm 12.2.4 — undo. Üç olası dönüş:
 ///   * Restored — hedef boştu, taşıma yapıldı.
-///   * Idempotent — hedef zaten aynı içerikte (4KB hash match), staged silindi.
+///   * Idempotent — hedef zaten aynı içerikte, staged silindi.
 ///   * Conflict — kullanıcı kararı gerek; UI dialog için snapshot'lar döner.
 ///
-/// Hash karşılaştırma sadece **ilk 4 KB**. Tam dosya hash büyük dosyalar
-/// için yavaş; çoğu çakışmada ilk 4 KB ayırt etmek için yeterli (Bölüm
-/// 12.2.4.1 hash check'in pratik formu).
+/// Gemini review B2 — idempotent karar artık dosya boyutuna göre:
+///   * ≤ 64 MB: tam dosya Blake3 karşılaştırması (kesin sonuç),
+///   * \> 64 MB: 4 KB + boyut eşleşmesi yalnızca “muhtemelen aynı” gösterir;
+///     sessiz silme RİSKİ olmadığından Conflict'e düşer — kullanıcı
+///     Overwrite ile aynı neticeyi bilinçli seçer.
 pub fn undo(id: i64, conn: &Connection) -> Result<UndoOutcome> {
     let (original, staged) = lookup_staging(conn, id)?;
     let src = Path::new(&staged);
@@ -327,10 +409,9 @@ pub fn undo(id: i64, conn: &Connection) -> Result<UndoOutcome> {
         )));
     }
 
-    // Hedef boş — direkt restore.
+    // Hedef boş — direkt restore (cross-volume dahil, undo_move halleder).
     if !dest.exists() {
-        ensure_parent(dest)?;
-        fs::rename(src, dest).map_err(|e| Error::Staging(format!("undo rename: {}", e)))?;
+        undo_move(src, dest)?;
         delete_staging_row(conn, id)?;
         info!(id, original = %original, "undo başarılı (Restored)");
         return Ok(UndoOutcome::Restored {
@@ -338,37 +419,55 @@ pub fn undo(id: i64, conn: &Connection) -> Result<UndoOutcome> {
         });
     }
 
-    // Hedef dolu — hash karşılaştırma (yalnızca dosyalar için).
+    // Hedef dolu — içerik karşılaştırma (yalnızca dosyalar için).
     let staged_snap = snapshot_of(src);
     let target_snap = snapshot_of(dest);
 
     let both_files = !staged_snap.is_dir && !target_snap.is_dir;
+    const FULL_HASH_THRESHOLD: u64 = 64 * 1024 * 1024;
     let same_hash = both_files
-        && staged_snap.blake3_first4kb_hex.is_some()
-        && staged_snap.blake3_first4kb_hex == target_snap.blake3_first4kb_hex
-        && staged_snap.size_bytes == target_snap.size_bytes;
+        && staged_snap.size_bytes == target_snap.size_bytes
+        && staged_snap.size_bytes > 0
+        && if staged_snap.size_bytes <= FULL_HASH_THRESHOLD {
+            // Tam dosya Blake3 — kesin sonuç.
+            let sh = crate::staging::cross_volume::blake3_file(src);
+            let th = crate::staging::cross_volume::blake3_file(dest);
+            matches!((sh, th), (Ok(a), Ok(b)) if a == b)
+        } else {
+            // 64 MB üzeri: 4 KB eşleşmesi “muhtemelen aynı” — kesin değil.
+            // Gemini review B2: sessiz silme yok → Conflict'e düş.
+            false
+        };
 
     if same_hash {
-        // Idempotent: hedef zaten "aynı dosya". Staged'i sil, DB satırı kaldır.
-        if let Err(e) = fs::remove_file(src) {
-            warn!(staged = %src.display(), error = %e, "idempotent silme uyarı");
+        // Idempotent: hedef zaten aynı dosya. Staged'i sil, DB satırı kaldır.
+        // Gemini review B12 — satır yalnızca başarılı silmeden sonra kalkar;
+        // silinemezse (kilit vb.) uyar + satırı koru.
+        match fs::remove_file(src) {
+            Ok(()) => {
+                cleanup_bucket_if_empty(src);
+                delete_staging_row(conn, id)?;
+                info!(id, original = %original, "undo idempotent — hedef ile staged aynı");
+                Ok(UndoOutcome::Idempotent {
+                    original_path: original,
+                })
+            }
+            Err(e) => {
+                warn!(staged = %src.display(), error = %e, "idempotent silme başarısız — satır korundu");
+                Err(Error::Staging(format!("Staged dosya silinemedi: {}", e)))
+            }
         }
-        delete_staging_row(conn, id)?;
-        info!(id, original = %original, "undo idempotent — hedef ile staged aynı");
-        return Ok(UndoOutcome::Idempotent {
+    } else {
+        warn!(
+            dest = %dest.display(),
+            "undo conflict — kullanıcı kararı gerekli"
+        );
+        Ok(UndoOutcome::Conflict {
             original_path: original,
-        });
+            staged: staged_snap,
+            target: target_snap,
+        })
     }
-
-    warn!(
-        dest = %dest.display(),
-        "undo conflict — kullanıcı kararı gerekli"
-    );
-    Ok(UndoOutcome::Conflict {
-        original_path: original,
-        staged: staged_snap,
-        target: target_snap,
-    })
 }
 
 fn rename_target(dest: &Path) -> PathBuf {
@@ -416,9 +515,7 @@ pub fn undo_with_resolution(
         ConflictResolution::Overwrite => {
             if !dest.exists() {
                 // Race: bu arada hedef boşalmış. Normal restore yap.
-                ensure_parent(dest)?;
-                fs::rename(src, dest)
-                    .map_err(|e| Error::Staging(format!("overwrite rename: {}", e)))?;
+                undo_move(src, dest)?;
             } else {
                 let target_is_dir = dest.is_dir();
                 if target_is_dir {
@@ -428,8 +525,7 @@ pub fn undo_with_resolution(
                     fs::remove_file(dest)
                         .map_err(|e| Error::Staging(format!("overwrite remove_file: {}", e)))?;
                 }
-                fs::rename(src, dest)
-                    .map_err(|e| Error::Staging(format!("overwrite rename: {}", e)))?;
+                undo_move(src, dest)?;
             }
             delete_staging_row(conn, id)?;
             info!(id, original = %original, "undo conflict → overwrite");
@@ -440,8 +536,7 @@ pub fn undo_with_resolution(
         ConflictResolution::Rename | ConflictResolution::KeepBoth => {
             ensure_parent(dest)?;
             let new_dest = rename_target(dest);
-            fs::rename(src, &new_dest)
-                .map_err(|e| Error::Staging(format!("rename target: {}", e)))?;
+            undo_move(src, &new_dest)?;
             delete_staging_row(conn, id)?;
             info!(
                 id,

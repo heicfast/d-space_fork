@@ -4,6 +4,157 @@
 
 Spec v1.4 dondurulmuş. Implementation farkı `docs/DISCOVERY_LOG.md`'de.
 
+## [v0.3.0-beta] — 2026-11-07
+
+Üçüncü pre-release — **kod inceleme dalgası + kalan v0.3 kapsam
+tamamlaması**. Beş bağımsız satır-satır kod incelemesinin (Rust scan/volume/
+locked_file + data katmanı + komut katmanı + Vue frontend + CI/release)
+bulguların tümü giderildi; USN watcher üretime bağlandı.
+
+### Kritik düzeltmeler (release engelleyiciler)
+
+- **`bundle.createUpdaterArtifacts: true`** eklendi (`tauri.conf.json`) —
+  Tauri v2 bundler bu bayrak olmadan updater `.sig` artifact'ı üretmiyor;
+  auto-updater zinciri (latest.json + imza doğrulama) baştan sona kırıktı.
+- **`prerelease: true` sabiti kaldırıldı** (release.yml) — GitHub
+  `releases/latest` yalnız stabil release gösterir; sabit prerelease
+  updater endpoint'ini 404'lüyordu. Artık tag'de alpha/beta/rc geçiyorsa
+  prerelease, aksi halde stabil yayınlanır.
+- **UNC girdi doğrulaması** — `\\fileserver\\public` gibi girdiler eski
+  `chars().find(alphabetic)` deseniyle sessizce `F:` sürücüne çevriliyordu
+  (yanlıs volume'ün MFT'sini tarayıp doğru gösterme riski). Yeni katı
+  `volume::parse_drive_letter` tüm komut sınırlarında UNC/path reddeder.
+
+### Komut katmanı (lib.rs)
+
+- **`index_build` donması fix** — açılışta her seferinde full MFT
+  enumerate + global DB mutex'i tutuluyordu (UI dakikalarca kilitleniyordu).
+  Artık: watermark varsa **incremental delta** (`sync_volume`), yoksa/wraparound
+  ise full baseline; yürüyüş **dedicated connection + spawn_blocking**
+  üzerinde koşar.
+- **USN watcher üretime bağlandı** (v0.3.1 planı öne alındı) — açılışta ve
+  `index_build` sonrası volume başına arka plan thread'i; 60 sn poll ile
+  `FSCTL_READ_USN_JOURNAL` delta uygular, wraparound'ta otomatik rebuild.
+  (`UsnWatchers` registry + `spawn_watcher` prod wire.)
+- **Blocking komutlar async'e taşındı** — `stage_path`, `undo_staging`,
+  `undo_resolve_staging`, `cleanup_expired_staging_cmd`, `permanent_delete_cmd`
+  (DoD wipe dakikalar sürebilir), `capture_snapshot`, `index_search`,
+  `index_status` artık `spawn_blocking` üzerinde; ana thread donmuyor.
+  (`DbState.conn` → `Arc<Mutex<Connection>>`.)
+- **İptal yarışı fix** — tek-global-flag tasarımında iptal→hızlı yeniden
+  tarama eski taramanın bayrağını sıfırlayıp iki walker'ı paralel
+  çalıştırıyordu. Her koşu artık kendi `Arc<AtomicBool>` bayrağını alır.
+- **`scan_unc_path` iptal edilebilir + canlı progress** — SMB walk saatler
+  sürebilir; artık `scan-progress` event'i emit eder ve UI'dan durdurulabilir.
+- **In-memory DB fallback'e migration** — şemasız fallback tüm DB
+  komutlarını "no such table" ile öldürüyordu.
+- Tray interval `saturating_mul(60)`; `is_on_battery` 255 (unknown) artık
+  konservatif; tokio feature set'i eksiksiz (`rt, sync, time, macros`).
+
+### Staging / geri kazanım (Pillar 5)
+
+- **Cross-volume undo fix** — `fs::rename` cross-device hata veriyordu;
+  undo artık kopya → Blake3 verify → atomik rename → kaynak sil zinciriyle
+  çalışır (stage'in iki-fazlı protokolünün aynası).
+- **Idempotent undo sessiz veri silme riski fix** — ≤ 64 MB dosyalarda tam
+  Blake3 karşılaştırması; üzerinde 4 KB eşleşmesi "muhtemelen aynı"
+  kabul edilip Conflict'e düşer (kullanıcı bilinçli seçer).
+- **stage() crash penceresi** — DB insert başarısızsa rename geri alınır.
+- **UNC kaynak staging** — UNC path artık two-phase kopya yoluna gider
+  (eski kod raw rename hatası veriyordu).
+- **DoD wipe sertleştirme** — readonly attribute temizliği + truncate-to-0 +
+  silme öncesi rastgele isim rename (NTFS directory entry kalıntısı).
+- WAL Faz 2b hatası artık açıkça `wal_abort`; boş staging bucket
+  dizinleri temizlenir; expired liste LIMIT 2000; rate-limit sleep yalnız
+  item'lar arasında.
+
+### Tarama motoru (Pillar 1)
+
+- **İptal/progress kapısı fix** — fallback walker'daki `entries.len() % 500`
+  kontrolü değişken artışla atlanabiliyordu (tek büyük dizin = hiç kontrol
+  yok). Deterministik `visited_dirs % 32` sayacına geçildi.
+- **Canlı sunburst O(N²) fix** — 10k'da bir full-tree rebuild + full klon +
+  63 kural × N düğüm eşleştirmesi yerine: klon YOK (`build_tree_light`
+  borrow ile), kural skorlaması YOK, geometrik aralık (10k→40k→160k→
+  640k→2.5M tavan). Toplam maliyet ~O(N log N).
+- **MFT walker** — dev upfront rezervasyon clamp (1M kayıt); hard-limit
+  kesilmesinde uyarı log'u; `GetCompressedFileSizeW` 0xFFFFFFFF başarı/
+  hata ayrımı `GetLastError` ile.
+- **Ağaç kurma** — self-cycle MFT kayıtları artık root'a rewiring (eskiden
+  görünmezdi); karşılıklı parent döngülerinde aggregate şişmesi
+  visited-set ile önlenir; `NameAsc` sıralama `sort_by_cached_key`;
+  `symlink_metadata` yerine `DirEntry::metadata()` (SMB taramada dosya
+  başına bir syscall tasarrufu).
+
+### Kilitli dosya / VSS
+
+- `CreateFileW` hatasında `GetLastError()` yerine güvenilir `e.code()`
+  (HRESULT) ayrımı — eski çağrı error-path tarafından kirletilebiliyordu.
+- VSS `Wait(INFINITE)` → 60 sn sınırlı bekleme (asılı VSS service'i
+  duplicate scan'i donduruyordu).
+- VSS pool ölü snapshot context eviction + tek seferlik yeniden deneme.
+- `RmGetList` ERROR_MORE_DATA retry (3 deneme).
+
+### Index (USN)
+
+- `resolve_full_path` root self-join fix (`C:\C:\C:\…` çöpü).
+- `load_watermark` DB hataları artık sessizce "watermark yok" olmaz.
+- Full rebuild öncesi `purge_volume` (wraparound hayalet kayıtları).
+- `index_status.last_sync_unix` per-volume.
+- USN_RECORD_V3 kayıtları artık tüm baseline'ı öldürmez (skip).
+
+### Frontend (Vue 3)
+
+- **`nodeFullPath` çifte-klasör fix** — drillInto sonrası detay paneli
+  `C:\a\b\b` gösteriyordu; stage/probe/lock yanlış yola gidiyordu.
+- **Index arama pseudo-node tam yol** — backend'den çözülen `full_path`
+  kullanılır; uydurma `C:\<name>` üretilmez.
+- **Stale selection fix** — pencere değişinde eski selectedNode temizlenir;
+  hızlı drill tıklamalarında out-of-order yanıt koruması (istek sırası).
+- **i18n tamamlaması** — conflict dialog, lock etiketleri, kısayol modalı,
+  Duplicate/Snapshot/UserRules panelleri, volume/cloud/sürücü uyarı
+  etiketleri, expired-cleanup akışı — hepsi locale dosyalarına taşındı
+  (EN locale'de Türkçe görünme sorunu bitti). Locale-aware sayı/tarih
+  formatlama (sabit `tr-TR` kaldırıldı); `index.html` lang attribute'u
+  dil değişinde güncellenir.
+- **3D cleanup** — center disk geo/mat dispose + `forceContextLoss` +
+  `rising`/`pulse` animasyon state reset (GPU sızıntısı + dispose edilmiş
+  mesh'e yazma).
+- **Kısayollar** — açık TÜM modal'larda bastırılır (eskiden conflict+
+  perm-delete dışındakilerde çalışıp arkadaki işlemi tetikliyordu);
+  Ctrl+1..5 ile 3D mod da seçilebilir; ölü `searchOpen` kaldırıldı.
+- **Update.close()** — dismiss'ta updater kaynağı serbest kalır.
+- **AUTO_THRESHOLD abort yüzeye çıkar** — expired cleanup eşiğini
+  aştığında kullanıcı açık uyarı görür.
+- `@types/three` devDependencies'e; vitest coverage bloğu (kurulu olmayan
+  paket) kaldırıldı.
+
+### E2E altyapısı (4 kırık test fix)
+
+- Mock `onboarding_seen` → `onboarding_done` (onboarding her yüklemede
+  açılıp tema/update testlerini blokluyordu).
+- Onboarding spec: 4 slayt + scoped `.slide-title` selector'ları (strict-mode
+  çakışması).
+- View-mode spec: gerçek `.view-chip`/`.view-chip-active` markup + mock'lu
+  scan verisi + Ctrl+1..5 klavye testi.
+- Playwright webdriver projesi açıkça opt-in (`D_SPACE_E2E_WEBDRIVER=1`);
+  CI e2e `--with-deps chromium` + html reporter + localhost host.
+
+### CI
+
+- Yeni `rust-vss` job — `--features vss` clippy + 9 VSS testi artık
+  varsayılan koşuda derlenmiyor olmak yerine her push'ta doğrulanır.
+
+### Bilinen sınırlar (v1.0 yolunda)
+
+- **Kod imzasız** — SmartScreen "publisher unknown" uyarısı sürer (EV
+  cert Faz 5.4, dış satın alma).
+- **EV cert / winget / Scoop** — Faz 5.4 (organizasyon eylemi).
+- **Synthetic NTFS VHDX fixture** (Faz 4.3) — Windows admin ortamı gerektirir.
+- **TFLite model** (Tier 2 ML) — v0.4; altyapı hazır, model eğitilmedi.
+
+---
+
 ## [v0.2.0-beta] — 2026-05-17
 
 İkinci public release — **Beta kanalı**. Hâlâ unsigned (EV cert Bölüm 18.2

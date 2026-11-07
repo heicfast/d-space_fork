@@ -1,6 +1,6 @@
 {
   "name": "dspace",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "D-Space — Windows için akıllı disk analiz ve geri kazanım platformu",
@@ -22,7 +22,6 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2",
     "@tauri-apps/plugin-updater": "^2",
-    "@types/three": "^0.184.1",
     "three": "^0.184.0",
     "vue": "^3.5.13",
     "vue-i18n": "^10.0.8"
@@ -30,6 +29,7 @@
   "devDependencies": {
     "@playwright/test": "^1.50.0",
     "@tauri-apps/cli": "^2",
+    "@types/three": "^0.184.1",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/test-utils": "^2.4.10",
     "happy-dom": "^20.9.0",

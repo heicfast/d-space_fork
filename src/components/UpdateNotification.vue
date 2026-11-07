@@ -110,6 +110,13 @@ async function onInstall(): Promise<void> {
 }
 
 function onDismiss(): void {
+  // Gemini review — Update nesnesi kapatılmalıdır (Tauri updater kaynağı
+  // serbest kalır; bırakmak kaynak sızdırıyordu). Mock/test nesnelerinde
+  // metod yokluğuna karşı savunmacı çağrı.
+  const upd = pendingUpdate.value as { close?: () => void } | null;
+  if (upd && typeof upd.close === "function") {
+    upd.close();
+  }
   phase.value = "idle";
   pendingUpdate.value = null;
   newVersion.value = "";

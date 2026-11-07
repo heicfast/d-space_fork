@@ -24,7 +24,7 @@ use serde::Serialize;
 use std::fs;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const FIRST_KB: usize = 4096;
 
@@ -131,7 +131,15 @@ pub fn permanent_delete(
         )));
     }
 
-    let hash = hash_first_4kb(&staged_pb).ok().flatten();
+    // Gemini review B16 — hash hatası sessiz None olmasın; forensic satırı
+    // NULL hash ile yazılır ama log'da görünür.
+    let hash = match hash_first_4kb(&staged_pb) {
+        Ok(h) => h,
+        Err(e) => {
+            warn!(staged = %staged_pb.display(), error = %e, "forensic hash alınamadı");
+            None
+        }
+    };
     let hash_hex = hash.as_ref().map(hex32);
 
     // Önce DB'ye forensic kayıt — silme başarısızsa bile orijinal niyet kalır.
@@ -185,6 +193,13 @@ pub fn permanent_delete(
             staged_pb.display(),
             e
         )));
+    }
+
+    // Gemini review B32 — boş kalan staging bucket dizinini temizle.
+    if let Some(bucket) = staged_pb.parent() {
+        if let Err(e) = fs::remove_dir(bucket) {
+            debug!(bucket = %bucket.display(), error = %e, "bucket cleanup atlandı");
+        }
     }
 
     info!(

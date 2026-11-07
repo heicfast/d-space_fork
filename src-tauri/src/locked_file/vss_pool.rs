@@ -239,9 +239,32 @@ impl WorkerState {
             Error::Snapshot(format!("yol volume harfi içermiyor: {}", path.display()))
         })?;
 
-        // Cache hit?
+        // Cache hit? Gemini review B10 — snapshot externally silinmişse /
+        // VSS service restart etmişse File::open NotFound ile düşer; ölü
+        // context'i evict edip bir kez yeniden dene (sonsuz döngü yok).
         if let Some(ctx) = self.contexts.get(&volume).cloned() {
-            return self.make_reader(ctx, path);
+            match self.make_reader(ctx, path) {
+                Ok(reader) => return Ok(reader),
+                Err(e) => {
+                    // make_reader open hatasını Error::Io olarak taşır — kind()
+                    // güvenilir ayrım sağlar (string parse yok).
+                    let stale = matches!(
+                        &e,
+                        Error::Io(io_err) if io_err.kind() == std::io::ErrorKind::NotFound
+                    );
+                    if !stale {
+                        return Err(e);
+                    }
+                    debug!(%volume, "vss: ölü snapshot context evict + retry");
+                    self.contexts.remove(&volume);
+                    if let Some(raw) = self.raw.remove(&volume) {
+                        if let Err(de) = unsafe { self.provider.destroy(raw) } {
+                            warn!(error = ?de, %volume, "vss destroy hata (stale evict)");
+                        }
+                    }
+                    // fall-through: yeniden oluştur.
+                }
+            }
         }
 
         // Cache miss → snapshot oluştur.
@@ -266,9 +289,16 @@ impl WorkerState {
 
     fn make_reader(&self, ctx: Arc<VssContext>, original: &Path) -> Result<VssReader> {
         let snap_path = snapshot_path(&ctx.device_object, original);
-        let file = fs::File::open(&snap_path).map_err(|e| {
-            Error::Snapshot(format!("snapshot path aç '{}': {}", snap_path.display(), e))
-        })?;
+        let file = match fs::File::open(&snap_path) {
+            Ok(f) => f,
+            Err(e) => {
+                // Gemini review B10 — Error::Io olarak taşı: kind() ayrımı
+                // handle_acquire'de güvenilir stale detection sağlar. Path
+                // context'i log'da korunur.
+                debug!(path = %snap_path.display(), error = %e, "vss snapshot open hatası");
+                return Err(Error::Io(e));
+            }
+        };
         ctx.active_leases.fetch_add(1, Ordering::AcqRel);
         ctx.touch();
 

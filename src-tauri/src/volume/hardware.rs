@@ -238,7 +238,10 @@ pub fn probe_drive_hardware(drive_letter: char) -> Result<DriveHardware> {
         }
     };
 
-    let (bus_label_str, typical_read_mbps) = bus_label_and_speed(bus_raw, is_ssd);
+    let (bus_label_str, bus_speed) = bus_label_and_speed(bus_raw, is_ssd);
+    // Gemini review B14 — medya tipi bilinmiyorken hız iddiasında bulunma
+    // ("SATA Bilinmeyen · ~150 MB/sn" yanıltıcı); build_summary 0'ı atlar.
+    let typical_read_mbps = if media_known { bus_speed } else { 0 };
     let bus_label = bus_label_str.to_string();
     let media_label = if media_known {
         if is_ssd { "SSD" } else { "HDD" }.to_string()

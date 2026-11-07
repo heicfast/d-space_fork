@@ -67,6 +67,9 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
         }
 
         // 3. RmGetList — iki turlu: önce boyut, sonra dolu liste.
+        //    Gemini review B11 — probe ile fetch arasında process listesi
+        //    büyürse fetch de ERROR_MORE_DATA dönebilir; sınırlı retry
+        //    (3 deneme) ile toparlanır.
         let mut needed: u32 = 0;
         let mut count: u32 = 0;
         let mut reboot_reasons: u32 = 0;
@@ -92,20 +95,35 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
             return Ok(Vec::new());
         }
 
-        let mut buffer: Vec<RM_PROCESS_INFO> = vec![unsafe { std::mem::zeroed() }; needed as usize];
-        count = needed;
-        let fetch_rc = unsafe {
-            RmGetList(
-                session_handle,
-                &mut needed,
-                &mut count,
-                Some(buffer.as_mut_ptr()),
-                &mut reboot_reasons,
-            )
-        };
-        if fetch_rc != ERROR_SUCCESS {
+        let mut buffer: Vec<RM_PROCESS_INFO> = Vec::new();
+        let mut fetch_rc = ERROR_SUCCESS;
+        for _attempt in 0..3 {
+            buffer = vec![unsafe { std::mem::zeroed() }; needed as usize];
+            count = needed;
+            fetch_rc = unsafe {
+                RmGetList(
+                    session_handle,
+                    &mut needed,
+                    &mut count,
+                    Some(buffer.as_mut_ptr()),
+                    &mut reboot_reasons,
+                )
+            };
+            if fetch_rc == ERROR_SUCCESS {
+                break;
+            }
+            if fetch_rc == ERROR_MORE_DATA && needed > 0 {
+                // Liste yine büyüdü — yeni needed ile tekrar dene.
+                continue;
+            }
             return Err(Error::LockedFile(format!(
                 "RmGetList (fetch) başarısız: Win32 code {}",
+                fetch_rc.0
+            )));
+        }
+        if fetch_rc != ERROR_SUCCESS {
+            return Err(Error::LockedFile(format!(
+                "RmGetList (fetch) retry tükendi: Win32 code {}",
                 fetch_rc.0
             )));
         }

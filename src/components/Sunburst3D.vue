@@ -97,6 +97,7 @@ interface SceneState {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
+  center: THREE.Mesh; // Gemini review — dispose için takip
   raycaster: THREE.Raycaster;
   pointer: THREE.Vector2;
   wedges: THREE.Mesh[]; // tıklanabilir wedge mesh listesi
@@ -194,6 +195,9 @@ function buildScene(
     scene,
     camera,
     controls,
+    // Gemini review — center disk mesh'i dispose edilebilir tutulur
+    // (eski kod GPU'da sızıyordu).
+    center,
     raycaster: new THREE.Raycaster(),
     pointer: new THREE.Vector2(),
     wedges: [],
@@ -246,6 +250,9 @@ function clearWedges(state: SceneState) {
   }
   state.wedges = [];
   state.labels = [];
+  // Gemini review — animasyon state'i resetle; yoksa tickRisingAnim bir
+  // süre daha dispose edilmiş mesh'e yazar + onPointerDown bloklanır.
+  state.rising = null;
 }
 
 function addWedgeLabel(
@@ -462,8 +469,15 @@ onBeforeUnmount(() => {
   if (state) {
     if (state.animation !== null) cancelAnimationFrame(state.animation);
     clearWedges(state);
+    // Gemini review — center disk geo/mat + labelRenderer + WebGL context
+    // temizliği (her 3D girişte GPU sızıntısı yapıyordu).
+    state.scene.remove(state.center);
+    state.center.geometry.dispose();
+    (state.center.material as THREE.MeshStandardMaterial).dispose();
     state.controls.dispose();
     state.renderer.dispose();
+    state.labelRenderer.domElement.remove();
+    state.renderer.forceContextLoss();
   }
   if (resizeObs) resizeObs.disconnect();
   if (canvasRef.value && pointerMoveHandler) {

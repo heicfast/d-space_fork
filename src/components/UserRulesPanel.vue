@@ -12,6 +12,11 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
+import { useI18n } from "vue-i18n";
+
+// Gemini review — panel tamamen i18n'e taşındı (EN locale'de Türkçe
+// görünmesin).
+const { t } = useI18n();
 
 type PatternType = "name" | "extension";
 
@@ -128,17 +133,14 @@ onMounted(loadRules);
 
 <template>
   <section class="card">
-    <h2>Kullanıcı Kuralları (Bölüm 6.4)</h2>
-    <p class="muted">
-      Built-in 63 kuraldan ÖNCE değerlendirilir. Kendi pattern'inle istediğin
-      klasör/uzantıya skor ata; yeniden tarama sonrası etkin olur.
-    </p>
+    <h2>{{ t("userRules.title") }}</h2>
+    <p class="muted">{{ t("userRules.intro") }}</p>
 
     <div class="rule-add">
       <input
         v-model="newPattern"
         class="rule-input mono"
-        placeholder="Pattern (örn. node_modules veya .heic)"
+        :placeholder="t('userRules.patternPlaceholder')"
         :disabled="busy"
       />
       <select
@@ -146,8 +148,8 @@ onMounted(loadRules);
         class="rule-select"
         :disabled="busy"
       >
-        <option value="name">İsim (tam, case-insensitive)</option>
-        <option value="extension">Uzantı (.ext)</option>
+        <option value="name">{{ t("userRules.typeName") }}</option>
+        <option value="extension">{{ t("userRules.typeExtension") }}</option>
       </select>
       <input
         v-model.number="newScore"
@@ -163,7 +165,7 @@ onMounted(loadRules);
       <input
         v-model="newExplanation"
         class="rule-input mono"
-        placeholder="Açıklama (opsiyonel)"
+        :placeholder="t('userRules.explanationPlaceholder')"
         :disabled="busy"
       />
       <button
@@ -172,7 +174,7 @@ onMounted(loadRules);
         :disabled="busy || !newPattern.trim()"
         @click="addRule"
       >
-        + Ekle
+        {{ t("userRules.add") }}
       </button>
     </div>
 
@@ -195,7 +197,7 @@ onMounted(loadRules);
           type="button"
           class="stage-btn"
           :disabled="busy"
-          :title="r.enabled ? 'Devre dışı bırak' : 'Etkinleştir'"
+          :title="r.enabled ? t('userRules.disable') : t('userRules.enable')"
           @click="toggleRule(r)"
         >
           {{ r.enabled ? "⏸" : "▶" }}
@@ -204,14 +206,14 @@ onMounted(loadRules);
           type="button"
           class="stage-btn perm-trigger"
           :disabled="busy"
-          title="Kuralı sil"
+          :title="t('userRules.delete')"
           @click="removeRule(r.id)"
         >
           🗑
         </button>
       </li>
     </ul>
-    <p v-else class="muted">Henüz kullanıcı kuralı yok.</p>
+    <p v-else class="muted">{{ t("userRules.empty") }}</p>
     <p v-if="error" class="err">{{ error }}</p>
   </section>
 </template>

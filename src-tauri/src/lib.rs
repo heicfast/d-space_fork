@@ -21,8 +21,8 @@ use crate::db::{db_info, get_setting, open_db, set_setting, DbInfo, DbState};
 use crate::duplicate::{find_duplicates, DuplicateOptions, DuplicateScanResult};
 use crate::error::{Error, Result};
 use crate::index::{
-    enumerate_volume_baseline, index_search as index_search_db, index_status as index_status_db,
-    IndexSearchResult, IndexStatus, DEFAULT_BASELINE_BUFFER,
+    index_search as index_search_db, index_status as index_status_db, list_indexed_volumes,
+    sync_volume, IndexSearchResult, IndexStatus, SyncOutcome, DEFAULT_BASELINE_BUFFER,
 };
 use crate::locked_file::{probe_file, LockedFileProbe};
 use crate::safe_delete::{
@@ -42,18 +42,45 @@ use crate::staging::{
     StagedItem, UndoOutcome, WalRecoveryReport,
 };
 use crate::volume::{
-    list_drives, pre_flight_check, probe_drive_hardware, DriveHardware, VolumeInfo,
+    list_drives, parse_drive_letter, pre_flight_check, probe_drive_hardware, DriveHardware,
+    VolumeInfo,
 };
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tracing::{info, warn};
 
-/// Tarama iptal bayrağı — `scan_cancel` set eder, `scan_full` her
-/// koşunun başında reset eder, walker periyodik kontrol eder. Tek-koşu
-/// global flag yeterli: D-Space anda yalnız bir scan_full çalıştırır.
+/// Tarama iptal kaydı — her `scan_full` / `scan_unc_path` koşusu KENDİ
+/// `Arc<AtomicBool>` bayrağını alır (Gemini review: eski tek-global-flag
+/// tasarımında iptal→hızlı yeniden tarama, eski taramanın bayrağını
+/// sıfırlayıp İKİ walker'ın paralel çalışmasına yol açabiliyordu).
+/// `scan_cancel` aktif koşunun bayrağını set eder; walker periyodik kontrol
+/// edip `Error::Scan("scan-cancelled")` ile çıkar.
 #[derive(Default)]
-pub struct ScanCancel(pub Arc<AtomicBool>);
+pub struct ScanCancel(std::sync::Mutex<Arc<AtomicBool>>);
+
+impl ScanCancel {
+    /// Bu koşu için taze bir bayrak üret, aktif kayda yaz ve döndür.
+    pub fn begin_run(&self) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let mut slot = match self.0.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        *slot = flag.clone();
+        flag
+    }
+
+    /// Aktif koşunun bayrağını set et (iptal). Koşu yoksa no-op.
+    pub fn cancel_active(&self) {
+        let slot = match self.0.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        slot.store(true, Ordering::Release);
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub struct AppInfo {
@@ -150,8 +177,9 @@ fn is_on_battery() -> bool {
         // Sorgu başarısız → konservatif, batarya varsay (interval × 2).
         return true;
     }
-    // ACLineStatus: 0=offline (battery), 1=online (AC), 255=unknown
-    status.ACLineStatus == 0
+    // ACLineStatus: 0=offline (battery), 1=online (AC), 255=unknown.
+    // Gemini review: 255 (bilinmiyor) da konservatif olarak batarya sayılır.
+    status.ACLineStatus == 0 || status.ACLineStatus == 255
 }
 
 #[cfg(not(windows))]
@@ -181,14 +209,13 @@ fn read_tray_monitor_settings(conn: &rusqlite::Connection) -> (bool, u64, u32) {
     (enabled, interval_min, threshold)
 }
 
-/// Sürmekte olan taramayı iptal et — `ScanCancel` bayrağını set eder,
+/// Sürmekte olan taramayı iptal et — aktif koşunun bayrağını set eder,
 /// walker bir sonraki progress checkpoint'inde fark eder ve
-/// `Error::Scan("scan-cancelled")` ile bail eder. Bir tarama yoksa
-/// no-op (bayrak set olur, sonraki scan_full reset eder).
+/// `Error::Scan("scan-cancelled")` ile bail eder. Bir tarama yoksa no-op.
 #[tauri::command]
 fn scan_cancel(state: tauri::State<'_, ScanCancel>) -> Result<()> {
-    state.0.store(true, Ordering::Release);
-    info!("scan_cancel istendi — bayrak set");
+    state.cancel_active();
+    info!("scan_cancel istendi — aktif koşu bayrağı set");
     Ok(())
 }
 
@@ -196,18 +223,49 @@ fn scan_cancel(state: tauri::State<'_, ScanCancel>) -> Result<()> {
 /// taraması. find_first walker UNC kabul eder; bu wrapper sayım +
 /// bandwidth tahmini döner. `bandwidth_cap_bps` v0.3.2'de gerçek
 /// throttling için tahsis edildi.
+///
+/// Gemini review — artık İPTAL EDİLEBİLİR ve canlı `scan-progress` event'i
+/// emit eder (SMB walk saatler sürebilir; sessiz + durdurulamaz UX kabul
+/// edilemez).
 #[tauri::command]
-async fn scan_unc_path(
+async fn scan_unc_path<R: tauri::Runtime>(
     unc_path: String,
     bandwidth_cap_bps: Option<u64>,
+    window: tauri::WebviewWindow<R>,
+    cancel_state: tauri::State<'_, ScanCancel>,
 ) -> Result<crate::v2::NetworkScanResult> {
-    use crate::v2::{NetworkShareScanner, WindowsNetworkScanner};
-    tokio::task::spawn_blocking(move || {
+    use crate::v2::WindowsNetworkScanner;
+    use tauri::Emitter;
+
+    // Bu koşuya özel iptal bayrağı (scan_full ile aynı semantik).
+    let cancel_handle = cancel_state.begin_run();
+
+    // Progress channel — scan_full ile aynı mpsc decouple pattern'i.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<ScanProgress>();
+    let window_for_emit = window.clone();
+    let emit_task = tokio::spawn(async move {
+        while let Some(progress) = rx.recv().await {
+            let _ = window_for_emit.emit("scan-progress", &progress);
+        }
+    });
+
+    let result = tokio::task::spawn_blocking(move || {
         let scanner = WindowsNetworkScanner::new();
-        scanner.scan_unc(&unc_path, bandwidth_cap_bps.unwrap_or(0))
+        let cb: Box<dyn Fn(&ScanProgress) + Send + Sync> = Box::new(move |p| {
+            let _ = tx.send(p.clone());
+        });
+        scanner.scan_unc_with_progress(
+            &unc_path,
+            bandwidth_cap_bps.unwrap_or(0),
+            Some(cb.as_ref()),
+            Some(cancel_handle.as_ref()),
+        )
     })
     .await
-    .map_err(|e| Error::Volume(format!("join hatası: {}", e)))?
+    .map_err(|e| Error::Volume(format!("join hatası: {}", e)))?;
+
+    emit_task.abort();
+    result
 }
 
 /// Bir sürücünün donanım profilini döner: bus tipi (NVMe/SATA/USB),
@@ -215,10 +273,10 @@ async fn scan_unc_path(
 /// Win32 `IOCTL_STORAGE_QUERY_PROPERTY` kullanılır; admin gerekmez.
 #[tauri::command]
 async fn probe_drive_hardware_cmd(drive: String) -> Result<DriveHardware> {
-    let letter = drive
-        .chars()
-        .find(|c| c.is_ascii_alphabetic())
-        .ok_or_else(|| Error::Volume(format!("geçersiz drive: {}", drive)))?;
+    // Gemini review B12 — katı doğrulama: UNC girdi sessizce harfe dönüşmesin.
+    let letter = parse_drive_letter(&drive)
+        .map(|c| c.to_ascii_uppercase())
+        .ok_or_else(|| Error::Volume(format!("geçersiz drive: '{}'", drive)))?;
     tokio::task::spawn_blocking(move || probe_drive_hardware(letter))
         .await
         .map_err(|e| crate::error::Error::Volume(format!("join hatası: {}", e)))?
@@ -263,9 +321,9 @@ async fn scan_full<R: tauri::Runtime>(
         list_active_snapshots(&conn)?
     };
 
-    // İptal bayrağı her yeni scan_full'da reset.
-    cancel_state.0.store(false, Ordering::Release);
-    let cancel_handle = cancel_state.0.clone();
+    // Gemini review (cancel race) — her koşu taze bayrak alır; önceki
+    // iptal edilmiş bir koşunun bayrağı yeni koşuyu etkilemez.
+    let cancel_handle = cancel_state.begin_run();
 
     // Progress channel: scan thread → emit task. spawn_blocking içinden
     // doğrudan window.emit çağrısı thread-safety açısından güvenli ama
@@ -295,8 +353,13 @@ async fn scan_full<R: tauri::Runtime>(
     emit_task.abort();
     // Son bir emit — tamamlandı. Sprint 3.7: final partial_tree de göndeririz
     // ki canlı sunburst tarama sonunda tam haritayı (root + 2 seviye + top-200)
-    // alıp final state'e geçiş yapsın.
-    let final_partial = crate::scan::tree::build_partial_view(&tree, 2, 200);
+    // alıp final state'e geçiş yapsın. Gemini review: sihirli sayılar yerine
+    // stream sabitleri (walk.rs) kullanılır.
+    let final_partial = crate::scan::tree::build_partial_view(
+        &tree,
+        crate::scan::walk::PARTIAL_TREE_MAX_DEPTH,
+        crate::scan::walk::PARTIAL_TREE_TOP_N,
+    );
     let _ = window.emit(
         "scan-progress",
         &ScanProgress {
@@ -386,13 +449,18 @@ fn tree_path(state: tauri::State<'_, ScanTreeState>, id: u64) -> Result<Vec<Node
 
 /// Bölüm 12.2 — staging: dosyayı `%LOCALAPPDATA%\DSpace\staging\<ts>` altına
 /// atomik MOVE eder ve `staging_items` tablosuna kayıt düşer. 24h undo penceresi.
+/// Gemini review — file I/O (rename/cross-volume copy) spawn_blocking'e taşındı.
 #[tauri::command]
-fn stage_path(path: String, state: tauri::State<'_, DbState>) -> Result<StagedItem> {
-    let conn = state
-        .conn
-        .lock()
-        .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
-    stage(&path, &conn)
+async fn stage_path(path: String, state: tauri::State<'_, DbState>) -> Result<StagedItem> {
+    let conn = state.conn.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = conn
+            .lock()
+            .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
+        stage(&path, &conn)
+    })
+    .await
+    .map_err(|e| Error::Staging(format!("join hatası: {}", e)))?
 }
 
 /// Bölüm 12.2 — bekleyen tüm staging item'larını listeler (staged_at DESC).
@@ -417,30 +485,39 @@ fn run_wal_recovery(state: tauri::State<'_, DbState>) -> Result<WalRecoveryRepor
 }
 
 /// Bölüm 12.2.4 — staging item'ı orijinal yoluna geri taşır. Üç sonuç:
-/// Restored (hedef boştu), Idempotent (hedef = staged, 4 KB hash match),
+/// Restored (hedef boştu), Idempotent (hedef = staged, hash match),
 /// Conflict (UI dialog → undo_resolve_staging çağrısı).
+/// Gemini review — cross-volume undo + hash I/O spawn_blocking'e taşındı.
 #[tauri::command]
-fn undo_staging(id: i64, state: tauri::State<'_, DbState>) -> Result<UndoOutcome> {
-    let conn = state
-        .conn
-        .lock()
-        .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
-    undo(id, &conn)
+async fn undo_staging(id: i64, state: tauri::State<'_, DbState>) -> Result<UndoOutcome> {
+    let conn = state.conn.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = conn
+            .lock()
+            .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
+        undo(id, &conn)
+    })
+    .await
+    .map_err(|e| Error::Staging(format!("join hatası: {}", e)))?
 }
 
 /// Bölüm 12.2.4.2 — conflict dialog'undan dönen kullanıcı seçimini
 /// uygula: Overwrite / Rename / KeepBoth / Cancel.
 #[tauri::command]
-fn undo_resolve_staging(
+async fn undo_resolve_staging(
     id: i64,
     resolution: ConflictResolution,
     state: tauri::State<'_, DbState>,
 ) -> Result<UndoOutcome> {
-    let conn = state
-        .conn
-        .lock()
-        .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
-    undo_with_resolution(id, resolution, &conn)
+    let conn = state.conn.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = conn
+            .lock()
+            .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
+        undo_with_resolution(id, resolution, &conn)
+    })
+    .await
+    .map_err(|e| Error::Staging(format!("join hatası: {}", e)))?
 }
 
 /// Bölüm 12.2.1 — süresi geçmiş staging item'larını listele (expires_at < now).
@@ -456,35 +533,46 @@ fn list_expired_staging_cmd(state: tauri::State<'_, DbState>) -> Result<Vec<Expi
 /// Bölüm 12.2.2-2.3 — onaylı toplu cleanup. AUTO_THRESHOLD aşımında dönen
 /// rapor `aborted_threshold = true` olur; UI kullanıcıdan açık onay ister.
 /// `force=true` "Hepsini sil" onayını işaretler.
+/// Gemini review — rate-limited sleep loop main thread'i donduruyordu;
+/// spawn_blocking'e taşındı.
 #[tauri::command]
-fn cleanup_expired_staging_cmd(
+async fn cleanup_expired_staging_cmd(
     rate_per_sec: Option<u32>,
     force: Option<bool>,
     state: tauri::State<'_, DbState>,
 ) -> Result<CleanupReport> {
-    let mut conn = state
-        .conn
-        .lock()
-        .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
-    let rate = rate_per_sec.unwrap_or(crate::staging::expiry::DEFAULT_CLEANUP_RATE_PER_SEC);
-    cleanup_expired(&mut conn, rate, force.unwrap_or(false))
+    let conn = state.conn.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = conn
+            .lock()
+            .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
+        let rate = rate_per_sec.unwrap_or(crate::staging::expiry::DEFAULT_CLEANUP_RATE_PER_SEC);
+        cleanup_expired(&mut conn, rate, force.unwrap_or(false))
+    })
+    .await
+    .map_err(|e| Error::Staging(format!("join hatası: {}", e)))?
 }
 
 /// Bölüm 12.4 — staging item'ı disk'ten kalıcı sil + forensic ledger.
 /// `confirm_phrase` orijinal dosya adına (case-insensitive) eşit olmalı.
 /// Bu çift onayın **ikinci** adımı; ilk adım UI'da "Sil" butonuna basmak.
+/// Gemini review — DoD wipe dakikalar sürebilir; spawn_blocking'e taşındı.
 #[tauri::command]
-fn permanent_delete_cmd(
+async fn permanent_delete_cmd(
     id: i64,
     confirm_phrase: String,
     secure_wipe: Option<bool>,
     state: tauri::State<'_, DbState>,
 ) -> Result<PermanentDeleteResult> {
-    let mut conn = state
-        .conn
-        .lock()
-        .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
-    permanent_delete(id, &confirm_phrase, secure_wipe.unwrap_or(false), &mut conn)
+    let conn = state.conn.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = conn
+            .lock()
+            .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
+        permanent_delete(id, &confirm_phrase, secure_wipe.unwrap_or(false), &mut conn)
+    })
+    .await
+    .map_err(|e| Error::Staging(format!("join hatası: {}", e)))?
 }
 
 /// Bölüm 6.4 — kullanıcı tanımlı kuralları listele.
@@ -566,8 +654,9 @@ fn get_db_info(state: tauri::State<'_, DbState>) -> Result<DbInfo> {
 /// Bölüm 8 — mevcut taranmış ScanTree'den bir snapshot yakalar. `scan_full`
 /// önce çağrılmış olmalı. Yalnızca dizinler `snapshot_entries`'e yazılır
 /// (v0.1 dir-only; Bölüm 8.6 dosya streaming v0.2'de gelir).
+/// Gemini review — bulk insert (100k+ satır) spawn_blocking'e taşındı.
 #[tauri::command]
-fn capture_snapshot(
+async fn capture_snapshot(
     scan_state: tauri::State<'_, ScanTreeState>,
     db_state: tauri::State<'_, DbState>,
 ) -> Result<SnapshotMeta> {
@@ -581,11 +670,15 @@ fn capture_snapshot(
             .ok_or_else(|| Error::Snapshot("scan_full henüz çağrılmadı".into()))?
             .clone()
     };
-    let mut conn = db_state
-        .conn
-        .lock()
-        .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
-    crate::snapshot::capture_snapshot(&tree_arc, &mut conn)
+    let conn = db_state.conn.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut conn = conn
+            .lock()
+            .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
+        crate::snapshot::capture_snapshot(&tree_arc, &mut conn)
+    })
+    .await
+    .map_err(|e| Error::Snapshot(format!("join hatası: {}", e)))?
 }
 
 /// Bölüm 8 — son 50 snapshot'ı captured_at DESC sırasında döner.
@@ -665,9 +758,9 @@ async fn find_duplicates_cmd(
             .ok_or_else(|| Error::Duplicate("scan_full henüz çağrılmadı".into()))?
             .clone()
     };
-    let letter = drive
-        .chars()
-        .find(|c| c.is_ascii_alphabetic())
+    // Gemini review B12 — katı doğrulama: UNC girdi sessizce harfe dönüşmesin.
+    let letter = parse_drive_letter(&drive)
+        .map(|c| c.to_ascii_uppercase())
         .ok_or_else(|| Error::Duplicate(format!("Geçersiz sürücü: '{}'", drive)))?;
     let opts = DuplicateOptions {
         min_size_bytes: min_size_bytes.unwrap_or(crate::duplicate::DEFAULT_MIN_DUP_SIZE),
@@ -685,32 +778,46 @@ async fn find_duplicates_cmd(
 /// substring araması. Tüm ciltlerden eşleşen ilk `limit` kaydı döner;
 /// `full_path` opsiyonel olarak parent zinciri ile çözülür (top-N için
 /// yeterli; v0.1 perf hedefi < 50 ms).
+/// Gemini review — milyonlarca satırda LIKE + COUNT taraması ana thread'i
+/// kilitliyordu; spawn_blocking'e taşındı.
 #[tauri::command]
-fn index_search(
+async fn index_search(
     query: String,
     limit: Option<usize>,
     state: tauri::State<'_, DbState>,
 ) -> Result<Vec<IndexSearchResult>> {
-    let conn = state
-        .conn
-        .lock()
-        .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
-    index_search_db(&conn, &query, limit.unwrap_or(50))
+    let conn = state.conn.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = conn
+            .lock()
+            .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
+        index_search_db(&conn, &query, limit.unwrap_or(50))
+    })
+    .await
+    .map_err(|e| Error::Index(format!("join hatası: {}", e)))?
 }
 
 /// Sprint 3.8 — Discovery #005. Index durum sorgusu. `drive` opsiyonel:
 /// boş geçildiğinde global sayım dönülür. Admin yoksa `mode="needs_admin"`.
 #[tauri::command]
-fn index_status(drive: Option<String>, state: tauri::State<'_, DbState>) -> Result<IndexStatus> {
-    let conn = state
-        .conn
-        .lock()
-        .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
+async fn index_status(
+    drive: Option<String>,
+    state: tauri::State<'_, DbState>,
+) -> Result<IndexStatus> {
+    // Gemini review B12 — katı doğrulama (UNC reddi).
     let volume_id = drive
         .as_ref()
-        .and_then(|d| d.chars().find(|c| c.is_ascii_alphabetic()))
+        .and_then(|d| parse_drive_letter(d))
         .map(|c| format!(r"\\.\{}:", c.to_ascii_uppercase()));
-    let mut st = index_status_db(&conn, volume_id.as_deref())?;
+    let conn = state.conn.clone();
+    let mut st = tokio::task::spawn_blocking(move || {
+        let conn = conn
+            .lock()
+            .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
+        index_status_db(&conn, volume_id.as_deref())
+    })
+    .await
+    .map_err(|e| Error::Index(format!("join hatası: {}", e)))??;
     if !is_elevated() && st.mode == "idle" {
         // Henüz indeks yok ve admin de yok → UI'a "needs_admin" göster.
         st.mode = "needs_admin".to_string();
@@ -718,18 +825,22 @@ fn index_status(drive: Option<String>, state: tauri::State<'_, DbState>) -> Resu
     Ok(st)
 }
 
-/// Sprint 3.8.1 — baseline enumerate. Admin yoksa `mode="needs_admin"`
-/// durumu döner; aksi halde gerçek `FSCTL_ENUM_USN_DATA` walker tüm MFT'yi
-/// gezer, `usn_index` tablosuna yazar ve watermark'ı (`usn_watermark`) kaydeder.
+/// Sprint 3.8.1 — index güncelleme. Gemini review (açılış donması):
+///   * Watermark VARSA → incremental delta (`FSCTL_READ_USN_JOURNAL`),
+///     saniyeler içinde biter; full rebuild yalnız wraparound'ta.
+///   * Yürüyüş DEDICATED connection + spawn_blocking ile koşar — global DB
+///     mutex'i ve ana thread artık dakikalarca kilitlenmez (WAL mode çoklu
+///     bağlantıyı güvenle destekler).
+///   * Başarıda volume için USN watcher (yeniden) spawn edilir (Bölüm 5.6
+///     canlı delta senkronizasyonu — v0.3.1 prod wire).
 #[tauri::command]
-async fn index_build(
+async fn index_build<R: tauri::Runtime>(
     drive: String,
     _force: Option<bool>,
+    app: tauri::AppHandle<R>,
     db_state: tauri::State<'_, DbState>,
 ) -> Result<IndexStatus> {
-    let drive_letter = drive
-        .chars()
-        .find(|c| c.is_ascii_alphabetic())
+    let drive_letter = parse_drive_letter(&drive)
         .map(|c| c.to_ascii_uppercase())
         .ok_or_else(|| Error::Index(format!("geçersiz drive parametresi: {}", drive)))?;
     let volume_id = format!(r"\\.\{}:", drive_letter);
@@ -744,19 +855,46 @@ async fn index_build(
         return Ok(st);
     }
 
-    let mut conn = db_state
+    let vid_for_status = volume_id.clone();
+    let vid_for_watcher = volume_id.clone();
+    let summary = tokio::task::spawn_blocking(move || -> Result<SyncOutcome> {
+        // Dedicated connection — uzun yürüyüş global mutex'i bloklamaz.
+        let mut conn = open_db()?;
+        sync_volume(&vid_for_watcher, &mut conn, DEFAULT_BASELINE_BUFFER)
+    })
+    .await
+    .map_err(|e| Error::Index(format!("join hatası: {}", e)))??;
+
+    match &summary {
+        SyncOutcome::Baseline(b) => info!(
+            volume = %volume_id,
+            records = b.records_seen,
+            entries = b.entries_written,
+            batches = b.batches,
+            "USN baseline tamamlandı"
+        ),
+        SyncOutcome::Delta {
+            summary: d,
+            next_usn,
+            ..
+        } => info!(
+            volume = %volume_id,
+            upserts = d.upserts,
+            deletes = d.deletes,
+            skipped = d.skipped,
+            next_usn,
+            "USN incremental delta uygulandı"
+        ),
+    }
+
+    // v0.3.1 — volume için watcher'ı garanti et (idempotent).
+    ensure_usn_watcher(&app, &volume_id);
+
+    let conn = db_state
         .conn
         .lock()
         .map_err(|e| Error::Db(format!("mutex poisoned: {}", e)))?;
-    let summary = enumerate_volume_baseline(&volume_id, &mut conn, DEFAULT_BASELINE_BUFFER)?;
-    info!(
-        volume = %volume_id,
-        records = summary.records_seen,
-        entries = summary.entries_written,
-        batches = summary.batches,
-        "USN baseline tamamlandı"
-    );
-    index_status_db(&conn, Some(&volume_id))
+    index_status_db(&conn, Some(&vid_for_status))
 }
 
 /// Bölüm 8.6 — iki snapshot ID arasındaki delta (added/removed/grew/shrunk
@@ -861,12 +999,17 @@ fn spawn_tray_monitor<R: tauri::Runtime>(app: &tauri::App<R>) {
                 }
             }
             // Bölüm 13.3 — battery-aware throttle: pillen modda interval × 2.
+            // Gemini review B8 — saturating_mul taşma koruması (elle
+            // düzenlenmiş dev ayar busy-loop'a düşmesin).
             let effective_interval = if is_on_battery() {
                 interval_min.saturating_mul(2)
             } else {
                 interval_min
             };
-            tokio::time::sleep(std::time::Duration::from_secs(effective_interval * 60)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(
+                effective_interval.saturating_mul(60),
+            ))
+            .await;
         }
     });
 
@@ -909,6 +1052,105 @@ fn spawn_tray_monitor<R: tauri::Runtime>(app: &tauri::App<R>) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// USN watcher registry — v0.3.1 prod wire (Bölüm 5.6 canlı delta sync).
+// ---------------------------------------------------------------------------
+
+/// Volume başına watcher handle kaydı. Aynı volume için çift spawn engellenir;
+/// handle'lar uygulama ömrü boyunca yaşar (drop = kapanma sinyali).
+pub struct UsnWatchers(pub std::sync::Mutex<HashMap<String, crate::index::watcher::WatcherHandle>>);
+
+/// Bir volume için USN watcher spawn et (yoksa). Tick closure'ı kendi
+/// dedicated SQLite connection'ını lazy açar ve `sync_volume` çağırır —
+/// incremental delta + wraparound'ta otomatik full rebuild.
+fn ensure_usn_watcher<R: tauri::Runtime>(app: &tauri::AppHandle<R>, volume_id: &str) {
+    use tauri::Manager;
+    ensure_usn_watcher_inner(app.state::<UsnWatchers>(), volume_id)
+}
+
+fn ensure_usn_watcher_inner(registry: tauri::State<'_, UsnWatchers>, volume_id: &str) {
+    {
+        let map = match registry.0.lock() {
+            Ok(m) => m,
+            Err(p) => p.into_inner(),
+        };
+        if map.contains_key(volume_id) {
+            return; // zaten izleniyor
+        }
+    }
+
+    let vid = volume_id.to_string();
+    let spawn_result = crate::index::watcher::spawn_watcher(vid.clone(), true, move |v: &str| {
+        // Lazy dedicated connection — watcher thread ömrü boyunca yaşar.
+        // Açılışta başarısızsa her tick retry eder (60 sn sonra).
+        use std::sync::Mutex;
+        thread_local! {
+            static WATCHER_CONN: Mutex<Option<rusqlite::Connection>> = const { Mutex::new(None) };
+        }
+        WATCHER_CONN.with(|slot| -> Result<()> {
+            let mut guard = match slot.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            if guard.is_none() {
+                *guard = Some(
+                    open_db().map_err(|e| Error::Index(format!("watcher DB açılışı: {}", e)))?,
+                );
+            }
+            let conn = guard
+                .as_mut()
+                .ok_or_else(|| Error::Index("watcher conn yok".into()))?;
+            sync_volume(v, conn, DEFAULT_BASELINE_BUFFER).map(|_| ())
+        })
+    });
+
+    match spawn_result {
+        Ok(Some(handle)) => {
+            let mut map = match registry.0.lock() {
+                Ok(m) => m,
+                Err(p) => p.into_inner(),
+            };
+            map.insert(vid.clone(), handle);
+            info!(volume = %vid, "USN watcher başlatıldı");
+        }
+        Ok(None) => {
+            // is_admin=false — çağıran zaten elevated kontrolü yapmış olmalı.
+            info!(volume = %vid, "USN watcher başlatılamadı (admin değil)");
+        }
+        Err(e) => {
+            warn!(volume = %vid, ?e, "USN watcher spawn hatası");
+        }
+    }
+}
+
+/// Açılışta: watermark'ı olan tüm volumeler için watcher başlat.
+/// Admin yoksa sessizce atlanır (index_status needs_admin rozetini gösterir).
+fn spawn_usn_watchers<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Manager;
+    if !is_elevated() {
+        info!("USN watcher'lar atlandı: admin değil");
+        return;
+    }
+    let db_state = app.state::<DbState>();
+    let volumes: Vec<String> = {
+        let conn = match db_state.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        match list_indexed_volumes(&conn) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(?e, "indexed volume listesi okunamadı — watcher atlandı");
+                return;
+            }
+        }
+    };
+    let registry = app.state::<UsnWatchers>();
+    for v in volumes {
+        ensure_usn_watcher_inner(registry.clone(), &v);
+    }
+}
+
 fn init_tracing() {
     use tracing_subscriber::{fmt, EnvFilter};
 
@@ -935,7 +1177,17 @@ pub fn run() {
         Ok(conn) => DbState::new(conn),
         Err(e) => {
             warn!(?e, "DB açılamadı — geçici in-memory ile devam");
-            let conn = rusqlite::Connection::open_in_memory().expect("in-memory SQLite açılamadı");
+            let mut conn =
+                rusqlite::Connection::open_in_memory().expect("in-memory SQLite açılamadı");
+            // Gemini review — fallback connection'a da PRAGMA + migration
+            // uygula; eskiden şemasız in-memory DB tüm komutları "no such
+            // table" ile öldürüyordu.
+            if let Err(pe) = db::apply_pragmas(&conn) {
+                warn!(?pe, "in-memory PRAGMA hatası");
+            }
+            if let Err(me) = db::migrations().to_latest(&mut conn) {
+                warn!(?me, "in-memory migration hatası");
+            }
             DbState::new(conn)
         }
     };
@@ -975,12 +1227,15 @@ pub fn run() {
         .manage(db_state)
         .manage(ScanTreeState::default())
         .manage(ScanCancel::default())
+        .manage(UsnWatchers(std::sync::Mutex::new(HashMap::new())))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             build_tray(app)?;
             spawn_tray_monitor(app);
+            // v0.3.1 — USN watcher'ları başlat (Bölüm 5.6 canlı index).
+            spawn_usn_watchers(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

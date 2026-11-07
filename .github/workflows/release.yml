@@ -88,14 +88,18 @@ jobs:
             **Spec:** D-Space-Mimari-v1.4.docx (Bölüm 28 Discovery Log canlı)
             **Hedef:** Windows 10 1809+ / Windows 11
 
-            Bu sürüm v0.2.0-beta kanalında, henüz EV cert ile imzalanmamış
-            bir build (Bölüm 18.2 stable hedefi). SmartScreen "yayıncı
-            bilinmiyor" uyarısı verebilir. Auto-updater (Tauri plugin-updater)
-            etkin — yeni sürümler imza eşleştikten sonra otomatik kurulur.
+            Bu sürüm henüz EV cert ile imzalanmamış bir build (Bölüm 18.2
+            stable hedefi). SmartScreen "yayıncı bilinmiyor / publisher unknown"
+            uyarısı verebilir. Auto-updater (Tauri plugin-updater) etkin — yeni
+            sürümler imza eşleştikten sonra otomatik kurulur.
 
             Geri bildirim: GitHub Issues.
           releaseDraft: false
-          prerelease: true
+          # Gemini review W2 — sabit `prerelease: true` `releases/latest`
+          # endpoint'ini 404'lüyordu (GitHub latest yalnız stabil release
+          # gösterir). Tag'de alpha/beta/rc geçiyorsa prerelease, aksi halde
+          # stabil yayınlanır — updater feed'i her iki durumda da çalışır.
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
           # Sprint 3.6 — latest.json üretilir; istemci tauri.conf.json'daki
           # endpoint üzerinden son sürümü doğrular + indirir.
           includeUpdaterJson: true

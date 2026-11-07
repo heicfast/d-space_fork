@@ -21,11 +21,11 @@
 use crate::error::{Error, Result};
 use crate::scan::tree::ROOT_RECORD;
 use crate::scan::walk::{
-    build_partial_from_raw, MftEntries, ProgressCb, RawMftEntry, ScanProgress,
-    PARTIAL_TREE_INTERVAL, PARTIAL_TREE_MAX_DEPTH, PARTIAL_TREE_TOP_N,
+    advance_partial_threshold, build_partial_from_raw, MftEntries, ProgressCb, RawMftEntry,
+    ScanProgress, PARTIAL_TREE_INTERVAL, PARTIAL_TREE_MAX_DEPTH, PARTIAL_TREE_TOP_N,
 };
 use crate::scan::NodeId;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fs::Metadata;
 #[cfg(windows)]
 use std::os::windows::fs::MetadataExt;
@@ -72,11 +72,14 @@ fn physical_file_size(path: &Path, metadata: &Metadata) -> u64 {
         .collect();
     let mut high: u32 = 0;
     let low = unsafe { GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high)) };
-    // INVALID_FILE_SIZE = 0xFFFFFFFF; bunu kontrol etmek için GetLastError
-    // çağrısı gerekir ama çoğu durumda low != INVALID veya high > 0 yeterli
-    // sinyaldir. Hata durumunda mantıksal boyuta düşeriz.
+    // INVALID_FILE_SIZE = 0xFFFFFFFF — başarı durumunda da meşru değer
+    // (4 GiB-1 fiziksel boyut). Gemini review B8: GetLastError ile gerçek
+    // hata ayırt edilir; hata ise mantıksal boyuta düşeriz.
     if low == 0xFFFF_FFFF {
-        return logical;
+        let err = unsafe { windows::Win32::Foundation::GetLastError() };
+        if err.0 != 0 {
+            return logical;
+        }
     }
     ((high as u64) << 32) | (low as u64)
 }
@@ -85,8 +88,6 @@ fn physical_file_size(path: &Path, metadata: &Metadata) -> u64 {
 fn physical_file_size(_path: &Path, metadata: &Metadata) -> u64 {
     metadata.len()
 }
-
-const FALLBACK_PROGRESS_INTERVAL: u64 = 500;
 
 /// `fs::metadata().modified()` → Unix saniye. Hata veya pre-epoch ise 0.
 fn metadata_mtime_unix(metadata: &Metadata) -> i64 {
@@ -195,10 +196,9 @@ fn drive_to_root(drive: &str) -> Result<PathBuf> {
         }
         return Ok(PathBuf::from(normalized));
     }
-    // Lokal sürücü harfi.
-    let letter = trimmed
-        .chars()
-        .find(|c| c.is_ascii_alphabetic())
+    // Lokal sürücü harfi — katı doğrulama (Gemini review B2: "abc" gibi
+    // girdiler sessizce 'A:' olmasın).
+    let letter = crate::volume::parse_drive_letter(trimmed)
         .ok_or_else(|| Error::Scan(format!("Geçersiz sürücü: '{}'", drive)))?
         .to_ascii_uppercase();
     Ok(PathBuf::from(format!(r"{}:\", letter)))
@@ -222,8 +222,6 @@ pub fn scan_find_first_with_progress(
     debug!(root = %root.display(), "FindFirstFile fallback başlıyor");
 
     let mut entries: Vec<RawMftEntry> = Vec::with_capacity(8192);
-    let mut path_to_id: HashMap<PathBuf, NodeId> = HashMap::new();
-    path_to_id.insert(root.clone(), ROOT_RECORD);
 
     let mut next_id: u64 = SYNTHETIC_ID_START;
     let mut queue: VecDeque<(PathBuf, NodeId, u32)> = VecDeque::new();
@@ -243,18 +241,19 @@ pub fn scan_find_first_with_progress(
 
     while let Some((dir, parent_id, depth)) = queue.pop_front() {
         visited_dirs += 1;
-        // Cancellation check — her progress interval'da yeterli.
-        if entries.len() as u64 % FALLBACK_PROGRESS_INTERVAL == 0 {
+        // Gemini review B1 — iptal/progress kapısı eskiden `entries.len() %
+        // 500 == 0` üzerine kuruluydu; entries her dizinde değişken arttığı
+        // için kontrol atlanabiliyordu (tek büyük dizin = hiç kontrol yok).
+        // Deterministik sayaç: her 32 dizinde bir kesin kontrol.
+        if visited_dirs % 32 == 0 {
             if let Some(c) = cancel {
                 if c.load(std::sync::atomic::Ordering::Acquire) {
                     return Err(Error::Scan("scan-cancelled".into()));
                 }
             }
-        }
-        if let Some(cb) = progress_cb {
-            if entries.len() as u64 % FALLBACK_PROGRESS_INTERVAL == 0 {
+            if let Some(cb) = progress_cb {
                 let partial = if entries.len() as u64 >= next_partial_at {
-                    next_partial_at = next_partial_at.saturating_add(PARTIAL_TREE_INTERVAL);
+                    next_partial_at = advance_partial_threshold(next_partial_at);
                     Some(build_partial_from_raw(
                         &entries,
                         PARTIAL_TREE_MAX_DEPTH,
@@ -316,9 +315,11 @@ pub fn scan_find_first_with_progress(
             let id = next_id;
             next_id += 1;
 
-            // metadata: dosya boyutu + mtime için gerekli. symlink_metadata
-            // kullanırız ki bilinmeyen reparse point'ler içine girmeyelim.
-            let metadata = std::fs::symlink_metadata(&path).ok();
+            // Gemini review B16 — `entry.metadata()` Windows'ta FindNextFileW
+            // verisinden servis edilir (ek syscall yok); `symlink_metadata`
+            // ekstra GetFileAttributesExW açardı. `metadata()` symlink
+            // takip etmez, yine de reparse point kontrolü file_type ile yapılır.
+            let metadata = entry.metadata().ok();
             let is_dir = file_type.is_dir();
             // raw_size: compressed/sparse için fiziksel boyut
             // (GetCompressedFileSizeW), diğerleri için metadata.len().
@@ -360,7 +361,6 @@ pub fn scan_find_first_with_progress(
             });
 
             if is_dir {
-                path_to_id.insert(path.clone(), id);
                 queue.push_back((path, id, depth + 1));
             }
         }
@@ -458,8 +458,6 @@ mod tests {
         // drive_to_root tek harf bekler; bu test için doğrudan kullanırız.
         let start = Instant::now();
         let mut entries: Vec<RawMftEntry> = Vec::new();
-        let mut path_to_id: HashMap<PathBuf, NodeId> = HashMap::new();
-        path_to_id.insert(tmp.clone(), ROOT_RECORD);
         let mut next_id = SYNTHETIC_ID_START;
         let mut queue = VecDeque::new();
         queue.push_back((tmp.clone(), ROOT_RECORD, 0u32));

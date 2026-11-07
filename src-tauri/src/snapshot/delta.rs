@@ -151,6 +151,29 @@ pub fn compute_delta(
     let from_captured_at = snapshot_captured_at(conn, from_id)?;
     let to_captured_at = snapshot_captured_at(conn, to_id)?;
 
+    // Gemini review B21 — iki snapshot aynı volume'den olmalı; cross-volume
+    // delta anlamsız sonuç üretirdi.
+    let from_volume: String = conn
+        .query_row(
+            "SELECT volume_id FROM snapshots WHERE id = ?1",
+            params![from_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| Error::Snapshot(format!("snapshot id={} volume okunamadı: {}", from_id, e)))?;
+    let to_volume: String = conn
+        .query_row(
+            "SELECT volume_id FROM snapshots WHERE id = ?1",
+            params![to_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| Error::Snapshot(format!("snapshot id={} volume okunamadı: {}", to_id, e)))?;
+    if from_volume != to_volume {
+        return Err(Error::Snapshot(format!(
+            "Delta yalnız aynı volume içinde: '{}' vs '{}'",
+            from_volume, to_volume
+        )));
+    }
+
     // FULL OUTER JOIN: SQLite 3.39+ destekler (rusqlite 0.32 bundles ≥3.46).
     // `a` from snapshot, `b` to snapshot. NULL → o tarafta yok.
     let mut stmt = conn

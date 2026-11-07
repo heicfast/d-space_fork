@@ -28,13 +28,17 @@ pub struct MftProbe {
     pub elapsed_ms: u64,
 }
 
-/// "C", "c:", "C:\", "C:/Users" → r"\\.\C:"
+/// "C", "c:", "C:\", "C:/Users" → r"\\.\C:" — katı doğrulama (UNC reddedilir,
+/// Gemini review B2).
 fn normalize_volume_path(drive: &str) -> Result<String> {
-    let letter = drive
-        .chars()
-        .find(|c| c.is_ascii_alphabetic())
-        .ok_or_else(|| Error::Scan(format!("Geçersiz sürücü: '{}'", drive)))?
-        .to_ascii_uppercase();
+    let letter = crate::volume::parse_drive_letter(drive)
+        .map(|c| c.to_ascii_uppercase())
+        .ok_or_else(|| {
+            Error::Scan(format!(
+                "Geçersiz sürücü parametresi: '{}' (raw volume yolu UNC kabul etmez)",
+                drive
+            ))
+        })?;
     Ok(format!(r"\\.\{}:", letter))
 }
 

@@ -28,12 +28,14 @@ fn wide_to_string(buf: &[u16]) -> String {
 }
 
 fn normalize_drive_letter(drive: &str) -> Result<char> {
-    let letter = drive
-        .chars()
-        .find(|c| c.is_ascii_alphabetic())
-        .ok_or_else(|| Error::Volume(format!("Geçersiz sürücü: '{}'", drive)))?
-        .to_ascii_uppercase();
-    Ok(letter)
+    crate::volume::parse_drive_letter(drive)
+        .map(|c| c.to_ascii_uppercase())
+        .ok_or_else(|| {
+            Error::Volume(format!(
+                "Geçersiz sürücü parametresi: '{}' (UNC/path burada desteklenmez)",
+                drive
+            ))
+        })
 }
 
 #[cfg(windows)]
@@ -60,7 +62,7 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
         "drive type sorgulandı"
     );
 
-    if matches!(drive_kind, DriveKind::NoRootDir | DriveKind::Unknown) && dtype_code != 6 {
+    if matches!(drive_kind, DriveKind::NoRootDir | DriveKind::Unknown) {
         return Ok(VolumeInfo {
             drive_letter,
             root_path,
@@ -173,6 +175,15 @@ mod tests {
         assert_eq!(normalize_drive_letter("c:").unwrap(), 'C');
         assert_eq!(normalize_drive_letter("d:\\").unwrap(), 'D');
         assert!(normalize_drive_letter("").is_err());
+    }
+
+    #[test]
+    fn unc_input_rejected() {
+        // Gemini review B2 — UNC girdisi sessizce sürücü harfine dönüşmemeli.
+        assert!(normalize_drive_letter(r"\\fileserver\public").is_err());
+        assert!(normalize_drive_letter("//server/share").is_err());
+        assert!(normalize_drive_letter(r"\rooted").is_err());
+        assert!(normalize_drive_letter("12").is_err());
     }
 
     #[test]

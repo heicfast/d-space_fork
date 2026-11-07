@@ -5,7 +5,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { useI18n } from "vue-i18n";
 import InfoButton from "./InfoButton.vue";
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
+
+// Gemini review — locale-aware sayı formatı (sabit "tr-TR" kaldırıldı).
+function localeTag(): string {
+  return locale.value === "tr" ? "tr-TR" : "en-US";
+}
 
 interface DuplicateGroup {
   hash_hex: string;
@@ -110,7 +115,7 @@ function toggle(hash: string) {
     <template v-else>
       <div class="dup-bar">
         <label class="dup-label">
-          Min boyut
+          {{ t("duplicate.minSize") }}
           <input
             v-model.number="minSizeKb"
             type="number"
@@ -122,7 +127,7 @@ function toggle(hash: string) {
         </label>
         <label class="dup-label">
           <input v-model="sizeOnly" type="checkbox" />
-          Sadece boyut (hash atla)
+          {{ t("duplicate.sizeOnly") }}
         </label>
         <button
           type="button"
@@ -130,24 +135,27 @@ function toggle(hash: string) {
           :disabled="running"
           @click="runScan"
         >
-          {{ running ? "Hash hesaplanıyor…" : "Duplicate ara" }}
+          {{ running ? t("duplicate.scanBusy") : t("duplicate.scan") }}
         </button>
       </div>
 
       <div v-if="result" class="grid">
         <div class="row">
-          <span class="key">Tarandı</span>
+          <span class="key">{{ t("duplicate.scanned") }}</span>
           <span class="val mono">
-            {{ result.scanned_files.toLocaleString("tr-TR") }} dosya
+            {{ result.scanned_files.toLocaleString(localeTag()) }}
+            {{ t("duplicate.filesUnit") }}
           </span>
           <span class="pill pill-ok">
-            {{ result.candidate_pairs }} aday
+            {{ result.candidate_pairs }} {{ t("duplicate.candidates") }}
           </span>
         </div>
         <div class="row">
           <span class="key">{{ t("duplicate.filtered") }}</span>
           <span class="val mono">
-            {{ result.filtered_small.toLocaleString() }} {{ t("duplicate.smallFiles") }}
+            {{
+              result.filtered_small.toLocaleString(localeTag())
+            }} {{ t("duplicate.smallFiles") }}
           </span>
         </div>
         <div class="row">
@@ -187,7 +195,7 @@ function toggle(hash: string) {
           </span>
         </div>
         <div class="row">
-          <span class="key">Süre</span>
+          <span class="key">{{ t("duplicate.duration") }}</span>
           <span class="val mono">{{ result.stats.elapsed_ms }} ms</span>
         </div>
       </div>

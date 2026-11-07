@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "D-Space",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "app.dspace",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -42,15 +42,16 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
   },
   "plugins": {
     "//": "Bölüm 21.4 — Tauri auto-updater. Sprint 3.6 (v0.2.0-beta). Endpoint GitHub releases latest.json'u işaret eder; release workflow `includeUpdaterJson: true` ile bu dosyayı üretir. Pubkey Ed25519 (2026-05-17 üretildi); private key + password GitHub Secrets'ta (`TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Detaylar: docs/RELEASE_CHECKLIST.md §2.",
     "updater": {
       "endpoints": [
-        "https://github.com/AmrasElessar/d-space/releases/latest/download/latest.json"
+        "https://github.com/heicfast/d-space_fork/releases/latest/download/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENDNzNBMDM1N0ZCMDY3NzQKUldSMFo3Qi9OYUJ6ekZNOFdjb2dJaUg2R1piVW5UdXV2M2dwVlB1a2JFaXJtUkNwenVQSmNDcFkK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM4NTNGRTgzRjBDQjUyNUUKUldSZVVzdndnLzVUT0NLS3BFZHk1cTZhUkZZVVZEREhhVVM5UHdGOWgrK1RVVlBXZitrcVBuc00K",
       "windows": {
         "installMode": "passive"
       }

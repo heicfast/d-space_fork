@@ -94,7 +94,18 @@
     "tierCross": "Diskler arası",
     "tierNormal": "Aynı disk",
     "tierCrossTitle": "Diskler arası taşıma — bütünlük kontrolü ve atomik adımlar uygulanır",
-    "tierNormalTitle": "Aynı disk içinde anlık yeniden adlandırma"
+    "tierNormalTitle": "Aynı disk içinde anlık yeniden adlandırma",
+    "expiredTitle": "Süresi geçmiş öğeler (Bölüm 12.2.1)",
+    "expiredIntro": "Staging kuyruğunda {count} öğenin 24 saatlik geri alma penceresi doldu. Bölüm 22.6 ilkesi gereği otomatik silinmedi — sen onaylayana kadar yaşamaya devam eder. Tek seferde tümünü kalıcı silebilir veya tek tek inceleyebilirsin.",
+    "expiredAgo": "{hours} sa süresi geçmiş",
+    "expiredMore": "ve {count} öğe daha…",
+    "expiredDeleteAll": "🔥 Tümünü kalıcı sil ({count})",
+    "expiredLastReport": "son rapor: {deleted} silindi, {bytes}, {ms} ms",
+    "expiredConfirmTitle": "⚠ {count} öğe kalıcı silinecek",
+    "expiredConfirmHelp": "Bölüm 12.2.3 — rate limit 20 dosya/sn, forensic ledger'a her biri kayıt düşer. Geri alınamaz. Devam etmek için onayla.",
+    "expiredConfirmGo": "Hepsini kalıcı sil",
+    "expiredConfirmBusy": "Siliniyor…",
+    "abortedThreshold": "⚠ {count} öğe eşiği aştı — otomatik temizlik durduruldu. Listeyi incele ve onayla."
   },
   "snapshot": {
     "title": "Zaman Makinesi",
@@ -102,7 +113,16 @@
     "snap": "📸 Snapshot Al",
     "snapBusy": "Alınıyor…",
     "empty": "Henüz snapshot yok. Bir tarama sonrası 📸 ile yakala — günlük büyüme/küçülme deltası buradan çıkar.",
-    "compareBtn": "İki snapshot karşılaştır"
+    "compareBtn": "İki snapshot karşılaştır",
+    "entriesUnit": "kayıt",
+    "compareHint": "Karşılaştırmak için iki snapshot seç (eski → yeni).",
+    "comparePickOneMore": "Bir tane daha seç.",
+    "deltaLoading": "Delta hesaplanıyor…",
+    "changedPaths": "değişen yol",
+    "added": "🆕 Eklenen",
+    "removed": "🗑 Silinen",
+    "grew": "📈 Büyüyen",
+    "shrunk": "📉 Küçülen"
   },
   "duplicate": {
     "title": "Dosya İkizleri",
@@ -120,7 +140,12 @@
     "lockedHint": "kilitli dosya",
     "hashErrorsTitle": "Bu dosyalar başka bir process tarafından açık tutulduğu için okunamadı. VSS aktif build'de bu hata düşer.",
     "truncated": "{shown} / {total}",
-    "truncatedTitle": "Toplam {total} grup bulundu, performans için ilk {shown} gösteriliyor. Filtreyi sıkı tutarsan tümünü görürsün."
+    "truncatedTitle": "Toplam {total} grup bulundu, performans için ilk {shown} gösteriliyor. Filtreyi sıkı tutarsan tümünü görürsün.",
+    "sizeOnly": "Sadece boyut (hash atla)",
+    "scanned": "Tarandı",
+    "filesUnit": "dosya",
+    "candidates": "aday",
+    "duration": "Süre"
   },
   "detail": {
     "title": "Seçili Öğe",
@@ -133,7 +158,8 @@
     "rule": "Kural",
     "lockProbe": "🔒 Kilit durumunu sorgula",
     "cloudProbe": "☁ Bulut placeholder sorgula",
-    "sendStaging": "📥 Sil (24 saat içinde geri alınabilir)"
+    "sendStaging": "📥 Sil (24 saat içinde geri alınabilir)",
+    "indexNote": "USN index arama sonucu — tam yol arka plandan çözüldü."
   },
   "scoreTier": {
     "none": "—",
@@ -204,11 +230,11 @@
   "shortcuts": {
     "title": "⌨ Klavye Kısayolları (Bölüm 15.2)",
     "rescan": "Yeniden tara",
-    "viewModes": "Görüntü modu — Sunburst · Treemap · Bubble · Timeline",
+    "viewModes": "Görüntü modu — Sunburst · Treemap · Bubble · Timeline · 3D",
     "navUp": "Bir seviye yukarı (drilldown breadcrumb)",
     "stageDelete": "Viewport'taki ilk dosyayı staging'e gönder",
     "undo": "Son staging undo",
-    "search": "Arama (placeholder, v0.2)",
+    "search": "Hızlı arama (USN index)",
     "escape": "Açık dialog'u kapat",
     "helpToggle": "Bu yardımı aç/kapat",
     "hint": "Input/textarea fokustayken kısayollar devre dışıdır — normal yazım engellenmez.",
@@ -280,5 +306,43 @@
     "errorVerify": "İmza doğrulanamadı — paket bozulmuş ya da pubkey eşleşmiyor",
     "errorNetwork": "Sunucuya ulaşılamadı: {msg}",
     "errorUnknown": "Beklenmedik hata: {msg}"
+  },
+  "cloud": {
+    "localOnly": "Yerel (bulutta değil)",
+    "onlineOnly": "☁ Yalnızca bulutta — açmak indirir",
+    "alwaysAvailable": "☁ Her zaman erişilebilir (bulut sürümü var)",
+    "otherReparse": "Reparse point (symlink/junction/dedup)",
+    "notFound": "Yol bulunamadı",
+    "win32Error": "Win32 hata ({code})"
+  },
+  "volumeStatus": {
+    "Ready": "Hazır",
+    "BitLockerLocked": "BitLocker kilitli",
+    "BitLockerSuspended": "BitLocker askıda",
+    "Encrypted": "Şifreli ({method})",
+    "NotMounted": "Bağlı değil",
+    "AccessDenied": "Erişim engellendi",
+    "NotFormatted": "Formatsız",
+    "UnsupportedDriveType": "Desteklenmeyen sürücü ({type})"
+  },
+  "driveWarning": {
+    "refs": "ReFS sürücü: MFT direkt okuma desteklenmiyor — Standart Mod kullanılır (Bölüm 5.5).",
+    "unknownFs": "Bilinmeyen dosya sistemi ({fs}) — Standart Mod denenecek.",
+    "remote": "Network sürücü: bandwidth ve yetki maliyeti yüksek (Bölüm 33.3). Tarama yavaş olabilir.",
+    "removable": "Removable medya: tarama bitince güvenli çıkarmayı unutma (Bölüm 33.4).",
+    "cdrom": "Optik medya: salt-okunur, staging/silme yapılamaz."
+  },
+  "userRules": {
+    "title": "Kullanıcı Kuralları (Bölüm 6.4)",
+    "intro": "Built-in kurallardan ÖNCE değerlendirilir. Kendi pattern'inle istediğin klasör/uzantıya skor ata; yeniden tarama sonrası etkin olur.",
+    "patternPlaceholder": "Pattern (örn. node_modules veya .heic)",
+    "typeName": "İsim (tam, case-insensitive)",
+    "typeExtension": "Uzantı (.ext)",
+    "explanationPlaceholder": "Açıklama (opsiyonel)",
+    "add": "+ Ekle",
+    "empty": "Henüz kullanıcı kuralı yok.",
+    "disable": "Devre dışı bırak",
+    "enable": "Etkinleştir",
+    "delete": "Kuralı sil"
   }
 }

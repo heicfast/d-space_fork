@@ -1,10 +1,10 @@
 [package]
 name = "dspace"
-version = "0.2.0"
+version = "0.3.0"
 description = "D-Space — Windows için akıllı disk analiz ve geri kazanım platformu"
 authors = ["D-Space contributors"]
 license = "GPL-3.0-or-later"
-repository = "https://github.com/dspace-app/dspace"
+repository = "https://github.com/heicfast/d-space_fork"
 edition = "2021"
 rust-version = "1.80"
 
@@ -26,7 +26,7 @@ thiserror = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 ntfs = "0.4"
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 rusqlite_migration = "1"
 dirs = "5"

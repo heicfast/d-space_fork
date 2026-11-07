@@ -50,6 +50,8 @@ pub struct CleanupReport {
 }
 
 /// Bölüm 12.2.1 — süresi geçmiş staging item listesi (expires_at < now).
+/// Gemini review B30 — LIMIT 2000: patolojik DB'de RAM şişmesin (cleanup
+/// zaten AUTO_THRESHOLD üzerinden parçalı çalışır).
 pub fn list_expired(conn: &Connection) -> Result<Vec<ExpiredItem>> {
     let now = now_unix();
     let mut stmt = conn
@@ -57,7 +59,8 @@ pub fn list_expired(conn: &Connection) -> Result<Vec<ExpiredItem>> {
             "SELECT id, original_path, size_bytes, expires_at, is_dir
              FROM staging_items
              WHERE expires_at < ?1
-             ORDER BY expires_at ASC",
+             ORDER BY expires_at ASC
+             LIMIT 2000",
         )
         .map_err(|e| Error::Staging(format!("expiry prepare: {}", e)))?;
 
@@ -118,7 +121,14 @@ pub fn cleanup_expired(
     let mut failed: u64 = 0;
     let mut total_bytes: u64 = 0;
 
+    // Gemini review B31 — sleep yalnızca item'lar ARASINDA; son itemdan
+    // sonra gereksiz bekleme yok.
+    let mut first = true;
     for item in items {
+        if !first {
+            sleep(interval);
+        }
+        first = false;
         // Permanent delete'in confirm_phrase'si dosya adıdır.
         let file_name = std::path::PathBuf::from(&item.original_path)
             .file_name()
@@ -143,7 +153,6 @@ pub fn cleanup_expired(
                 );
             }
         }
-        sleep(interval);
     }
 
     let report = CleanupReport {

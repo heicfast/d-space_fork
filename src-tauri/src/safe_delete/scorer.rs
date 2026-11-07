@@ -14,6 +14,7 @@
 // Tier 3 (CloudScorer): premium opt-in, v2.0. Trait stub `crate::v2::ml_scorer`.
 
 use crate::error::{Error, Result};
+use crate::safe_delete::UserRuleSnapshot;
 use crate::v2::{InferenceTier, MlSafeDeleteScorer, MlScoreRecord};
 use blake3::Hasher;
 use rusqlite::{params, Connection};
@@ -24,6 +25,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// burada `tier=Rules` ile yazılır, tutarlılık için.
 pub struct RulesScorer<'a> {
     pub conn: &'a Connection,
+    /// Gemini review B7 — construction anında yüklenen aktif user rules
+    /// (Bölüm 6.4 önceliği). Kural seti nadiren değişir; scorer kısa ömürlü
+    /// tutulmalı.
+    user_rules: Vec<UserRuleSnapshot>,
 }
 
 fn path_hash(path: &str) -> [u8; 32] {
@@ -39,11 +44,16 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-fn score_path_via_rules(path: &str, is_dir: bool) -> u8 {
+fn score_path_via_rules(path: &str, is_dir: bool, user_rules: &[UserRuleSnapshot]) -> u8 {
     let name = std::path::Path::new(path)
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string());
+    // Gemini review B7 — Bölüm 6.4 önceliği: user rules önce (build_tree
+    // ile aynı sıra), sonra built-in. Eskiden user rules yok sayılıyordu.
+    if let Some(ur) = crate::safe_delete::match_user_rule(user_rules, &name, is_dir) {
+        return ur.score;
+    }
     match crate::safe_delete::match_rule(&name, is_dir) {
         Some(r) => r.score,
         None => 50, // bilinmeyen → İNCELE tier varsayılan
@@ -52,7 +62,8 @@ fn score_path_via_rules(path: &str, is_dir: bool) -> u8 {
 
 impl<'a> RulesScorer<'a> {
     pub fn new(conn: &'a Connection) -> Self {
-        Self { conn }
+        let user_rules = crate::safe_delete::list_active_snapshots(conn).unwrap_or_default();
+        Self { conn, user_rules }
     }
 
     /// `ml_scores` cache'inden okur; miss ise rules üzerinden skorlar + cache'le.
@@ -86,13 +97,16 @@ impl<'a> RulesScorer<'a> {
             }
         }
 
-        let score = score_path_via_rules(path, is_dir);
+        let score = score_path_via_rules(path, is_dir, &self.user_rules);
         let computed_at = now_unix();
 
         self.conn
             .execute(
+                // Gemini review B22 — model_version kolonu INTEGER NOT NULL
+                // (migration 0001); TEXT 'rules-v1' affinity ile sessizce TEXT
+                // kalıyordu. Kural motoru = tier 1.
                 "INSERT INTO ml_scores (path_hash, mtime, score, model_version, computed_at)
-                 VALUES (?1, ?2, ?3, 'rules-v1', ?4)
+                 VALUES (?1, ?2, ?3, 1, ?4)
                  ON CONFLICT(path_hash) DO UPDATE SET
                      mtime = excluded.mtime,
                      score = excluded.score,
@@ -123,7 +137,7 @@ fn hex32(bytes: &[u8; 32]) -> String {
 impl<'a> MlSafeDeleteScorer for RulesScorer<'a> {
     fn score_one(&self, path: &str, mtime_unix: i64) -> Result<MlScoreRecord> {
         // is_dir bilinmiyor (path metadata yapılmıyor — pure-rule scoring),
-        // varsayılan false. Caller bilirse `score_one_with_kind` çağırabilir.
+        // varsayılan false.
         self.score_and_cache(path, mtime_unix, false)
     }
 

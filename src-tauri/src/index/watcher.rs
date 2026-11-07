@@ -12,11 +12,11 @@
 // başlatmaz, `IndexStatus { mode: "needs_admin" }` döner. Hızlı Mod
 // (Bölüm 5.2A Katman 1) yetkisinin aynısı.
 //
-// Bu modül **çoğunlukla iskelet**: gerçek `DeviceIoControl` çağrıları
-// `cfg(windows)` altında, dosyanın alt kısmında. Test platform-agnostic
-// kısımları kapsar (channel-shutdown semantiği).
+// v0.3.1 — production'a bağlanmış durumda: `lib.rs::spawn_usn_watchers`
+// açılışta ve `index_build` sonrası watcher başlatır; tick closure'ı
+// `index::sync_volume` çağırır (lazy dedicated Connection ile).
+// Test platform-agnostic kısımları kapsar (channel-shutdown semantiği).
 
-use crate::db::DbState;
 use crate::error::Result;
 use std::sync::mpsc::{channel, Sender};
 use std::thread::JoinHandle;
@@ -68,7 +68,6 @@ impl Drop for WatcherHandle {
 pub fn spawn_watcher<F>(
     volume_id: String,
     is_admin: bool,
-    _db: std::sync::Arc<DbState>,
     mut tick: F,
 ) -> Result<Option<WatcherHandle>>
 where
@@ -115,30 +114,21 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::DbState;
-    use rusqlite::Connection;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
 
-    fn fake_db() -> Arc<DbState> {
-        let conn = Connection::open_in_memory().unwrap();
-        Arc::new(DbState::new(conn))
-    }
-
     #[test]
     fn watcher_returns_none_when_not_admin() {
-        let db = fake_db();
-        let res = spawn_watcher(r"\\.\C:".to_string(), false, db, |_| Ok(())).unwrap();
+        let res = spawn_watcher(r"\\.\C:".to_string(), false, |_| Ok(())).unwrap();
         assert!(res.is_none());
     }
 
     #[test]
     fn watcher_shutdown_terminates_thread() {
-        let db = fake_db();
         let counter = Arc::new(AtomicUsize::new(0));
         let c = counter.clone();
-        let handle = spawn_watcher(r"\\.\C:".to_string(), true, db, move |_| {
+        let handle = spawn_watcher(r"\\.\C:".to_string(), true, move |_| {
             c.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })

@@ -173,6 +173,135 @@ pub fn build_tree(volume_id: String, raw: Vec<RawMftEntry>) -> ScanTree {
     build_tree_with_user_rules(volume_id, raw, &[])
 }
 
+/// Gemini review (partial-tree perf) — canlı sunburst snapshot'ları için
+/// hafif ağaç kurucu. `build_tree_with_user_rules`'tan farkları:
+///   * borrow ile çalışır (kopya YOK),
+///   * safe-delete kural skorlaması YOK (partial view yalnız boyut/isim
+///     taşır — Node.score alanları None kalır),
+///   * volume_id boş (yalnız partial_view hesabı için kullanılır).
+pub fn build_tree_light(raw: &[RawMftEntry]) -> ScanTree {
+    let start = Instant::now();
+    let count = raw.len();
+
+    let mut nodes: HashMap<NodeId, Node> = HashMap::with_capacity(count + 1);
+    let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::with_capacity(count / 8 + 1);
+
+    for e in raw {
+        nodes.insert(
+            e.record_no,
+            Node {
+                id: e.record_no,
+                parent: Some(e.parent_record_no),
+                name: e.name.clone(),
+                data_size: e.data_size,
+                aggregate_size: e.data_size,
+                is_dir: e.is_dir,
+                score: None,
+                score_rule: None,
+                score_reason: None,
+                modified_unix: e.modified_unix,
+            },
+        );
+    }
+
+    nodes.entry(ROOT_RECORD).or_insert(Node {
+        id: ROOT_RECORD,
+        parent: None,
+        name: "<volume root>".into(),
+        data_size: 0,
+        aggregate_size: 0,
+        is_dir: true,
+        score: None,
+        score_rule: None,
+        score_reason: None,
+        modified_unix: 0,
+    });
+
+    let known: std::collections::HashSet<NodeId> = nodes.keys().copied().collect();
+    for node in nodes.values_mut() {
+        if node.id == ROOT_RECORD {
+            node.parent = None;
+            continue;
+        }
+        match node.parent {
+            // Gemini review B7 — self-cycle (bozuk MFT) root'a bağlanır,
+            // düğüm erişilebilir kalır.
+            Some(p) if p == node.id => {
+                node.parent = Some(ROOT_RECORD);
+            }
+            Some(p) if !known.contains(&p) => {
+                node.parent = Some(ROOT_RECORD);
+            }
+            _ => {}
+        }
+    }
+
+    for n in nodes.values() {
+        if let Some(p) = n.parent {
+            children.entry(p).or_default().push(n.id);
+        }
+    }
+
+    let mut total_bytes = 0u64;
+    let mut file_count = 0u64;
+    let mut dir_count = 0u64;
+    for e in raw {
+        if e.is_dir {
+            dir_count += 1;
+        } else {
+            file_count += 1;
+            total_bytes = total_bytes.saturating_add(e.data_size);
+        }
+    }
+
+    // Walk-up aggregate — döngü korumalı (aşağıdaki ile aynı mantık).
+    let snapshot: Vec<(NodeId, Option<NodeId>, u64)> = nodes
+        .iter()
+        .map(|(&id, n)| (id, n.parent, n.data_size))
+        .collect();
+    for (id, parent, size) in snapshot {
+        if size == 0 {
+            continue;
+        }
+        let mut visited: std::collections::HashSet<NodeId> =
+            std::collections::HashSet::with_capacity(8);
+        visited.insert(id);
+        let mut cur = parent;
+        let mut hops = 0u32;
+        while let Some(p) = cur {
+            if hops >= MAX_PARENT_HOPS || !visited.insert(p) {
+                break;
+            }
+            match nodes.get_mut(&p) {
+                Some(pn) => {
+                    pn.aggregate_size = pn.aggregate_size.saturating_add(size);
+                    cur = pn.parent;
+                }
+                None => break,
+            }
+            hops += 1;
+        }
+    }
+
+    let build_elapsed_ms = start.elapsed().as_millis() as u64;
+    let built_at_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    ScanTree {
+        volume_id: String::new(),
+        root_id: ROOT_RECORD,
+        nodes,
+        children,
+        total_bytes,
+        file_count,
+        dir_count,
+        built_at_unix,
+        build_elapsed_ms,
+    }
+}
+
 /// Raw MFT entry'lerinden tam ScanTree kurar:
 /// 1. Düğümleri yerleştirir, ROOT_RECORD sentetik garanti.
 /// 2. Çocuk listelerini oluşturur (orphan'lar root altına).
@@ -191,15 +320,13 @@ pub fn build_tree_with_user_rules(
     let mut nodes: HashMap<NodeId, Node> = HashMap::with_capacity(count + 1);
     let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::with_capacity(count / 8 + 1);
 
-    // 1. Düğüm yerleştirme — self-cycle (record == parent) None.
+    // 1. Düğüm yerleştirme — self-cycle (record == parent) root'a bağlanır
+    //    (Gemini review B7: eskiden parent=None yapıp düğümü görünmez
+    //    bırakıyorduk; artık orphan muamelesi görüp root altına rewiring).
     //    Aynı zamanda Bölüm 6.4 (user rules öncelikli) + Bölüm 6.2 (built-in)
     //    safe-to-delete kuralları uygulanır.
     for e in &raw {
-        let parent_opt = if e.parent_record_no == e.record_no {
-            None
-        } else {
-            Some(e.parent_record_no)
-        };
+        let parent_opt = Some(e.parent_record_no);
 
         let (score, score_rule, score_reason) =
             if let Some(ur) = crate::safe_delete::match_user_rule(user_rules, &e.name, e.is_dir) {
@@ -257,6 +384,11 @@ pub fn build_tree_with_user_rules(
             continue;
         }
         match node.parent {
+            // Gemini review B7 — self-cycle (bozuk MFT) root'a bağlanır,
+            // düğüm erişilebilir kalır.
+            Some(p) if p == node.id => {
+                node.parent = Some(ROOT_RECORD);
+            }
             Some(p) if !known.contains(&p) => {
                 node.parent = Some(ROOT_RECORD);
             }
@@ -287,6 +419,10 @@ pub fn build_tree_with_user_rules(
     // 5. Walk-up aggregate. İki aşama (borrow checker):
     //    a) Snapshot (id, parent, data_size)
     //    b) Walk-up + mut update
+    // Gemini review B6 — karşılıklı parent döngülerinde (A↔B) eskiden aynı
+    //    boyut ~128 kez ekleniyordu (yalnız self-cycle korunuyordu). Artık
+    //    her yürüyüş kendi visited set'ini tutar — bir ancestor en fazla bir
+    //    kez eklenir.
     let snapshot: Vec<(NodeId, Option<NodeId>, u64)> = nodes
         .iter()
         .map(|(&id, n)| (id, n.parent, n.data_size))
@@ -296,10 +432,13 @@ pub fn build_tree_with_user_rules(
         if size == 0 {
             continue;
         }
+        let mut visited: std::collections::HashSet<NodeId> =
+            std::collections::HashSet::with_capacity(8);
+        visited.insert(id);
         let mut cur = parent;
         let mut hops = 0u32;
         while let Some(p) = cur {
-            if hops >= MAX_PARENT_HOPS || p == id {
+            if hops >= MAX_PARENT_HOPS || !visited.insert(p) {
                 break;
             }
             match nodes.get_mut(&p) {
@@ -415,7 +554,9 @@ pub fn window_query(
             children.sort_by_key(|n| std::cmp::Reverse(n.aggregate_size));
         }
         SortKey::NameAsc => {
-            children.sort_by_key(|a| a.name.to_lowercase());
+            // Gemini review B15 — karşıştırma başına String alloc yerine
+            // decorate-sort-undecorate (bir kez küçük harfe çevir).
+            children.sort_by_cached_key(|a| a.name.to_lowercase());
         }
         SortKey::DataSizeDesc => {
             children.sort_by_key(|n| std::cmp::Reverse(n.data_size));
@@ -533,8 +674,12 @@ pub fn scan_to_tree_with_user_rules(
 /// volumelerde `ntfs` crate boot sector parse'ı veya MFT record okuması
 /// fail eder; pre_flight FS bilgisini önceden kontrol edip MFT denemesini
 /// atlayarak ~3-5 sn boş wait + log gürültüsü tasarrufu yapılır. UNC
-/// (`\\server\share`) için pre_flight reddeder → otomatik false döner.
+/// (`\\server\share`) girdisi burada reddedilir — UNC tarama için `scan_unc_path` komutu ayrılmıştır (Gemini review B2).
 fn is_mft_compatible(drive: &str) -> bool {
+    // Gemini review B2 — UNC/radikal girdi asla sürücü harfine dönüşmesin.
+    if crate::volume::parse_drive_letter(drive).is_none() {
+        return false;
+    }
     match crate::volume::pre_flight_check(drive) {
         Ok(info) => {
             let fs = info.file_system.to_uppercase();
@@ -556,6 +701,15 @@ pub fn scan_to_tree_with_progress(
     progress_cb: Option<ProgressCb<'_>>,
     cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> crate::error::Result<(ScanSummary, ScanTree)> {
+    // Gemini review B2 — scan_full IPC sınırı: UNC/path girdi burada net
+    // hata verir (yanlış volume’ün MFT’sini tarayıp doğru sanma riski).
+    // UNC tarama için `scan_unc_path` komutu vardır.
+    crate::volume::parse_drive_letter(drive).ok_or_else(|| {
+        crate::error::Error::Scan(format!(
+            "Geçersiz sürücü parametresi: '{}' (UNC/path desteklenmez — UNC tarama komutunu kullanın)",
+            drive
+        ))
+    })?;
     let mft_capable = is_mft_compatible(drive);
     if is_elevated() && mft_capable {
         debug!("elevated process + NTFS — MFT yolu denenecek");
@@ -678,11 +832,32 @@ mod tests {
 
     #[test]
     fn cycle_protection() {
-        // self-referencing entry
+        // self-referencing entry — Gemini review B7: root'a rewiring edilir,
+        // düğüm erişilebilir kalır (eskiden parent=None ile görünmezdi).
         let raw = vec![r(300, 300, "weird", 64, false)];
         let tree = build_tree("vol".into(), raw);
         assert_eq!(tree.total_bytes, 64);
-        assert_eq!(tree.nodes.get(&300).unwrap().parent, None);
+        assert_eq!(tree.nodes.get(&300).unwrap().parent, Some(ROOT_RECORD));
+        let root_children = tree.children.get(&ROOT_RECORD).unwrap();
+        assert!(root_children.contains(&300), "self-cycle root'a bağlanmalı");
+        // Walk-up döngüye girmez — root aggregate tam 64.
+        assert_eq!(tree.nodes.get(&ROOT_RECORD).unwrap().aggregate_size, 64);
+    }
+
+    #[test]
+    fn mutual_parent_cycle_does_not_inflate_aggregates() {
+        // Gemini review B6 — A↔B karşılıklı parent döngüsü: her ancestor
+        // en fazla bir kez sayılmalı (eski kod ~128 kez ekliyordu).
+        let raw = vec![
+            r(400, 401, "a", 100, false),
+            r(401, 400, "b", 0, true),
+            r(5, 5, "root", 0, true),
+        ];
+        let tree = build_tree("vol".into(), raw);
+        let a = tree.nodes.get(&400).unwrap().aggregate_size;
+        let b = tree.nodes.get(&401).unwrap().aggregate_size;
+        assert!(a <= 100, "a aggregate şişmemeli: {}", a);
+        assert!(b <= 100, "b aggregate şişmemeli: {}", b);
     }
 
     #[test]

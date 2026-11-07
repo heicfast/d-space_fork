@@ -94,7 +94,18 @@
     "tierCross": "Across disks",
     "tierNormal": "Same disk",
     "tierCrossTitle": "Across-disk move — integrity-checked and atomic",
-    "tierNormalTitle": "Same-disk instant rename"
+    "tierNormalTitle": "Same-disk instant rename",
+    "expiredTitle": "Expired items (Section 12.2.1)",
+    "expiredIntro": "{count} items in the staging queue have passed their 24-hour undo window. Per Section 22.6 they were NOT deleted automatically — they live on until you approve. You can permanently delete all of them at once or review one by one.",
+    "expiredAgo": "expired {hours} h ago",
+    "expiredMore": "and {count} more…",
+    "expiredDeleteAll": "🔥 Permanently delete all ({count})",
+    "expiredLastReport": "last report: {deleted} deleted, {bytes}, {ms} ms",
+    "expiredConfirmTitle": "⚠ {count} items will be permanently deleted",
+    "expiredConfirmHelp": "Section 12.2.3 — rate limit 20 files/s, each one is recorded in the forensic ledger. This cannot be undone. Confirm to proceed.",
+    "expiredConfirmGo": "Permanently delete all",
+    "expiredConfirmBusy": "Deleting…",
+    "abortedThreshold": "⚠ {count} items exceeded the threshold — automatic cleanup was aborted. Review the list and confirm."
   },
   "snapshot": {
     "title": "Time Machine",
@@ -102,7 +113,16 @@
     "snap": "📸 Capture snapshot",
     "snapBusy": "Capturing…",
     "empty": "No snapshots yet. After a scan, hit 📸 to capture — daily growth/shrink delta comes from here.",
-    "compareBtn": "Compare two snapshots"
+    "compareBtn": "Compare two snapshots",
+    "entriesUnit": "entries",
+    "compareHint": "Select two snapshots to compare (old → new).",
+    "comparePickOneMore": "Pick one more.",
+    "deltaLoading": "Computing delta…",
+    "changedPaths": "changed paths",
+    "added": "🆕 Added",
+    "removed": "🗑 Removed",
+    "grew": "📈 Grew",
+    "shrunk": "📉 Shrunk"
   },
   "duplicate": {
     "title": "Duplicate Files",
@@ -120,7 +140,12 @@
     "lockedHint": "locked files",
     "hashErrorsTitle": "These files were held open by another process. With VSS build feature enabled, this error drops.",
     "truncated": "{shown} / {total}",
-    "truncatedTitle": "Found {total} groups total; showing top {shown} for performance. Tighten the filter to see all."
+    "truncatedTitle": "Found {total} groups total; showing top {shown} for performance. Tighten the filter to see all.",
+    "sizeOnly": "Size only (skip hash)",
+    "scanned": "Scanned",
+    "filesUnit": "files",
+    "candidates": "candidates",
+    "duration": "Duration"
   },
   "detail": {
     "title": "Selected Item",
@@ -133,7 +158,8 @@
     "rule": "Rule",
     "lockProbe": "🔒 Probe lock state",
     "cloudProbe": "☁ Probe cloud placeholder",
-    "sendStaging": "📥 Delete (recoverable for 24h)"
+    "sendStaging": "📥 Delete (recoverable for 24h)",
+    "indexNote": "USN index search result — full path resolved from the backend."
   },
   "scoreTier": {
     "none": "—",
@@ -204,11 +230,11 @@
   "shortcuts": {
     "title": "⌨ Keyboard Shortcuts (Section 15.2)",
     "rescan": "Rescan",
-    "viewModes": "View mode — Sunburst · Treemap · Bubble · Timeline",
+    "viewModes": "View mode — Sunburst · Treemap · Bubble · Timeline · 3D",
     "navUp": "One level up (drilldown breadcrumb)",
     "stageDelete": "Send the first file in viewport to staging",
     "undo": "Undo last staging",
-    "search": "Search (placeholder, v0.2)",
+    "search": "Quick search (USN index)",
     "escape": "Close open dialog",
     "helpToggle": "Toggle this help",
     "hint": "Shortcuts are disabled while an input/textarea has focus — normal typing is not blocked.",
@@ -280,5 +306,43 @@
     "errorVerify": "Signature verification failed — package corrupted or pubkey mismatch",
     "errorNetwork": "Could not reach server: {msg}",
     "errorUnknown": "Unexpected error: {msg}"
+  },
+  "cloud": {
+    "localOnly": "Local (not in cloud)",
+    "onlineOnly": "☁ Online-only — opening downloads it",
+    "alwaysAvailable": "☁ Always available (cloud copy exists)",
+    "otherReparse": "Reparse point (symlink/junction/dedup)",
+    "notFound": "Path not found",
+    "win32Error": "Win32 error ({code})"
+  },
+  "volumeStatus": {
+    "Ready": "Ready",
+    "BitLockerLocked": "BitLocker locked",
+    "BitLockerSuspended": "BitLocker suspended",
+    "Encrypted": "Encrypted ({method})",
+    "NotMounted": "Not mounted",
+    "AccessDenied": "Access denied",
+    "NotFormatted": "Not formatted",
+    "UnsupportedDriveType": "Unsupported drive type ({type})"
+  },
+  "driveWarning": {
+    "refs": "ReFS drive: direct MFT reading is not supported — Standard Mode will be used (Section 5.5).",
+    "unknownFs": "Unknown file system ({fs}) — Standard Mode will be attempted.",
+    "remote": "Network drive: high bandwidth and privilege cost (Section 33.3). Scanning may be slow.",
+    "removable": "Removable media: remember to safely eject after the scan (Section 33.4).",
+    "cdrom": "Optical media: read-only, staging/deletion is not possible."
+  },
+  "userRules": {
+    "title": "User Rules (Section 6.4)",
+    "intro": "Evaluated BEFORE the built-in rules. Assign a score to any folder/extension with your own pattern; takes effect after the next scan.",
+    "patternPlaceholder": "Pattern (e.g. node_modules or .heic)",
+    "typeName": "Name (exact, case-insensitive)",
+    "typeExtension": "Extension (.ext)",
+    "explanationPlaceholder": "Explanation (optional)",
+    "add": "+ Add",
+    "empty": "No user rules yet.",
+    "disable": "Disable",
+    "enable": "Enable",
+    "delete": "Delete rule"
   }
 }

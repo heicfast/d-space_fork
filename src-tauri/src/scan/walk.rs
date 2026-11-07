@@ -74,12 +74,26 @@ pub struct ScanProgress {
 pub type ProgressCb<'a> = &'a (dyn Fn(&ScanProgress) + Send + Sync);
 
 const MFT_PROGRESS_INTERVAL: u64 = 5000;
-/// Sprint 3.7 — canlı sunburst snapshot frekansı (entries sayısına göre).
+/// Sprint 3.7 — canlı sunburst snapshot başlangıç aralığı. Gemini review
+/// (partial-tree O(N²)): sabit 10k aralıkla full-rebuild, büyük volumelerde
+/// karesel maliyet üretiyordu. Artık geometrik büyüme (×4) kullanılır —
+/// 10k, 40k, 160k, 640k, 2.5M, sonra her 2.5M'de bir. Toplam rebuild
+/// sayısı ~O(log N), her biri O(N) → maliyet ~O(N log N) sınırlı kalır.
 pub(crate) const PARTIAL_TREE_INTERVAL: u64 = 10_000;
+/// Geometrik büyüme katsayısı (aralık × 4).
+const PARTIAL_TREE_GROWTH: u64 = 4;
+/// Geometrik aralığın tavanı — çok büyük taramalarda bile makul sıklık.
+const PARTIAL_TREE_MAX_INTERVAL: u64 = 2_500_000;
 /// Sprint 3.7 — canlı sunburst max derinlik (root + 2 seviye).
 pub(crate) const PARTIAL_TREE_MAX_DEPTH: usize = 2;
 /// Sprint 3.7 — canlı sunburst top-N düğüm (root + 199).
 pub(crate) const PARTIAL_TREE_TOP_N: usize = 200;
+
+/// Bir sonraki partial-tree snapshot eşiğini geometrik olarak ilerletir.
+#[inline]
+pub(crate) fn advance_partial_threshold(current: u64) -> u64 {
+    (current.saturating_mul(PARTIAL_TREE_GROWTH)).min(PARTIAL_TREE_MAX_INTERVAL)
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MftWalkStats {
@@ -96,13 +110,16 @@ pub struct MftWalkStats {
     pub elapsed_ms: u64,
 }
 
-/// "C", "c:", "C:\Users" → r"\\.\C:"
+/// "C", "c:", "C:\Users" → r"\\.\C:" — katı doğrulama (UNC reddedilir).
 fn normalize_volume_path(drive: &str) -> Result<String> {
-    let letter = drive
-        .chars()
-        .find(|c| c.is_ascii_alphabetic())
-        .ok_or_else(|| Error::Scan(format!("Geçersiz sürücü: '{}'", drive)))?
-        .to_ascii_uppercase();
+    let letter = crate::volume::parse_drive_letter(drive)
+        .map(|c| c.to_ascii_uppercase())
+        .ok_or_else(|| {
+            Error::Scan(format!(
+                "Geçersiz sürücü parametresi: '{}' (MFT yolu UNC kabul etmez)",
+                drive
+            ))
+        })?;
     Ok(format!(r"\\.\{}:", letter))
 }
 
@@ -187,18 +204,20 @@ pub fn collect_mft_entries(drive: &str) -> Result<MftEntries> {
     collect_mft_entries_with_progress(drive, None, None)
 }
 
-/// Sprint 3.7 — canlı sunburst için raw entries'den hafif partial view inşa eder.
-/// `build_tree` çağırır (user rules yok = hızlı), sonra `build_partial_view`
-/// ile root + max_depth seviye + top_n döner. Walk içinde her 10k entry'de
-/// çağrılır; full tree build maliyeti büyür ama 10k aralığında kabul edilebilir.
+/// Sprint 3.7 — canlı sunburst için raw entries'den hafif partial view inşa
+/// eder. Gemini review (partial-tree perf): eskiden `entries.to_vec()` + tam
+/// `build_tree` (kural eşleştirme dahil) her snapshot'ta O(N) ekstra kopya +
+/// 63 kural × N düğüm maliyeti üretiyordu. Artık:
+///   * klon YOK — `build_tree_light` borrow ile çalışır,
+///   * kural skorlaması YOK — partial view yalnız boyut/isim taşır.
+///
+/// Geometrik aralık (yukarıda) ile birlikte toplam maliyet ~O(N log N).
 pub(crate) fn build_partial_from_raw(
     entries: &[RawMftEntry],
     max_depth: usize,
     top_n: usize,
 ) -> Vec<crate::scan::tree::PartialNode> {
-    // Sığ klon — RawMftEntry küçük struct, alloc maliyeti düşük.
-    let snapshot = entries.to_vec();
-    let tree = crate::scan::tree::build_tree(String::new(), snapshot);
+    let tree = crate::scan::tree::build_tree_light(entries);
     crate::scan::tree::build_partial_view(&tree, max_depth, top_n)
 }
 
@@ -226,9 +245,19 @@ pub fn collect_mft_entries_with_progress(
 
     let estimated = estimate_record_count(&ntfs, &mut handle)?;
     let cap = estimated.min(MAX_RECORD_HARD_LIMIT);
+    if estimated > MAX_RECORD_HARD_LIMIT {
+        tracing::warn!(
+            estimated,
+            hard_limit = MAX_RECORD_HARD_LIMIT,
+            "MFT record tahmini hard limit'i aştı — tarama 50M kayıtta kesildi"
+        );
+    }
     info!(estimated, cap, "MFT entry koleksiyonu kapasitesi");
 
-    let mut entries: Vec<RawMftEntry> = Vec::with_capacity((cap as usize / 2).max(1024));
+    // Gemini review B12 — dev upfront rezervasyon (~GB'lar) yerine makul
+    // başlangıç kapasitesi; Vec zaten ihtiyaç oldukça büyür.
+    let mut entries: Vec<RawMftEntry> =
+        Vec::with_capacity(((cap as usize) / 2).clamp(1024, 1_000_000));
     let mut skipped = 0u64;
     let mut last_name = String::new();
     // Sprint 3.7 — her PARTIAL_TREE_INTERVAL entry'de bir partial tree
@@ -252,7 +281,7 @@ pub fn collect_mft_entries_with_progress(
         if let Some(cb) = progress_cb {
             if (record_no - 16) % MFT_PROGRESS_INTERVAL == 0 {
                 let partial = if entries.len() as u64 >= next_partial_at {
-                    next_partial_at = next_partial_at.saturating_add(PARTIAL_TREE_INTERVAL);
+                    next_partial_at = advance_partial_threshold(next_partial_at);
                     Some(build_partial_from_raw(
                         &entries,
                         PARTIAL_TREE_MAX_DEPTH,

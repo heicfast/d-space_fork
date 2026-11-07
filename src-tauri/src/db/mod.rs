@@ -33,7 +33,7 @@ pub fn db_path() -> Result<PathBuf> {
     Ok(base.join("DSpace").join("db").join(DB_FILENAME))
 }
 
-fn migrations() -> Migrations<'static> {
+pub(crate) fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(include_str!("migrations/0001_initial.sql")),
         M::up(include_str!("migrations/0002_user_rules.sql")),
@@ -70,7 +70,7 @@ pub fn open_db() -> Result<Connection> {
     Ok(conn)
 }
 
-fn apply_pragmas(conn: &Connection) -> Result<()> {
+pub(crate) fn apply_pragmas(conn: &Connection) -> Result<()> {
     let pragmas: [(&str, &str); 4] = [
         ("journal_mode", "WAL"),
         ("synchronous", "NORMAL"),
@@ -160,16 +160,18 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// Tauri yönetilen state: tek `Connection`'ı `Mutex` ile sarar.
-/// Tek-kullanıcılı desktop için connection pool gerekmez.
+/// Tauri yönetilen state: tek `Connection`'ı `Arc<Mutex>` ile sarar.
+/// Tek-kullanıcılı desktop için connection pool gerekmez. `Arc` sarması
+/// (Gemini review: async komutlar) `spawn_blocking` içine clonlanabilir —
+/// uzun DB işleri artık main thread'i bloklamaz.
 pub struct DbState {
-    pub conn: Mutex<Connection>,
+    pub conn: std::sync::Arc<Mutex<Connection>>,
 }
 
 impl DbState {
     pub fn new(conn: Connection) -> Self {
         Self {
-            conn: Mutex::new(conn),
+            conn: std::sync::Arc::new(Mutex::new(conn)),
         }
     }
 }

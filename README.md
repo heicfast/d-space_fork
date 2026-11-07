@@ -10,12 +10,17 @@
 
 🌐 **TR · EN** — Bu README iki dillidir / This README is bilingual (English collapsibles below each section)
 
+> ℹ️ **Bu depo / This repository:** `heicfast/d-space_fork` — upstream
+> [AmrasElessar/d-space](https://github.com/AmrasElessar/d-space)'in sürüm kanalı
+> ayrımı. Upstream katkıları için orijinal depoyu kullanın.
+> *Release channel fork of the upstream project; use the original repo for upstream contributions.*
+
 </div>
 
 <div align="center">
 
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.en.html)
-![Status](https://img.shields.io/badge/status-alpha-orange)
+![Status](https://img.shields.io/badge/status-beta-orange)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20%C2%B7%20x64-0078D6)
 ![Rust](https://img.shields.io/badge/Rust-1.80%2B-CE412B?logo=rust)
 ![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri)
@@ -62,10 +67,10 @@ Built on **Tauri v2** + **Rust 1.80+** + **Vue 3** + **SQLite (WAL)** under the 
 > Faz 1 implementasyonu devam ediyor. Spec v1.4 dondurulmuş (37 bölüm); kod sırasında çıkan keşifler Bölüm 28 Discovery Log'a düşer. Aşağıda bugüne kadarki çıkış noktaları.
 > *Phase 1 in progress. Spec v1.4 is frozen (37 sections); discoveries during coding land in Section 28 Discovery Log. Highlights so far below.*
 
-- 📦 **13 commit · 36/36 birim test geçiyor · 5/5 pillar canlı**
+- 📦 **v0.3.0-beta · 159 Rust (+9 VSS-gated) + 34 frontend + 6 e2e test geçiyor · 5/5 pillar canlı**
 - ⚡ **MFT tarama motoru** — `ntfs` crate üzerine MFT probe + full walk + FindFirstFile fallback (3 katmanlı yetki stratejisi, UAC ilk açılışta sorulmuyor)
 - 🍩 **Sunburst donut** — hand-rolled SVG (d3 yok), drilldown + breadcrumb, Vue 3 Composition API
-- 🧠 **33 kuralı kapsayan zeka katmanı** — 4 renk tier (kırmızı/sarı/yeşil/mavi), 0–100 güvenli-silme skoru
+- 🧠 **72 kuralı kapsayan zeka katmanı** — 4 renk tier (kırmızı/sarı/yeşil/mavi), 0–100 güvenli-silme skoru
 - 🕒 **Zaman boyutu** — günlük snapshot capture + delta (added/removed/grew/shrunk top 10)
 - 🛟 **Cross-volume two-phase commit** — `.dspace_tmp` + WAL + Blake3 hash verify + atomik rename, başlangıçta otomatik crash recovery
 - 🪟 **Lazy viewport query** — Vue ağacı tam tutmaz; ~200 düğümlük pencere ister, Rust `Arc<ScanTree>` tek sahibi
@@ -75,10 +80,10 @@ Built on **Tauri v2** + **Rust 1.80+** + **Vue 3** + **SQLite (WAL)** under the 
 <details>
 <summary>🇬🇧 What's done (English)</summary>
 
-- 📦 **13 commits · 36/36 unit tests passing · 5/5 pillars live**
+- 📦 **v0.3.0-beta · 159 Rust (+9 VSS-gated) + 34 frontend + 6 e2e tests passing · 5/5 pillars live**
 - ⚡ **MFT scan engine** — MFT probe + full walk + FindFirstFile fallback on the `ntfs` crate (three-tier privilege strategy; no UAC on first launch)
 - 🍩 **Sunburst donut** — hand-rolled SVG (no d3), drilldown + breadcrumb, Vue 3 Composition API
-- 🧠 **33-rule intelligence layer** — 4-color tier (red/yellow/green/blue), 0–100 safe-to-delete score
+- 🧠 **72-rule intelligence layer** — 4-color tier (red/yellow/green/blue), 0–100 safe-to-delete score
 - 🕒 **Time dimension** — daily snapshot capture + delta (added/removed/grew/shrunk top 10)
 - 🛟 **Cross-volume two-phase commit** — `.dspace_tmp` + WAL + Blake3 hash verify + atomic rename, automatic crash recovery on startup
 - 🪟 **Lazy viewport query** — Vue never owns the full tree; requests ~200-node windows; Rust holds the single `Arc<ScanTree>`
@@ -123,8 +128,9 @@ pnpm tauri dev
 cd src-tauri
 cargo build
 
-# Test
-cargo test --lib            # 36 birim test geçer / 36 unit tests pass
+# Test (Windows)
+cargo test --lib            # 159 birim test geçer / unit tests pass
+cargo test --lib --features vss  # +9 VSS-gated test
 pnpm build                  # vue-tsc + vite build
 ```
 
@@ -134,7 +140,7 @@ pnpm build                  # vue-tsc + vite build
 2. Bir sürücü seç (`C:`, `D:` …) → MFT probe denenir; başarısızsa otomatik FindFirstFile fallback'e düşer.
 3. **Sunburst donut** üzerinden drilldown yap → breadcrumb ile geri dön.
 4. **Silmek istediğin** bir dosyayı seç → staging'e taşınır, 24 saat boyunca **Undo** ile geri alınabilir.
-5. **`cargo test --lib`** → 36 birim test, pillar başına regression koruması.
+5. **`cargo test --lib`** → 159 birim test, pillar başına regression koruması.
 
 <details>
 <summary>🇬🇧 Quick Start (English)</summary>
@@ -155,7 +161,7 @@ pnpm build
 2. Pick a volume (`C:`, `D:`, …) → MFT probe is attempted; on failure it falls back to FindFirstFile automatically.
 3. Drilldown through the **sunburst donut** → use the breadcrumb to navigate back.
 4. Select a file to **delete** → it is moved to staging and can be **undone** for 24 hours.
-5. Run `cargo test --lib` → 36 unit tests, per-pillar regression coverage.
+5. Run `cargo test --lib` → 159 unit tests, per-pillar regression coverage.
 
 </details>
 
@@ -184,7 +190,7 @@ pnpm build
 |---|--------|----------------|
 | 1 | **Hız / Speed** — MFT motoru / engine | ✅ MFT probe + full walk + FindFirstFile fallback |
 | 2 | **Görsel zarafet / Visual elegance** — sunburst/treemap/bubble/timeline | ✅ Sunburst donut + drilldown + breadcrumb |
-| 3 | **Zeka katmanı / Intelligence layer** — 50+ kural / rules + ML tier | ✅ 33 kural / rules, 4 renk tier / 4-color tier (kırmızı/sarı/yeşil/mavi); ML v2 |
+| 3 | **Zeka katmanı / Intelligence layer** — 50+ kural / rules + ML tier | ✅ 72 kural / rules, 4 renk tier / 4-color tier (kırmızı/sarı/yeşil/mavi); ML v2 |
 | 4 | **Zaman boyutu / Time dimension** — günlük snapshot + delta / daily snapshot + delta | ✅ Capture + delta (added/removed/grew/shrunk top 10) |
 | 5 | **Geri kazanım garantisi / Recovery guarantee** — staging + undo | ✅ Same-volume + cross-volume two-phase commit + WAL |
 
@@ -210,13 +216,13 @@ pnpm build
 ### 🍩 Görsel Katmanı / Visual Layer
 
 - **Sunburst donut** — hand-rolled SVG (d3 yok / no d3), drilldown + breadcrumb
-- **Treemap / bubble / timeline** — yol haritasında (sunburst canlı / live)
+- **Treemap / bubble / timeline / 3D sunburst** — hepsi canlı / all live
 - **Tema-uyumlu / theme-aware** rendering
 - Vue 3 Composition API + TypeScript + Vite
 
 ### 🧠 Zeka Katmanı / Intelligence Layer
 
-- **33 kural / rules** Faz 1'de canlı (hedef: 50+)
+- **72 kural / rules** canlı (hedef: 50+ aşıldı)
 - **4 renk tier / 4-color tier**: 🔴 kırmızı (silinebilir / deletable) · 🟡 sarı (dikkat / caution) · 🟢 yeşil (güvenli / safe-keep) · 🔵 mavi (sistem / system)
 - **0–100 güvenli-silme skoru / safe-to-delete score** her dosyaya
 - **ML v2** — pattern öğrenme + kullanıcı davranışından kalibrasyon (v2'de)
@@ -273,7 +279,7 @@ Mimari kararlar ve detaylı tasarım için: **`D-Space-Mimari-v1.4.docx`** (repo
 
 - **🏠 Tamamen lokal / Fully local** — Hiçbir tarama verisi internete çıkmaz. D-Space hiçbir telemetri, analytics veya uzak sunucu kullanmaz.
 - **🔒 KVKK / GDPR uyumlu / compliant** — Hostname ve IP varsayılan **maskelenir / masked** (raporlama ve paylaşımda). Kullanıcı tek tıkla açar/kapar.
-- **🗄️ Veriler yerel / Local data** — Tüm tarama sonuçları, kurallar ve staging içeriği **kullanıcı profili** altında SQLite veritabanında tutulur (`%AppData%\D-Space\`).
+- **🗄️ Veriler yerel / Local data** — Tüm tarama sonuçları, kurallar ve staging içeriği **kullanıcı profili** altında SQLite veritabanında tutulur (`%LOCALAPPDATA%\DSpace\`).
 - **🔬 Salt-okunur tarama / Read-only scanning** — MFT erişimi salt-okunur; tarama hiçbir dosyayı değiştirmez.
 - **🛟 Yıkıcı işlem yok / No destructive ops** — Silme yok, sadece staging. **Geri al / Undo** her zaman 24 saat boyunca açık.
 - **🔐 Atomik garantiler / Atomic guarantees** — Cross-volume MOVE'larda Blake3 hash verify + WAL; crash sonrası otomatik recovery.
@@ -284,7 +290,7 @@ Mimari kararlar ve detaylı tasarım için: **`D-Space-Mimari-v1.4.docx`** (repo
 
 - **🏠 Fully local** — No scan data leaves the machine. D-Space uses no telemetry, no analytics, no remote servers.
 - **🔒 GDPR / KVKK compliant** — Hostname and IP are **masked by default** in reports and shared output; the user toggles them on/off with one click.
-- **🗄️ Local data** — All scan results, rules, and staging contents are kept in a SQLite database under the **user profile** (`%AppData%\D-Space\`).
+- **🗄️ Local data** — All scan results, rules, and staging contents are kept in a SQLite database under the **user profile** (`%LOCALAPPDATA%\DSpace\`).
 - **🔬 Read-only scanning** — MFT access is read-only; scans never modify a single file.
 - **🛟 No destructive ops** — No deletion, only staging. **Undo** is always available for 24 hours.
 - **🔐 Atomic guarantees** — Cross-volume MOVEs use Blake3 hash verify + WAL; automatic recovery after crash.
@@ -367,7 +373,7 @@ D-Space is open source (GPL-3.0+) and actively developed. Sponsorships translate
 GitHub'da **Star** projeyi başkalarına da görünür kılar.
 Make the project visible to others.
 
-[⭐ Star D-Space](https://github.com/AmrasElessar/d-space)
+[⭐ Star D-Space](https://github.com/heicfast/d-space_fork)
 
 </td>
 <td align="center" width="33%">
@@ -387,7 +393,7 @@ Active development, **5 pillars live**, more pillars and D Brand apps in queue.
 Faz 1 alpha — bug raporu, performans regression veya feature fikri gönder.
 Phase 1 alpha — file a bug, a perf regression, or a feature idea.
 
-[🧪 Issues](https://github.com/AmrasElessar/d-space/issues)
+[🧪 Issues](https://github.com/heicfast/d-space_fork/issues)
 
 </td>
 </tr>

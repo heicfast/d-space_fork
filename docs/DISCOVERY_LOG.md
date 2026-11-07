@@ -199,3 +199,27 @@ i18n key'leri `index.*` altında (6 string × tr/en).
 - `src-tauri/src/db/migrations/0003_usn_index.sql`
 - `src/components/IndexSearchBar.vue` + test
 - Bu sprint commit'i — worktree `agent-a1d7ae08a791e3114`
+
+## #006 — v0.3.0 kod inceleme dalgası: ~90 bulgu + kalan v0.3 kapsamı
+Tarih: 2026-11-07 · İlgili bölüm: tümü · Tip: gotcha (toplu)
+
+**Bulgu:** Beş bağımsız satır-satır inceleme (scan/volume/locked_file,
+data katmanı, komut katmanı, frontend, CI/release) toplam ~90 bulgu üretti.
+En kritikleri: (1) `bundle.createUpdaterArtifacts` eksikti — updater `.sig`
+hiç üretilmiyordu; (2) sabit `prerelease: true` `releases/latest` 404;
+(3) `index_build` her açılışta full MFT enumerate + global DB mutex → UI
+dakikalarca donma; (4) UNC girdiler `chars().find(alphabetic)` ile sessizce
+sürücü harfine dönüşüyordu; (5) cross-volume undo `fs::rename` ile hep
+başarısız; (6) `nodeFullPath` drillInto sonrası çifte klasör üretiyordu;
+(7) e2e mock `onboarding_seen` okuyordu, uygulama `onboarding_done` — 4/6
+senaryo kırıktı.
+
+**Etki:** v0.2.0-beta'da auto-updater fiilen çalışmıyordu; açılış donması
+ve iptal yarışması gibi üretim riskleri vardı.
+
+**Karar:** Tüm bulgular giderildi (CHANGELOG v0.3.0-beta listesi). USN
+watcher v0.3.1 planından öne alınıp üretime bağlandı (`sync_volume`
+incremental çekirdeği + `UsnWatchers` registry). Updater Ed25519 anahtar
+çifti fork kanalı için yeniden üretildi; private key GitHub Secrets'ta.
+
+**Referans:** `heicfast/d-space_fork` v0.3.0-beta tag'i.

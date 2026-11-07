@@ -20,7 +20,7 @@ pub mod walk;
 
 pub use cloud::{probe_cloud_state, CloudPlaceholderState, CloudProbe};
 
-pub use find_first::scan_find_first;
+pub use find_first::{scan_find_first, scan_find_first_with_progress};
 pub use mft::{probe_ntfs, MftProbe};
 pub use privilege::is_elevated;
 pub use tree::{

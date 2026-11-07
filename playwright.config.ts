@@ -47,16 +47,21 @@ export default defineConfig({
       name: "web",
       use: { ...devices["Desktop Chrome"] },
     },
-    {
-      name: "webdriver",
-      // tauri-driver yalnız Windows; Tauri build'i `target/debug` altında
-      // olmalı. Bu proje şimdilik test seçimine `--project=webdriver` ile
-      // dahil edilir; varsayılan koşuda atlanır.
-      testIgnore: ["**/web-only/**"],
-      use: {
-        baseURL: `http://${HOST}:4444`,
-      },
-    },
+    // Gemini review W6 — webdriver projesi varsılan koşuda hiçbir spec'i
+    // eleyemiyordu (testIgnore hiçbir şeye eşleşmiyordu) ve var-olmayan
+    // tauri-driver 4444'e bağlanıp tüm spec'leri düşürüyordu. Artık
+    // AÇIKÇA opt-in: yalnız `D_SPACE_E2E_WEBDRIVER=1` ile liste'ye girer.
+    ...(process.env.D_SPACE_E2E_WEBDRIVER === "1"
+      ? [
+          {
+            name: "webdriver",
+            testIgnore: ["**/*.spec.ts"],
+            use: {
+              baseURL: `http://${HOST}:4444`,
+            },
+          },
+        ]
+      : []),
   ],
 
   webServer: process.env.D_SPACE_E2E_SKIP_SERVER

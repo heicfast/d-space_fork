@@ -102,7 +102,7 @@ bunu gerçek pubkey ile değiştirmeli.
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/AmrasElessar/d-space/releases/latest/download/latest.json"
+        "https://github.com/heicfast/d-space_fork/releases/latest/download/latest.json"
       ],
       "pubkey": "<v0.2 öncesi: pnpm tauri signer generate çıktısı>",
       "windows": { "installMode": "passive" }

@@ -46,8 +46,9 @@ pub fn blake3_file(path: &Path) -> Result<[u8; 32]> {
 }
 
 /// Streaming copy. Hedef üzerine yazar. İlerleme callback'i yoksa şimdilik
-/// (v0.2'de event stream UI'ya).
-fn copy_file_streaming(src: &Path, dst: &Path) -> Result<u64> {
+/// (v0.2'de event stream UI'ya). Gemini review B1 — `pub(crate)`: undo
+/// cross-volume geri taşıması da aynı kopya yardımcısını kullanır.
+pub(crate) fn copy_file_streaming(src: &Path, dst: &Path) -> Result<u64> {
     let mut s = fs::File::open(src).map_err(|e| Error::Staging(format!("copy src aç: {}", e)))?;
     let mut d =
         fs::File::create(dst).map_err(|e| Error::Staging(format!("copy dst oluştur: {}", e)))?;
@@ -163,11 +164,13 @@ pub fn cross_volume_stage_file(
             is_dir as i64,
         ],
     ) {
-        // Rare: tmp commit edildi ama DB insert fail. Veri kaybı yok
-        // (final_path orada), sadece tracking bozuk. WAL'ı ABORTED yapma —
-        // kullanıcı tmp dosyayı görür ama undo yapamaz. Hata fırlat.
+        // Gemini review B13 — final dosya commit edildi ama DB insert fail:
+        // WAL satırını BEGIN'de bırakmak yerine açıkça ABORT et (bir sonraki
+        // açılış recovery'sinde yanlış yorumlanmasın); final dosya yerinde
+        // kalır (veri kaybı yok), hata fırlatılır.
         let msg = format!("DB insert (final var ama tracking yok): {}", e);
         warn!(?msg);
+        let _ = wal_abort(conn, wal_id, &msg);
         return Err(Error::Staging(msg));
     }
     let staging_id = conn.last_insert_rowid();

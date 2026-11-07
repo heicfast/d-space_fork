@@ -14,6 +14,9 @@
 -->
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
+
+const { locale } = useI18n();
 
 interface TreeNode {
   id: number;
@@ -104,7 +107,10 @@ function formatAgo(unix: number, nowSecs: number): string {
 
 function formatDate(unix: number): string {
   if (unix === 0) return "—";
-  return new Date(unix * 1000).toLocaleDateString("tr-TR");
+  // Gemini review — locale-aware tarih.
+  return new Date(unix * 1000).toLocaleDateString(
+    locale.value === "tr" ? "tr-TR" : "en-US",
+  );
 }
 
 interface Layout {

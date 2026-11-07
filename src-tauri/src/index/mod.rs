@@ -31,7 +31,7 @@ use crate::error::{Error, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::debug;
+use tracing::{debug, info};
 
 pub use baseline::{
     apply_baseline_batch, enumerate_volume_baseline, BaselineSummary, DEFAULT_BASELINE_BUFFER,
@@ -101,6 +101,94 @@ impl IndexBuilder {
     }
 }
 
+/// Gemini review B9 / v0.3.1 prod wire — `usn_watermark` tablosunda kayıtlı
+/// volume'lerin ID listesi (`\\.\C:` biçiminde). Açılışta watcher spawn
+/// etmek için kullanılır.
+pub fn list_indexed_volumes(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt = conn
+        .prepare("SELECT volume_id FROM usn_watermark ORDER BY volume_id")
+        .map_err(|e| Error::Index(format!("list_indexed_volumes: {}", e)))?;
+    let rows = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| Error::Index(format!("list_indexed_volumes query: {}", e)))?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| Error::Index(format!("list_indexed_volumes row: {}", e)))?);
+    }
+    Ok(out)
+}
+
+/// `sync_volume` sonucu — incremental delta mı full baseline mı koşuldu.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum SyncOutcome {
+    /// Watermark yoktu / wraparound — full `FSCTL_ENUM_USN_DATA` rebuild.
+    Baseline(Box<BaselineSummary>),
+    /// Watermark geçerliydi — yalnız `FSCTL_READ_USN_JOURNAL` delta uygulandı.
+    Delta {
+        volume_id: String,
+        #[serde(flatten)]
+        summary: DeltaSummary,
+        next_usn: i64,
+    },
+}
+
+/// Bir volume'ün USN index'ini güncelle — watermark varsa incremental delta,
+/// yoksa (veya wraparound'ta) full baseline. `index_build` komutu ve watcher
+/// tick'inin ortak çekirdeği (Gemini review: her açılışta full rebuild
+/// yerine watermark kısa devresi).
+pub fn sync_volume(
+    volume_id: &str,
+    conn: &mut Connection,
+    buffer_size: usize,
+) -> Result<SyncOutcome> {
+    let fresh = baseline::query_journal(volume_id)?;
+    let stored = load_watermark(conn, volume_id)?;
+
+    match stored {
+        Some(wm) => {
+            // Wraparound kontrolü — journal_id değiştiyse full rebuild.
+            if let Err(e) = detect_wraparound(wm.journal_id, fresh.journal_id) {
+                info!(volume = volume_id, ?e, "wraparound — full rebuild");
+                let summary = enumerate_volume_baseline(volume_id, conn, buffer_size)?;
+                return Ok(SyncOutcome::Baseline(Box::new(summary)));
+            }
+            // Incremental delta: watermark'dan itibaren beklemesiz oku.
+            let read = usn::read_journal_blocking(
+                volume_id,
+                wm.next_usn,
+                fresh.journal_id,
+                0, // no-wait: birikmiş kayıtları topla, bekleme yok
+                buffer_size,
+            )?;
+            let summary = apply_delta(conn, volume_id, &read.records)?;
+            let next_usn = if read.next_usn > wm.next_usn {
+                read.next_usn
+            } else {
+                wm.next_usn
+            };
+            save_watermark(
+                conn,
+                volume_id,
+                Watermark {
+                    next_usn,
+                    journal_id: fresh.journal_id,
+                },
+            )?;
+            Ok(SyncOutcome::Delta {
+                volume_id: volume_id.to_string(),
+                summary,
+                next_usn,
+            })
+        }
+        None => {
+            // Henüz baseline yok — full enumerate.
+            let summary = enumerate_volume_baseline(volume_id, conn, buffer_size)?;
+            Ok(SyncOutcome::Baseline(Box::new(summary)))
+        }
+    }
+}
+
 /// `usn_index` toplam satır sayısı. UI badge için.
 pub fn count_entries(conn: &Connection, volume_id: &str) -> Result<i64> {
     conn.query_row(
@@ -111,14 +199,24 @@ pub fn count_entries(conn: &Connection, volume_id: &str) -> Result<i64> {
     .map_err(|e| Error::Index(format!("count_entries: {}", e)))
 }
 
-/// Tüm ciltler için son watermark'ları gez, en yeni `last_seen_unix`'i bul.
-/// Boş indeks için 0 döner.
-pub fn last_sync_unix(conn: &Connection) -> Result<i64> {
-    let ts: Option<i64> = conn
-        .query_row("SELECT MAX(last_seen_unix) FROM usn_index", [], |r| {
-            r.get(0)
-        })
-        .map_err(|e| Error::Index(format!("last_sync_unix: {}", e)))?;
+/// Son sync zamanı. `volume_id` verilirse yalnız o cilt; yoksa global
+/// MAX. Boş indeks için 0 döner. (Gemini review B24 — per-volume sorgu
+/// başka bir cildin tazeliğini raporlamasın.)
+pub fn last_sync_unix(conn: &Connection, volume_id: Option<&str>) -> Result<i64> {
+    let ts: Option<i64> = match volume_id {
+        Some(v) => conn
+            .query_row(
+                "SELECT MAX(last_seen_unix) FROM usn_index WHERE volume_id = ?1",
+                params![v],
+                |r| r.get(0),
+            )
+            .map_err(|e| Error::Index(format!("last_sync_unix: {}", e)))?,
+        None => conn
+            .query_row("SELECT MAX(last_seen_unix) FROM usn_index", [], |r| {
+                r.get(0)
+            })
+            .map_err(|e| Error::Index(format!("last_sync_unix: {}", e)))?,
+    };
     Ok(ts.unwrap_or(0))
 }
 
@@ -131,7 +229,7 @@ pub fn index_status(conn: &Connection, volume_id: Option<&str>) -> Result<IndexS
             .query_row("SELECT COUNT(*) FROM usn_index", [], |r| r.get::<_, i64>(0))
             .map_err(|e| Error::Index(format!("total count: {}", e)))?,
     };
-    let last_sync = last_sync_unix(conn)?;
+    let last_sync = last_sync_unix(conn, volume_id)?;
     let mode = if total == 0 { "idle" } else { "ready" };
     Ok(IndexStatus {
         volume_id: volume_id.map(|s| s.to_string()),

@@ -40,7 +40,7 @@ pub fn probe_lock_state(path: &Path) -> Result<LockState> {
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{
-        CloseHandle, GetLastError, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND,
+        CloseHandle, ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND,
         ERROR_SHARING_VIOLATION,
     };
     use windows::Win32::Storage::FileSystem::{
@@ -74,8 +74,18 @@ pub fn probe_lock_state(path: &Path) -> Result<LockState> {
             debug!(path = %path.display(), "lock probe = Free");
             Ok(LockState::Free)
         }
-        Err(_) => {
-            let code = unsafe { GetLastError().0 };
+        Err(e) => {
+            // Gemini review B3 — windows-rs `CreateFileW` hata kodunu Result
+            // oluştururken zaten yakalar; `GetLastError()` sonradan çağrılırsa
+            // değer error-path tarafından kirletilmiş olabilir. Güvenilir
+            // kaynak: `e.code()` (HRESULT). FACILITY_WIN32 (0x0007) ise alt
+            // 16 bit gerçek Win32 error kodudur.
+            let hr = e.code().0 as u32;
+            let code = if (hr & 0xFFFF_0000) == 0x0007_0000 || (hr & 0xFFFF_0000) == 0x8007_0000 {
+                hr & 0xFFFF
+            } else {
+                hr
+            };
             let state = match code {
                 c if c == ERROR_SHARING_VIOLATION.0 => LockState::Locked,
                 c if c == ERROR_ACCESS_DENIED.0 => LockState::AccessDenied,

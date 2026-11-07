@@ -293,21 +293,22 @@ async function probeCloud(node: TreeNode) {
 }
 
 function cloudStateLabel(s: CloudPlaceholderState): string {
+  // Gemini review — sabit TR metinler i18n'e taşındı.
   if (typeof s === "string") {
     switch (s) {
       case "local_only":
-        return "Yerel (bulutta değil)";
+        return t("cloud.localOnly");
       case "online_only":
-        return "☁ Yalnızca buluta — açmak indirir";
+        return t("cloud.onlineOnly");
       case "always_available":
-        return "☁ Her zaman erişilebilir (bulut sürümü var)";
+        return t("cloud.alwaysAvailable");
       case "other_reparse":
-        return "Reparse point (symlink/junction/dedup)";
+        return t("cloud.otherReparse");
       case "not_found":
-        return "Yol bulunamadı";
+        return t("cloud.notFound");
     }
   }
-  return `Win32 hata (${s.other_error})`;
+  return t("cloud.win32Error", { code: s.other_error });
 }
 
 function cloudStateClass(s: CloudPlaceholderState): string {
@@ -526,6 +527,9 @@ const onboardingVisible = ref<boolean>(false);
 // Bölüm 19 — language toggle. Persisted in settings.language_preference.
 async function switchLocale(next: SupportedLocale) {
   setLocale(next);
+  // Gemini review — index.html lang attribute'u dil değişinde güncellenir
+  // (ekran okuyucular / tarayıcı çeviri ipuçları doğru çalışır).
+  document.documentElement.lang = next === "tr" ? "tr" : "en";
   try {
     await invoke("set_setting_cmd", {
       key: "language_preference",
@@ -569,7 +573,6 @@ function toggleAdvanced() {
 
 // Bölüm 15.2 — Klavye-First kısayollar.
 const showShortcuts = ref<boolean>(false);
-const searchOpen = ref<boolean>(false);
 
 function isTypingTarget(t: EventTarget | null): boolean {
   if (!t) return false;
@@ -603,16 +606,30 @@ function focusFirstFileForDelete(): TreeNode | null {
 }
 
 function handleShortcut(e: KeyboardEvent) {
-  if (conflictDialog.value || permDeletePendingId.value !== null) {
-    // Dialog/inline confirm açıkken kısayolları yutma
+  // Gemini review — kısayollar yalnızca ilk iki dialog değil, AÇIK TÜM
+  // modal/confirm'lerde bastırılır (uncDialog, expiredConfirm, shortcuts,
+  // onboarding); Esc açık olanı kapatır.
+  const anyModalOpen =
+    conflictDialog.value !== null ||
+    permDeletePendingId.value !== null ||
+    uncDialogOpen.value ||
+    expiredConfirmOpen.value ||
+    showShortcuts.value ||
+    onboardingVisible.value;
+  if (anyModalOpen) {
     if (e.key === "Escape") {
       if (conflictDialog.value) {
         resolveConflict("cancel");
-        e.preventDefault();
-      } else {
+      } else if (permDeletePendingId.value !== null) {
         cancelPermDelete();
-        e.preventDefault();
+      } else if (uncDialogOpen.value) {
+        closeUncDialog();
+      } else if (expiredConfirmOpen.value) {
+        expiredConfirmOpen.value = false;
+      } else if (showShortcuts.value) {
+        showShortcuts.value = false;
       }
+      e.preventDefault();
     }
     return;
   }
@@ -624,10 +641,17 @@ function handleShortcut(e: KeyboardEvent) {
     if (!scanning.value) runFullScan();
     return;
   }
-  // Ctrl+1/2/3/4 — Görüntü modu
-  if ((e.ctrlKey || e.metaKey) && ["1", "2", "3", "4"].includes(e.key)) {
+  // Ctrl+1/2/3/4/5 — Görüntü modu (Gemini review: 3D mod da
+  // klavyeden seçilebilir olmalı — eskiden yalnız butonla ulaşılıyordu).
+  if ((e.ctrlKey || e.metaKey) && ["1", "2", "3", "4", "5"].includes(e.key)) {
     e.preventDefault();
-    const modes: ViewMode[] = ["sunburst", "treemap", "bubble", "timeline"];
+    const modes: ViewMode[] = [
+      "sunburst",
+      "treemap",
+      "bubble",
+      "timeline",
+      "sunburst3d",
+    ];
     const idx = parseInt(e.key, 10) - 1;
     if (viewWindow.value && modes[idx]) {
       viewMode.value = modes[idx];
@@ -643,17 +667,14 @@ function handleShortcut(e: KeyboardEvent) {
   // Ctrl+F — Arama (placeholder toggle, gerçek arama v0.2)
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
     e.preventDefault();
-    // Sprint 3.8 — Ctrl+F artık IndexSearchBar input'una odaklanır.
-    // `searchOpen` toggle eski v0.1 placeholder davranışı; korunur ama
-    // index input fokusu öncelikli.
+    // Sprint 3.8 — Ctrl+F IndexSearchBar input'una odaklanır.
+    // (Gemini review: ölü `searchOpen` placeholder toggle'ı kaldırıldı.)
     const input = document.querySelector<HTMLInputElement>(
       ".index-search-bar input",
     );
     if (input) {
       input.focus();
       input.select();
-    } else {
-      searchOpen.value = !searchOpen.value;
     }
     return;
   }
@@ -794,23 +815,26 @@ function formatBytes(b: number): string {
 }
 
 function volumeStatusLabel(s: VolumeStatus): string {
+  // Gemini review — i18n.
   switch (s.kind) {
     case "Ready":
-      return "Hazır";
+      return t("volumeStatus.Ready");
     case "BitLockerLocked":
-      return "BitLocker kilitli";
+      return t("volumeStatus.BitLockerLocked");
     case "BitLockerSuspended":
-      return "BitLocker askıda";
+      return t("volumeStatus.BitLockerSuspended");
     case "Encrypted":
-      return `Şifreli (${s.data?.method ?? "bilinmeyen"})`;
+      return t("volumeStatus.Encrypted", { method: s.data?.method ?? "?" });
     case "NotMounted":
-      return "Bağlı değil";
+      return t("volumeStatus.NotMounted");
     case "AccessDenied":
-      return "Erişim engellendi";
+      return t("volumeStatus.AccessDenied");
     case "NotFormatted":
-      return "Formatsız";
+      return t("volumeStatus.NotFormatted");
     case "UnsupportedDriveType":
-      return `Desteklenmeyen sürücü (${s.data?.drive_type ?? "?"})`;
+      return t("volumeStatus.UnsupportedDriveType", {
+        type: s.data?.drive_type ?? "?",
+      });
   }
 }
 
@@ -859,6 +883,7 @@ onMounted(async () => {
     });
     if (pref === "en" || pref === "tr") {
       setLocale(pref);
+      document.documentElement.lang = pref;
     }
   } catch (err) {
     console.warn("language pref okunamadı", err);
@@ -1019,7 +1044,18 @@ function computeLodThreshold(
 
 const lodHiddenCount = ref<number>(0);
 
+// Gemini review — hızlı drill tıklamalarında eski yanıtların geç gelip
+// yeni pencereyi ezmesini önleyen istek sıra numarası.
+let windowReqSeq = 0;
+
 async function loadWindow(parentId: number) {
+  // Gemini review — eski pencereden kalan selectedNode yeni breadcrumb ile
+  // yanlış yol üretip detay panelinde gösteriliyordu; parent değiştiğinde
+  // temizle (drillInto'nun hedefi olan düğüm hariç — o kasıtlı seçim).
+  if (selectedNode.value && selectedNode.value.id !== parentId) {
+    selectedNode.value = null;
+  }
+  const seq = ++windowReqSeq;
   windowLoading.value = true;
   windowError.value = null;
   lodHiddenCount.value = 0;
@@ -1030,6 +1066,7 @@ async function loadWindow(parentId: number) {
       limit: 200,
       offset: 0,
     });
+    if (seq !== windowReqSeq) return; // eski yanıt — atla
     // LOD: çocuk sayısı 200'ü geçiyorsa dinamik threshold ile yeniden sor.
     if (w.total_children > 200) {
       const threshold = computeLodThreshold(
@@ -1044,16 +1081,22 @@ async function loadWindow(parentId: number) {
           offset: 0,
           minSizeBytes: threshold,
         });
+        if (seq !== windowReqSeq) return; // eski yanıt — atla
         lodHiddenCount.value = w.total_children - w2.total_children;
         w = w2;
       }
     }
+    const path = await invoke<TreeNode[]>("tree_path", { id: parentId });
+    if (seq !== windowReqSeq) return; // eski yanıt — atla
     viewWindow.value = w;
-    breadcrumb.value = await invoke<TreeNode[]>("tree_path", { id: parentId });
+    breadcrumb.value = path;
   } catch (err) {
+    if (seq !== windowReqSeq) return;
     windowError.value = formatIpcError(err);
   } finally {
-    windowLoading.value = false;
+    if (seq === windowReqSeq) {
+      windowLoading.value = false;
+    }
   }
 }
 
@@ -1061,22 +1104,23 @@ async function loadWindow(parentId: number) {
 const driveWarning = ref<string | null>(null);
 
 function computeDriveWarning(info: VolumeInfo | null): string | null {
+  // Gemini review — i18n.
   if (!info) return null;
   const fs = (info.file_system || "").toUpperCase();
   if (fs === "REFS") {
-    return "ReFS sürücü: MFT direkt okuma desteklenmiyor — Standart Mod kullanılır (Bölüm 5.5).";
+    return t("driveWarning.refs");
   }
   if (fs && !["NTFS", "REFS", "FAT32", "EXFAT"].includes(fs)) {
-    return `Bilinmeyen dosya sistemi (${fs}) — Standart Mod denenecek.`;
+    return t("driveWarning.unknownFs", { fs });
   }
   if (info.drive_kind === "Remote") {
-    return "Network sürücü: bandwidth ve yetki maliyeti yüksek (Bölüm 33.3). Tarama yavaş olabilir.";
+    return t("driveWarning.remote");
   }
   if (info.drive_kind === "Removable") {
-    return "Removable medya: tarama bitince güvenli çıkarmayı unutma (Bölüm 33.4).";
+    return t("driveWarning.removable");
   }
   if (info.drive_kind === "CdRom") {
-    return "Optik medya: salt-okunur, staging/silme yapılamaz.";
+    return t("driveWarning.cdrom");
   }
   return null;
 }
@@ -1167,9 +1211,20 @@ function driveLetter(): string {
 }
 
 function nodeFullPath(n: TreeNode): string {
+  // Gemini review — USN index arama pseudo-node'u (negatif id): gerçek tam
+  // yol backend'den çözüldü (score_reason alanında taşınır); uydurma
+  // "C:\\<name>" üretme — yanlış dosyaya stage/probe gönderme riski.
+  if (n.id < 0) {
+    return n.score_reason ?? `${driveLetter()}:\\${n.name}`;
+  }
   const letter = driveLetter();
   const parts = breadcrumb.value.slice(1).map((b) => b.name);
-  parts.push(n.name);
+  // Gemini review — drillInto sonrası breadcrumb zaten bu düğümü içerir;
+  // tekrar push etmek "C:\\a\\b\\b" üretiyordu.
+  const last = breadcrumb.value[breadcrumb.value.length - 1];
+  if (!last || last.id !== n.id) {
+    parts.push(n.name);
+  }
   return `${letter}:\\${parts.join("\\")}`;
 }
 
@@ -1275,27 +1330,26 @@ async function resolveConflict(resolution: UndoResolution) {
 }
 
 function scoreTierLabel(score: number | null): string {
-  if (score === null) return "—";
-  if (score <= 30) return "DOKUNMA";
-  if (score <= 60) return "İNCELE";
-  if (score <= 85) return "BÜYÜK İHTİMAL";
-  return "CACHE";
+  // Gemini review — i18n versiyonuna delege (iki ayrı impl aynı etiketi
+  // farklı dillerde basıyordu).
+  return scoreTierLabelFor(score);
 }
 
 function lockStateLabel(s: LockState): string {
+  // Gemini review — i18n.
   if (typeof s === "string") {
     switch (s) {
       case "free":
-        return "Boş — başka handle yok";
+        return t("lock.stateFree");
       case "locked":
-        return "Kilitli — başka process tutuyor";
+        return t("lock.stateLocked");
       case "access_denied":
-        return "ACL engelliyor";
+        return t("lock.stateAccessDenied");
       case "not_found":
-        return "Bulunamadı";
+        return t("lock.stateNotFound");
     }
   }
-  return `Win32 hata (${s.other_error})`;
+  return t("lock.stateOtherError", { code: s.other_error });
 }
 
 function lockStateClass(s: LockState): string {
@@ -1307,17 +1361,18 @@ function lockStateClass(s: LockState): string {
 }
 
 function lockActionLabel(a: LockedFileAction): string {
+  // Gemini review — i18n.
   switch (a) {
     case "proceed":
-      return "Devam et";
+      return t("lock.actionProceed");
     case "skip_content":
-      return "İçeriği atla";
+      return t("lock.actionSkip");
     case "snapshot_read":
-      return "VSS snapshot oku (v0.2)";
+      return t("lock.actionSnapshot");
     case "user_drill_down":
-      return "Seçenekleri göster";
+      return t("lock.actionDrillDown");
     case "hard_pass":
-      return "Sistem dosyası — denenmez";
+      return t("lock.actionHardPass");
   }
 }
 
@@ -1969,7 +2024,7 @@ async function confirmPermDelete(item: StagedItem) {
               type="button"
               class="stage-btn lock-probe-btn"
               :disabled="lockProbeBusyId === n.id"
-              title="Lock durumu sorgula (Bölüm 34 — RestartManager, VSS yok)"
+              :title="t('drilldown.lockProbe')"
               @click="probeLock(n)"
             >
               {{ lockProbeBusyId === n.id ? "…" : "🔒" }}
@@ -1979,7 +2034,7 @@ async function confirmPermDelete(item: StagedItem) {
               type="button"
               class="stage-btn lock-probe-btn"
               :disabled="cloudProbeBusyId === n.id"
-              title="Cloud placeholder sorgula (Bölüm 11.1 — recall flag'leri)"
+              :title="t('detail.cloudProbe')"
               @click="probeCloud(n)"
             >
               {{ cloudProbeBusyId === n.id ? "…" : "☁" }}
@@ -2092,8 +2147,7 @@ async function confirmPermDelete(item: StagedItem) {
                 "
                 class="muted lock-empty"
               >
-                Owner tespit edilemedi (RestartManager process bulamadı —
-                kernel handle olabilir).
+                {{ t("lock.ownerEmpty") }}
               </p>
             </template>
             <p v-if="lockProbeErrors.get(n.id)" class="err lock-err">
@@ -2101,7 +2155,7 @@ async function confirmPermDelete(item: StagedItem) {
             </p>
           </div>
         </li>
-        <li v-if="windowLoading" class="drill-loading">Yükleniyor…</li>
+        <li v-if="windowLoading" class="drill-loading">{{ t("drilldown.loading") }}</li>
       </ul>
       <p v-if="windowError" class="err">{{ windowError }}</p>
     </section>
@@ -2232,52 +2286,50 @@ async function confirmPermDelete(item: StagedItem) {
       @click.self="showShortcuts = false"
     >
       <div class="shortcuts-dialog">
-        <h3 class="conflict-title">⌨ Klavye Kısayolları (Bölüm 15.2)</h3>
+        <h3 class="conflict-title">{{ t("shortcuts.title") }}</h3>
         <table class="shortcut-table">
           <tbody>
             <tr>
               <td><kbd>Ctrl</kbd>+<kbd>R</kbd></td>
-              <td>Yeniden tara</td>
+              <td>{{ t("shortcuts.rescan") }}</td>
             </tr>
             <tr>
-              <td><kbd>Ctrl</kbd>+<kbd>1</kbd>/<kbd>2</kbd>/<kbd>3</kbd>/<kbd>4</kbd></td>
-              <td>Görüntü modu — Sunburst · Treemap · Bubble · Timeline</td>
+              <td><kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>5</kbd></td>
+              <td>{{ t("shortcuts.viewModes") }}</td>
             </tr>
             <tr>
               <td><kbd>Backspace</kbd></td>
-              <td>Bir seviye yukarı (drilldown breadcrumb)</td>
+              <td>{{ t("shortcuts.navUp") }}</td>
             </tr>
             <tr>
               <td><kbd>Delete</kbd></td>
-              <td>Viewport'taki ilk dosyayı staging'e gönder</td>
+              <td>{{ t("shortcuts.stageDelete") }}</td>
             </tr>
             <tr>
               <td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td>
-              <td>Son staging undo</td>
+              <td>{{ t("shortcuts.undo") }}</td>
             </tr>
             <tr>
               <td><kbd>Ctrl</kbd>+<kbd>F</kbd></td>
-              <td>Arama (placeholder, v0.2)</td>
+              <td>{{ t("shortcuts.search") }}</td>
             </tr>
             <tr>
               <td><kbd>Esc</kbd></td>
-              <td>Açık dialog'u kapat</td>
+              <td>{{ t("shortcuts.escape") }}</td>
             </tr>
             <tr>
               <td><kbd>Ctrl</kbd>+<kbd>?</kbd></td>
-              <td>Bu yardımı aç/kapat</td>
+              <td>{{ t("shortcuts.helpToggle") }}</td>
             </tr>
           </tbody>
         </table>
-        <p class="shortcut-hint">
-          Input/textarea fokustayken kısayollar devre dışıdır — normal yazım engellenmez.
-        </p>
+        <p class="shortcut-hint">{{ t("shortcuts.hint") }}</p>
         <button
           type="button"
           class="conflict-btn conflict-cancel"
           @click="showShortcuts = false"
         >
-          Kapat
+          {{ t("shortcuts.close") }}
         </button>
       </div>
     </div>
@@ -2289,16 +2341,13 @@ async function confirmPermDelete(item: StagedItem) {
     >
       <div class="conflict-dialog">
         <h3 class="conflict-title">
-          ⚠ Çakışma: {{ fileNameOf(conflictDialog.original_path) }}
+          {{ t("conflict.title", { name: fileNameOf(conflictDialog.original_path) }) }}
         </h3>
-        <p class="conflict-help">
-          Bölüm 12.2.4 — hedef yolda farklı içerikte bir dosya var. Hangisini
-          tutmak istiyorsun?
-        </p>
+        <p class="conflict-help">{{ t("conflict.help") }}</p>
 
         <div class="conflict-cols">
           <div class="conflict-col">
-            <div class="conflict-col-head">Geri alınacak (staged)</div>
+            <div class="conflict-col-head">{{ t("conflict.colStaged") }}</div>
             <div class="conflict-meta mono">
               <div>📄 {{ formatBytes(conflictDialog.staged.size_bytes) }}</div>
               <div>{{ formatTime(conflictDialog.staged.modified_unix) }}</div>
@@ -2313,7 +2362,7 @@ async function confirmPermDelete(item: StagedItem) {
           </div>
           <div class="conflict-vs">vs</div>
           <div class="conflict-col">
-            <div class="conflict-col-head">Hedefte var olan</div>
+            <div class="conflict-col-head">{{ t("conflict.colTarget") }}</div>
             <div class="conflict-meta mono">
               <div>📄 {{ formatBytes(conflictDialog.target.size_bytes) }}</div>
               <div>{{ formatTime(conflictDialog.target.modified_unix) }}</div>
@@ -2335,7 +2384,7 @@ async function confirmPermDelete(item: StagedItem) {
             :disabled="conflictBusy"
             @click="resolveConflict('overwrite')"
           >
-            Üzerine yaz
+            {{ t("conflict.overwrite") }}
           </button>
           <button
             type="button"
@@ -2343,7 +2392,7 @@ async function confirmPermDelete(item: StagedItem) {
             :disabled="conflictBusy"
             @click="resolveConflict('rename')"
           >
-            Yeni isim ({{ fileNameOf(conflictDialog.original_path) }} (1))
+            {{ t("conflict.rename", { name: fileNameOf(conflictDialog.original_path) }) }}
           </button>
           <button
             type="button"
@@ -2351,7 +2400,7 @@ async function confirmPermDelete(item: StagedItem) {
             :disabled="conflictBusy"
             @click="resolveConflict('keep_both')"
           >
-            Her ikisini koru
+            {{ t("conflict.keepBoth") }}
           </button>
           <button
             type="button"
@@ -2359,7 +2408,7 @@ async function confirmPermDelete(item: StagedItem) {
             :disabled="conflictBusy"
             @click="resolveConflict('cancel')"
           >
-            İptal
+            {{ t("conflict.cancel") }}
           </button>
         </div>
 
@@ -2584,12 +2633,9 @@ async function confirmPermDelete(item: StagedItem) {
     <UserRulesPanel v-if="showAdvanced" />
 
     <section v-if="showAdvanced && expiredList.length > 0" class="card">
-      <h2>Süresi geçmiş öğeler (Bölüm 12.2.1)</h2>
+      <h2>{{ t("staging.expiredTitle") }}</h2>
       <p class="muted">
-        Staging kuyruğunda {{ expiredList.length }} öğenin 24 saatlik geri alma
-        penceresi doldu. Bölüm 22.6 ilkesi gereği otomatik silinmedi — sen
-        onaylayana kadar yaşamaya devam eder. Tek seferde tümünü kalıcı silebilir
-        veya tek tek inceleyebilirsin.
+        {{ t("staging.expiredIntro", { count: expiredList.length }) }}
       </p>
       <ul class="expired-list">
         <li
@@ -2600,11 +2646,11 @@ async function confirmPermDelete(item: StagedItem) {
           <span>📄 {{ item.original_path }}</span>
           <span class="expired-meta">
             {{ formatBytes(item.size_bytes) }} ·
-            {{ Math.floor(item.age_secs / 3600) }} sa süresi geçmiş
+            {{ t("staging.expiredAgo", { hours: Math.floor(item.age_secs / 3600) }) }}
           </span>
         </li>
         <li v-if="expiredList.length > 6" class="expired-row muted">
-          ve {{ expiredList.length - 6 }} öğe daha…
+          {{ t("staging.expiredMore", { count: expiredList.length - 6 }) }}
         </li>
       </ul>
       <div class="probe-bar">
@@ -2614,12 +2660,14 @@ async function confirmPermDelete(item: StagedItem) {
           :disabled="expiredCleanupBusy"
           @click="expiredConfirmOpen = true"
         >
-          🔥 Tümünü kalıcı sil ({{ expiredList.length }})
+          {{ t("staging.expiredDeleteAll", { count: expiredList.length }) }}
         </button>
         <span v-if="expiredCleanupReport" class="scan-quick mono">
-          son rapor: {{ expiredCleanupReport.deleted }} silindi,
-          {{ formatBytes(expiredCleanupReport.total_bytes) }},
-          {{ expiredCleanupReport.elapsed_ms }} ms
+          {{ t("staging.expiredLastReport", {
+            deleted: expiredCleanupReport.deleted,
+            bytes: formatBytes(expiredCleanupReport.total_bytes),
+            ms: expiredCleanupReport.elapsed_ms,
+          }) }}
         </span>
       </div>
       <p v-if="expiredCleanupError" class="err">{{ expiredCleanupError }}</p>
@@ -2631,10 +2679,14 @@ async function confirmPermDelete(item: StagedItem) {
       @click.self="expiredConfirmOpen = false"
     >
       <div class="conflict-dialog">
-        <h3 class="conflict-title">⚠ {{ expiredList.length }} öğe kalıcı silinecek</h3>
-        <p class="conflict-help">
-          Bölüm 12.2.3 — rate limit 20 dosya/sn, forensic ledger'a her biri kayıt
-          düşer. Geri alınamaz. Devam etmek için onayla.
+        <h3 class="conflict-title">
+          {{ t("staging.expiredConfirmTitle", { count: expiredList.length }) }}
+        </h3>
+        <p class="conflict-help">{{ t("staging.expiredConfirmHelp") }}</p>
+        <!-- Gemini review — AUTO_THRESHOLD abort semantiği artık yüzeye
+             çıkar: rapor aborted döndüyse kullanıcı açıkça görür. -->
+        <p v-if="expiredCleanupReport?.aborted_threshold" class="err">
+          {{ t("staging.abortedThreshold", { count: expiredList.length }) }}
         </p>
         <div class="conflict-actions">
           <button
@@ -2643,7 +2695,11 @@ async function confirmPermDelete(item: StagedItem) {
             :disabled="expiredCleanupBusy"
             @click="runExpiredCleanup(true)"
           >
-            {{ expiredCleanupBusy ? "Siliniyor…" : "Hepsini kalıcı sil" }}
+            {{
+              expiredCleanupBusy
+                ? t("staging.expiredConfirmBusy")
+                : t("staging.expiredConfirmGo")
+            }}
           </button>
           <button
             type="button"
@@ -2651,7 +2707,7 @@ async function confirmPermDelete(item: StagedItem) {
             :disabled="expiredCleanupBusy"
             @click="expiredConfirmOpen = false"
           >
-            İptal
+            {{ t("conflict.cancel") }}
           </button>
         </div>
       </div>

@@ -48,6 +48,13 @@ fn volume_root_prefix(volume_id: &str) -> String {
             }
         }
     }
+    // Gemini review B20 — UNC volume (drive harfi yok): ge\u00e7erli bir
+    // UNC k\u00f6k\u00fc d\u00f6nd\u00fcr ("\\\\server\\share" bi\u00e7iminde \u00e7ift backslash),
+    // tek "\" de\u011fil (ge\u00e7ersiz path \u00fcretiyordu).
+    let trimmed = volume_id.trim_end_matches('\\');
+    if trimmed.starts_with("\\\\") || trimmed.starts_with("//") {
+        return trimmed.replace('/', "\\");
+    }
     "\\".into()
 }
 
@@ -134,7 +141,10 @@ pub fn capture_snapshot(tree: &ScanTree, conn: &mut Connection) -> Result<Snapsh
                 hash_bytes,
                 path,
                 node.aggregate_size as i64,
-                0i64, // modified_at — Node henüz mtime tutmuyor, v0.2
+                // Gemini review B8 — Node.modified_unix zaten dolu (MFT
+                // $STANDARD_INFORMATION / FindFirstFile mtime); 0 placeholder
+                // kaldırıldı.
+                node.modified_unix,
                 1i64,
             ]) {
                 Ok(_) => entry_count += 1,
@@ -238,9 +248,10 @@ pub fn list_snapshots(conn: &Connection) -> Result<Vec<SnapshotMeta>> {
                 captured_at_unix: r.get(2)?,
                 total_size_bytes: r.get::<_, i64>(3)? as u64,
                 file_count: r.get::<_, i64>(4)? as u64,
-                // dir_count == entry_count çünkü v0.1'de yalnızca dizinler
-                // tablolanıyor.
-                dir_count: entry_count_u,
+                // Gemini review B19 — entry_count sentetik ROOT düğümünü
+                // de içerir; capture'ın döndüğü dir_count (root hariç)
+                // ile aynı olmak için 1 çıkarılır.
+                dir_count: entry_count_u.saturating_sub(1),
                 entry_count: entry_count_u,
             })
         })

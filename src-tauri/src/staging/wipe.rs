@@ -120,6 +120,26 @@ pub fn dod_wipe_file(path: &Path) -> Result<()> {
         )));
     }
     let len = metadata.len();
+    // Gemini review B17 — FILE_ATTRIBUTE_READONLY dosyalar OpenOptions
+    // .write(true) ile ACCESS_DENIED verir. Staging'e MOVE attribute'yi
+    // korur; wipe öncesi readonly bayrağını temizle (best-effort).
+    {
+        let perms = std::fs::metadata(path)
+            .map_err(|e| Error::Staging(format!("wipe perms '{}': {}", path.display(), e)))?
+            .permissions();
+        if perms.readonly() {
+            // Windows hedefi: FILE_ATTRIBUTE_READONLY temizliği. Clippy'nin
+            // Unix "world writable" uyarısı bu platformda geçerli değil.
+            #[allow(clippy::permissions_set_readonly_false)]
+            {
+                let mut cleared = perms;
+                cleared.set_readonly(false);
+                if let Err(e) = std::fs::set_permissions(path, cleared) {
+                    debug!(path = %path.display(), error = %e, "readonly temizleme başarısız");
+                }
+            }
+        }
+    }
 
     // 0-byte dosya: passes anlamsız, direkt sil.
     if len == 0 {
@@ -138,8 +158,28 @@ pub fn dod_wipe_file(path: &Path) -> Result<()> {
             .map_err(|e| Error::Staging(format!("wipe pass {}: {}", i + 1, e)))?;
         debug!(path = %path.display(), pass = i + 1, "DoD pass tamam");
     }
+    // Gemini review B18 — geçişler bittiğinde dosyayı 0'a truncate et ki
+    // son uzunluk + son geçişin içerik kalıntısı MFT resident verisinden
+    // okunamasın.
+    file.set_len(0)
+        .map_err(|e| Error::Staging(format!("wipe truncate: {}", e)))?;
     drop(file);
-    std::fs::remove_file(path).map_err(|e| Error::Staging(format!("wipe remove: {}", e)))?;
+
+    // Gemini review B18 — silmeden önce rastgele kısa isme rename: NTFS
+    // directory entry'sinde orijinal dosya adı forensic kalıntısı bırakır.
+    let random_suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let renamed = parent.join(format!(".dspace_wiped_{:x}", random_suffix));
+    let delete_target = if std::fs::rename(path, &renamed).is_ok() {
+        renamed
+    } else {
+        path.to_path_buf()
+    };
+    std::fs::remove_file(&delete_target)
+        .map_err(|e| Error::Staging(format!("wipe remove: {}", e)))?;
 
     info!(
         path = %path.display(),

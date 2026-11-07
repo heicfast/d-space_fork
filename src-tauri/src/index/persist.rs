@@ -18,7 +18,11 @@ pub struct Watermark {
 }
 
 /// Verilen ciltteki watermark'ı oku.
+/// Gemini review B5 — eski `.ok()` zinciri TÜM DB hatalarını (kilitli DB,
+/// bozulma, IO) "watermark yok" sanıp gereksiz full re-enumerate
+/// tetikliyordu. Artık yalnız satır-yok None; diğer hatalar yükselir.
 pub fn load_watermark(conn: &Connection, volume_id: &str) -> Result<Option<Watermark>> {
+    use rusqlite::OptionalExtension;
     conn.query_row(
         "SELECT next_usn, journal_id FROM usn_watermark WHERE volume_id = ?1",
         params![volume_id],
@@ -29,10 +33,8 @@ pub fn load_watermark(conn: &Connection, volume_id: &str) -> Result<Option<Water
             })
         },
     )
-    .ok()
-    .map(Some)
-    .map(Ok)
-    .unwrap_or(Ok(None))
+    .optional()
+    .map_err(|e| Error::Index(format!("load_watermark: {}", e)))
 }
 
 /// Watermark upsert.
@@ -181,6 +183,10 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<IndexS
 /// Bir file_ref için root'a kadar parent zinciri kur. SQLite
 /// `WITH RECURSIVE` kullanılır. Yalnız ilgili cilt içinde gez,
 /// 64 seviye ile sınırla (sonsuz döngüye karşı).
+///
+/// Gemini review B4 — NTFS root (file_ref 5, parent 5) self-join yapıp
+/// `C:\C:\C:\...` çöpü üretiyordu. Recursive terime `u.file_ref != c.file_ref`
+/// koşulu self-join'i keser; zincir root'ta durur.
 pub fn resolve_full_path(conn: &Connection, volume_id: &str, file_ref: i64) -> Result<String> {
     let mut stmt = conn
         .prepare(
@@ -192,7 +198,7 @@ pub fn resolve_full_path(conn: &Connection, volume_id: &str, file_ref: i64) -> R
                 SELECT u.file_ref, u.parent_ref, u.name, c.depth + 1
                 FROM usn_index u
                 JOIN chain c ON u.file_ref = c.parent_ref
-                WHERE u.volume_id = ?1 AND c.depth < 64
+                WHERE u.volume_id = ?1 AND c.depth < 64 AND u.file_ref != c.file_ref
             )
             SELECT name FROM chain",
         )
@@ -327,12 +333,9 @@ mod tests {
             sample(v, 30, 20, "report.docx", 4),
         ];
         save_entries(&mut conn, &entries).unwrap();
-        // 30 → engin/Users/C: zincirini bulmalı (self-ref kökte durur)
+        // 30 → Users → C: zinciri; root self-ref KESİLMELİ (Gemini review B4 —
+        // eskiden ~61 kez tekrar ediyordu).
         let path = resolve_full_path(&conn, v, 30).unwrap();
-        // recursive zincir kendisini sayar ama root self-ref ile döngü oluşur
-        // → depth 64 sınırı keser. Önemli: en az 4 parça olmalı.
-        assert!(path.contains("report.docx"));
-        assert!(path.contains("engin"));
-        assert!(path.contains("Users"));
+        assert_eq!(path, "C:\\Users\\engin\\report.docx");
     }
 }
