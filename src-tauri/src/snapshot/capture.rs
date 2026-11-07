@@ -297,7 +297,10 @@ mod tests {
         assert_eq!(volume_root_prefix(r"\\?\C:"), "C:\\");
         assert_eq!(volume_root_prefix(r"\\.\D:"), "D:\\");
         assert_eq!(volume_root_prefix("e:"), "E:\\");
-        assert_eq!(volume_root_prefix("//server/share"), "\\");
+        // Gemini review B20 — UNC volume artık geçerli çift-backslash kök
+        // döndürür (eskiden geçersiz tek "\" üretiyordu).
+        assert_eq!(volume_root_prefix("//server/share"), r"\\server\share");
+        assert_eq!(volume_root_prefix(r"\\fs01\projects"), r"\\fs01\projects");
     }
 
     #[test]
