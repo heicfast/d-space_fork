@@ -1,32 +1,14 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-#
-# D-Space Release — Master mimari Bölüm 21 (Build, İmzalama ve Dağıtım).
-#
-# Trigger: semantik versiyon tag push (örn. `git tag v0.1.0 && git push --tags`).
-# Çıktılar (Bölüm 21.2):
-#   * .msi (WiX)   — birincil installer
-#   * .exe (NSIS)  — alternatif installer
-# Tauri-action default olarak ikisini de üretir (bundle.targets = "all").
-#
-# Bölüm 21'den v0.2'ye ertelenenler:
-#   * Kod imzalama (EV/OV certificate) — Bölüm 18.2
-#   * ARM64 build matrisi — Bölüm 21.1 faz 2
-#   * winget / Scoop publish — Bölüm 21.3
-#
-# Sprint 3.6 (v0.2.0-beta) ile etkin: Tauri auto-updater feed. tauri-action
-# `includeUpdaterJson: true` ile `latest.json` üretir; GitHub release'in
-# son sürümüne otomatik yapışır. İmza için `TAURI_SIGNING_PRIVATE_KEY` ve
-# `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` GitHub Secrets'tan beslenir.
-#
-# İlk release alpha: imzasız → Windows SmartScreen "publisher unknown"
-# diyebilir. Kullanıcı uyarısı README'de.
-
 name: Release
 
+# DiskWizard release — tag push v*.*.* builds MSI + NSIS with updater
+# artifacts (.sig + latest.json signed via the Ed25519 key in repo secrets),
+# guarded by a version-match gate (tag must equal tauri.conf.json version).
+# The build runs with the REAL tauri connector (VITE_CONNECTOR=tauri) — a
+# mock-connector build must never ship.
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - "v*.*.*"
 
 concurrency:
   group: release-${{ github.ref }}
@@ -34,72 +16,88 @@ concurrency:
 
 jobs:
   build-and-release:
-    name: MSI + NSIS · windows-latest
-    runs-on: windows-latest
     permissions:
       contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    runs-on: windows-latest
 
-      - name: pnpm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version match gate
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CONF=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$TAG" != "$CONF" ]; then
+            echo "Tag v$TAG does not match tauri.conf.json version $CONF"
+            exit 1
+          fi
+          echo "Version gate passed: $TAG"
+
+      - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 12.15.0
 
-      - name: Node 22 + pnpm cache
+      - name: Install Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
-      - name: Rust stable
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cargo cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
 
-      - name: pnpm install --frozen-lockfile
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build + create release
-        uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Bölüm 21.4 — Tauri updater Ed25519 imzalama. Maintainer'ın
-          # `pnpm tauri signer generate` ile ürettiği private key GitHub
-          # Secrets'a (`TAURI_SIGNING_PRIVATE_KEY`) konur; password ayrı
-          # Secret. Public key `tauri.conf.json`'da. Secrets eksikse
-          # tauri-action imzasız bundle üretir + latest.json'da signature
-          # alanı boş kalır → istemci `signature verification failed`.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VITE_CONNECTOR: tauri
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "D-Space ${{ github.ref_name }}"
+          releaseName: "DiskWizard ${{ github.ref_name }}"
           releaseBody: |
-            ## D-Space ${{ github.ref_name }}
+            DiskWizard — Windows data recovery wizard and safe disk cleanup.
 
-            Görmek, anlamak, geri kazanmak.
+            **What's inside**
+            - Raw NTFS recovery engine: deleted-file discovery, confidence grading, bounded previews, verified recovery to any destination
+            - Space analysis with a 100-point safe-cleanup score and a guaranteed undo (staging + 24h restore window)
+            - Duplicate finder, snapshots, disk health, volume repair
+            - Fully local: no telemetry, no cloud
 
-            **Lisans:** GPL-3.0-or-later
-            **Spec:** D-Space-Mimari-v1.4.docx (Bölüm 28 Discovery Log canlı)
-            **Hedef:** Windows 10 1809+ / Windows 11
+            **Install**
+            - Windows 10 (1809+) / 11, x64. Two installers: `.msi` (WiX) and `-setup.exe` (NSIS).
+            - The app requests administrator privileges at launch — required for raw volume access, deleted-file recovery and the MFT engine.
 
-            Bu sürüm henüz EV cert ile imzalanmamış bir build (Bölüm 18.2
-            stable hedefi). SmartScreen "yayıncı bilinmiyor / publisher unknown"
-            uyarısı verebilir. Auto-updater (Tauri plugin-updater) etkin — yeni
-            sürümler imza eşleştikten sonra otomatik kurulur.
-
-            Geri bildirim: GitHub Issues.
+            **Notes**
+            - Builds are unsigned (EV certificate is a v1.0 roadmap item) — SmartScreen may warn on first run. Verify the SHA-256 checksums on the release assets.
+            - Licensed under GPL-3.0-or-later.
           releaseDraft: false
-          # Gemini review W2 — sabit `prerelease: true` `releases/latest`
-          # endpoint'ini 404'lüyordu (GitHub latest yalnız stabil release
-          # gösterir). Tag'de alpha/beta/rc geçiyorsa prerelease, aksi halde
-          # stabil yayınlanır — updater feed'i her iki durumda da çalışır.
           prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
-          # Sprint 3.6 — latest.json üretilir; istemci tauri.conf.json'daki
-          # endpoint üzerinden son sürümü doğrular + indirir.
           includeUpdaterJson: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd src-tauri/target/release/bundle
+          for f in msi/*.msi nsis/*.exe nsis/*.sig msi/*.sig latest.json; do
+            [ -f "$f" ] && sha256sum "$f" > "$f.sha256" || true
+          done
+          ls -R msi nsis 2>/dev/null || true
+
+      - name: Attach checksums to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            src-tauri/target/release/bundle/msi/*.msi.sha256
+            src-tauri/target/release/bundle/nsis/*.exe.sha256

@@ -1,0 +1,427 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * DiskGenie design tokens — BuildPrompt §14 (exact hex) extended with the
+ * owner-approved Lovable prototype visual system (semantic surface tokens +
+ * pastel tone families). One source of truth for every color/shape/metric.
+ *
+ * Light AND dark palettes are Apple-system-based per spec. Data pastels are
+ * theme-independent. Text on pastel fills is locked to #0F172A / #475569.
+ *
+ * SESSION 16 — the two-layer theme system (src/theme/themes.ts):
+ *   :root                      the LIGHT default palette.
+ *   [data-scheme="dark"]       the DARK-FAMILY layer (any dark-family
+ *                              theme: dark, ember, tide): control
+ *                              affordances, vivid tone family, skeleton/
+ *                              shimmer, elevation, color-scheme.
+ *   [data-theme="dark"]        the neutral graphite palette.
+ *   [data-theme="ember"]       warm espresso + honey gold.
+ *   [data-theme="tide"]        deep marine + lagoon cyan.
+ *   [data-theme="blossom"]     blush cream + rose (light family).
+ * Theme blocks come AFTER the scheme layer so a theme-specific
+ * override (e.g. Ember's compressed-segment color) always wins the
+ * family default. Attribute selectors share specificity with :root —
+ * source order decides, and :root is first by construction.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Surfaces (light) ─────────────────────────────────────────────── */
+  --background: #ffffff;
+  --panel: #f5f5f7;
+  --card: #ffffff;
+  --border: #d8d8dd;
+  --divider: #e5e5ea;
+  --chip: #f2f2f7;
+  --track: #e5e5ea;
+  --overlay: rgba(29, 29, 31, 0.16);
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --text: #1d1d1f;
+  --text-secondary: #6e6e73;
+  --text-tertiary: #8e8e93;
+  --on-pastel: #0f172a;
+  --on-pastel-secondary: #334155;
+
+  /* Control affordance (outline buttons, chips, pickers) — light values
+   * mirror the previous look; dark overrides them (see below). */
+  --on-control: #6e6e73;
+  --control-border: #d8d8dd;
+  --control-hover: #f2f2f7;
+  --control-active: #eaeaef;
+
+  /* ── Brand & status ───────────────────────────────────────────────── */
+  --ink: #ff6b4a;
+  --ink-strong: #f5522b;
+  --on-ink: #ffffff;
+  --ink-soft: rgba(255, 107, 74, 0.12);
+  /* Primary CTA treatment (reference: subtle top-light coral gradient +
+   * a warm glow shadow instead of a flat gray shadow). */
+  --ink-grad: linear-gradient(180deg, #ff7e5f 0%, #ff6b4a 55%, #f96036 100%);
+  --ink-glow: 0 2px 8px rgba(255, 107, 74, 0.32), 0 1px 2px rgba(245, 82, 43, 0.18);
+  --ink-glow-strong: 0 4px 14px rgba(255, 107, 74, 0.42), 0 1px 3px rgba(245, 82, 43, 0.2);
+  --used: #ff3b30;
+  --used-soft: rgba(255, 59, 48, 0.1);
+  --used-tint: rgba(255, 59, 48, 0.055);
+  --free: #34c759;
+  --free-soft: rgba(52, 199, 89, 0.12);
+  /* 0.8 alpha: 0.55 blended to ~1.8:1 on white/panel — below the
+   * 3:1 focus-indicator floor. 0.8 reads ~2.9:1 with the 2px width
+   * (effective contrast higher still). */
+  --focus-ring: rgba(255, 107, 74, 0.8);
+  --close-hover: #e81123;
+
+  /* ── Data pastels (theme-independent, spec §4 + doc 05 §1.1) ──────── */
+  --cat-video: #fda4af;
+  --cat-audio: #c4b5fd;
+  --cat-image: #7dd3fc;
+  --cat-document: #fcd34d;
+  --cat-developer: #86efac;
+  --cat-archive: #fdba74;
+  --cat-apps: #93c5fd;
+  --cat-system: #5eead4;
+  --cat-other: #cbd5e1;
+
+  /* ── By-folder tone families (8 pastels; shades vary by depth+index) */
+  --pastel-blue: #cfe0f7;
+  --pastel-mint: #cdf0e6;
+  --pastel-violet: #e3d8f5;
+  --pastel-amber: #f9ecc3;
+  --pastel-rose: #f9dde1;
+  --pastel-green: #d4efc9;
+  --pastel-sky: #d9ecf9;
+  --pastel-slate: #e6e8ea;
+
+  /* ── Age buckets (spec §7 color modes) ────────────────────────────── */
+  --age-0: #34d399;
+  --age-1: #60a5fa;
+  --age-2: #818cf8;
+  --age-3: #a78bfa;
+  --age-4: #f472b6;
+  --age-5: #f87171;
+
+  /* ── Data-layer literals (theme-aware) ──────────────────────────
+   * Monitor memory-map "Compressed" band — amber between used-red and
+   * ink; a data color, not chrome, so it lives with the other data
+   * tokens (dark gets a slightly lifted amber for the panel bg). */
+  --seg-compressed: #f59e0b;
+
+  /* ── Shape & motion (spec §14) ────────────────────────────────────── */
+  --radius-xs: 6px;
+  --radius-s: 8px;
+  --radius-m: 10px;
+  --radius-l: 12px;
+  --radius-xl: 14px;
+  --press-scale: 0.985;
+  --press-opacity: 0.75;
+  --spring: 250ms;
+  --fade: 160ms;
+
+  /* ── Motion system v2 (one family, harmonized tempo) ───────────────
+   * Durations sit on a 0.5×/0.75×/1×/1.5×/2× ladder anchored at the
+   * 160ms fade; indeterminate loops (spinner 0.92s, shimmer 1.38s,
+   * strip 1.15s) are 5.75×/8.6×/7.2× — one rhythm family, so
+   * concurrent loaders read as a chorus, not a quarrel.
+   * The framer spring presets live in src/lib/motion.ts (JS springs
+   * can't be expressed as CSS vars). */
+  --dur-micro: 120ms; /* menus, chips, hover swaps */
+  --dur-fast: 160ms; /* = --fade: entrances, scrim */
+  --dur-base: 240ms; /* layout settles, scan bar */
+  --dur-slow: 360ms; /* large surfaces, inspector slide */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.5, 0.05, 0.4, 1);
+  --ease-overshoot: cubic-bezier(0.2, 0.9, 0.3, 1.15);
+
+  /* ── Spacing scale (4px base; the half-steps 6/10/14 exist for dense
+   * UI rows) ───────────────────────────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 56px;
+
+  /* ── Focus geometry (ring WIDTH/OFFSET were hardcoded in 4 places;
+   * color already had --focus-ring) ────────────────────────────────── */
+  --focus-w: 2px;
+  --focus-offset: 2px;
+
+  /* ── Status on-colors (white text on used/free fills was hardcoded
+   * 6×) ───────────────────────────────────────────────────────────── */
+  --on-used: #ffffff;
+  --on-free: #ffffff;
+  --on-close: #ffffff;
+
+  /* ── Loading system (v2): skeleton + shimmer speak the surface
+   * language of whichever theme is active ──────────────────────────── */
+  --skeleton: #e9e9ee;
+  --shimmer: rgba(255, 255, 255, 0.65);
+
+  /* ── State opacity (disabled was 0.45/0.5/0.55/0.35 in four files) ── */
+  --disabled-opacity: 0.5;
+
+  /* ── Elevation ────────────────────────────────────────────────────── */
+  --shadow-1: 0 1px 2px rgba(29, 29, 31, 0.06), 0 1px 3px rgba(29, 29, 31, 0.05);
+  --shadow-2: 0 4px 10px rgba(29, 29, 31, 0.08), 0 2px 4px rgba(29, 29, 31, 0.05);
+  --shadow-3: 0 12px 28px rgba(29, 29, 31, 0.14), 0 4px 8px rgba(29, 29, 31, 0.06);
+  /* Pop elevation: crisp 1px contact edge + mid + ambient. The old
+   * two-layer ambient read as muddy against saturated treemap fills
+   * (round-16 CI audit: modal edges blended into bright cells). */
+  --shadow-pop: 0 1px 2px rgba(29, 29, 31, 0.12), 0 8px 20px rgba(29, 29, 31, 0.13), 0 16px 44px rgba(29, 29, 31, 0.17);
+  --card-sheen: linear-gradient(125deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 55%);
+
+  /* ── Typography (spec §3) ─────────────────────────────────────────── */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+
+  /* ── Layout metrics (spec §3: locked) ─────────────────────────────── */
+  --top-bar-h: 56px;
+  --sidebar-w: 312px;
+  --inspector-w: 344px;
+  --caption-btn-w: 46px;
+  --caption-btn-h: 32px;
+  --sidebar-w-compact: 276px;
+  --inspector-w-compact: 304px;
+
+  /* ── Density ladder breakpoints (responsive degrade) ────────────────
+   * DOCUMENTATION-ONLY constants: media queries cannot consume custom
+   * properties (a CSS spec limitation), so the real queries hardcode
+   * these px values inline. They live here as the single named source
+   * the queries must match — 1280 is the enforced window minimum
+   * (tauri.conf.json minWidth), not 1120. */
+  --bp-compact: 1500px;
+  --bp-narrow: 1280px;
+
+  color-scheme: light;
+}
+
+/* ── The DARK-FAMILY layer (dark | ember | tide) ──────────────────
+ * Everything shared by ANY dark-family palette. The tone-family
+ * switch (pastels → vivids) lives here: the .tone-* utilities
+ * (sidebar.css) resolve against this block, and CanvasViz's cell
+ * saturation boost reads data-scheme directly. */
+[data-scheme="dark"] {
+  /* Control affordance — brightened so outline buttons, chips and
+   * pickers stay obviously interactive on dark surfaces (panel-adjacent
+   * card fills blend at #52525a; VLM dark audit round 2). #7a7a85 is
+   * the validated outline-button contrast (≈3.4:1 vs panel) — now THE
+   * control border for the whole family (icon buttons, chips, search
+   * capsule previously sat at #606069 ≈ 2.5:1: same family, two
+   * borders). */
+  --on-control: #e8e8ed;
+  --control-border: #7a7a85;
+  --control-hover: rgba(255, 255, 255, 0.07);
+  --control-active: rgba(255, 255, 255, 0.11);
+
+  /* Loading system v2 (dark family): skeletons lift off the panel;
+   * the shimmer is a subtle white wash, not a bright band. A
+   * warm/cool palette may re-tint the skeleton below (ember/tide do). */
+  --skeleton: #323234;
+  --shimmer: rgba(255, 255, 255, 0.07);
+
+  /* Data-layer literals (dark family): amber lifted for dark panels.
+   * (Ember overrides — its honey ink sits in the amber hue space.) */
+  --seg-compressed: #f5a623;
+
+  /* Dark tone family (vivid variants) — the pastels above are
+   * LIGHT-mode material: L≈0.90 with C≈0.03. Every dark-mode recipe
+   * mixed them into surface grays, which keeps the lightness but
+   * halves the already-low chroma — all eight tones collapsed into
+   * the same faint gray wash (owner report: the Top Sizes bars read
+   * "too faint or similar" in dark; clearly distinct in light). Dark
+   * mode gets its own family: the same eight hues at L≈0.62-0.68 with
+   * real chroma, so the tuned dark recipes land with actual color
+   * instead of gray. The .tone-* utilities resolve to this family in
+   * dark (see sidebar.css); light mode is untouched. */
+  --vivid-blue: #5d8fe0;
+  --vivid-mint: #3ec39a;
+  --vivid-violet: #9678e6;
+  --vivid-amber: #dca43e;
+  --vivid-rose: #e66a80;
+  --vivid-green: #61b857;
+  --vivid-sky: #45aede;
+  --vivid-slate: #8b95a3;
+
+  /* ── Elevation (deeper in the dark family) ──────────────────── */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 10px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 12px 28px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 1px 2px rgba(0, 0, 0, 0.55), 0 8px 20px rgba(0, 0, 0, 0.55), 0 16px 44px rgba(0, 0, 0, 0.7);
+  --card-sheen: linear-gradient(125deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 55%);
+
+  color-scheme: dark;
+}
+
+/* ── Dark (neutral graphite + coral) ──────────────────────────────── */
+[data-theme="dark"] {
+  /* ── Surfaces ────────────────────────────────────────────────────── */
+  --background: #1e1e20;
+  --panel: #28282b;
+  --card: #2c2c2e;
+  --border: #46464c;
+  --divider: #38383a;
+  --chip: #3a3a3c;
+  --track: #3a3a3c;
+  --overlay: rgba(0, 0, 0, 0.5);
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --text: #f5f5f7;
+  --text-secondary: #aeaeb2;
+  --text-tertiary: #9a9aa1;
+
+  /* ── Brand & status ───────────────────────────────────────────────── */
+  --ink: #ff7a5c;
+  --ink-strong: #ff8a6e;
+  --on-ink: #ffffff;
+  --ink-soft: rgba(255, 122, 92, 0.16);
+  --ink-grad: linear-gradient(180deg, #ff9070 0%, #ff7a5c 55%, #f96c48 100%);
+  --ink-glow: 0 2px 8px rgba(255, 122, 92, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --ink-glow-strong: 0 4px 14px rgba(255, 122, 92, 0.38), 0 1px 3px rgba(0, 0, 0, 0.22);
+  --used: #ff453a;
+  --used-soft: rgba(255, 69, 58, 0.14);
+  --used-tint: rgba(255, 69, 58, 0.08);
+  --free: #30d158;
+  --free-soft: rgba(48, 209, 88, 0.14);
+  --focus-ring: rgba(255, 122, 92, 0.6);
+}
+
+/* ── Ember (warm espresso + honey gold) ─────────────────────────────
+ * The candlelit-workshop palette: warm espresso surfaces carry the
+ * same geometry/contrast relationships as graphite, with a honey-gold
+ * ink. Gold is a HIGH-luminance accent, so on-ink flips to deep
+ * espresso (dark-on-gold ≈ 8:1 — the inverse of white-on-coral);
+ * every ink-filled control already speaks --on-ink, so the whole
+ * button vocabulary flips cleanly. --seg-compressed moves out of the
+ * amber hue space (too close to the gold ink) into copper. */
+[data-theme="ember"] {
+  /* ── Surfaces ────────────────────────────────────────────────────── */
+  --background: #201a15;
+  --panel: #292119;
+  --card: #2e2620;
+  --border: #4a3d2e;
+  --divider: #382e23;
+  --chip: #362c21;
+  --track: #3a3026;
+  --overlay: rgba(12, 8, 4, 0.55);
+
+  /* ── Text (warm ivory ladder) ─────────────────────────────────────── */
+  --text: #f7f1e8;
+  --text-secondary: #b9a894;
+  --text-tertiary: #98897a;
+
+  /* Warm-tinted skeleton (the family default is a neutral gray —
+   * on espresso it reads as a cold patch). */
+  --skeleton: #352a1f;
+  --shimmer: rgba(255, 240, 214, 0.06);
+
+  /* ── Brand & status ───────────────────────────────────────────────── */
+  --ink: #f2b04e;
+  --ink-strong: #ffc464;
+  --on-ink: #33230a;
+  --ink-soft: rgba(242, 176, 78, 0.16);
+  --ink-grad: linear-gradient(180deg, #ffd27a 0%, #f2b04e 55%, #d9902c 100%);
+  --ink-glow: 0 2px 8px rgba(242, 176, 78, 0.3), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --ink-glow-strong: 0 4px 14px rgba(242, 176, 78, 0.4), 0 1px 3px rgba(0, 0, 0, 0.28);
+  --used: #ff453a;
+  --used-soft: rgba(255, 69, 58, 0.14);
+  --used-tint: rgba(255, 69, 58, 0.08);
+  --free: #30d158;
+  --free-soft: rgba(48, 209, 88, 0.14);
+  --focus-ring: rgba(242, 176, 78, 0.65);
+
+  /* Copper — distinct lightness AND hue step from both the honey ink
+   * and the red used-band on the Monitor memory map. */
+  --seg-compressed: #b5733c;
+}
+
+/* ── Tide (deep marine + lagoon cyan) ───────────────────────────────
+ * The midnight-ocean palette: marine-blue surfaces with a lagoon
+ * cyan ink. Cyan is high-luminance, so on-ink is deep marine (the
+ * same dark-on-bright contrast solve as Ember's gold). Amber stays
+ * the compressed-segment color — on deep blue it is maximally
+ * distinct from every other segment. */
+[data-theme="tide"] {
+  /* ── Surfaces ────────────────────────────────────────────────────── */
+  --background: #101722;
+  --panel: #18202e;
+  --card: #1c2534;
+  --border: #3c4a61;
+  --divider: #263040;
+  --chip: #223046;
+  --track: #263149;
+  --overlay: rgba(2, 6, 14, 0.55);
+
+  /* ── Text (cool white ladder) ─────────────────────────────────────── */
+  --text: #eef4fb;
+  --text-secondary: #a5b3c8;
+  --text-tertiary: #8393ab;
+
+  /* Cool-tinted skeleton (the family neutral reads warm on marine). */
+  --skeleton: #1f2837;
+  --shimmer: rgba(224, 242, 254, 0.06);
+
+  /* ── Brand & status ───────────────────────────────────────────────── */
+  --ink: #3fc5f2;
+  --ink-strong: #63d2f8;
+  --on-ink: #072431;
+  --ink-soft: rgba(63, 197, 242, 0.15);
+  --ink-grad: linear-gradient(180deg, #71d9fb 0%, #3fc5f2 55%, #1fa6d8 100%);
+  --ink-glow: 0 2px 8px rgba(63, 197, 242, 0.28), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --ink-glow-strong: 0 4px 14px rgba(63, 197, 242, 0.38), 0 1px 3px rgba(0, 0, 0, 0.28);
+  --used: #ff453a;
+  --used-soft: rgba(255, 69, 58, 0.14);
+  --used-tint: rgba(255, 69, 58, 0.08);
+  --free: #30d158;
+  --free-soft: rgba(48, 209, 88, 0.14);
+  --focus-ring: rgba(63, 197, 242, 0.6);
+}
+
+/* ── Blossom (blush cream + rose) ───────────────────────────────────
+ * The cherry-blossom-morning palette: warm blush surfaces, white
+ * cards that pop off them, and a rich rose ink. Rose is a
+ * mid-luminance accent — white on-ink keeps ≈3.6:1 (above the coral
+ * baseline the light default ships). Light family: the pastel tone
+ * family, the neutral skeletons and the soft elevation all apply. */
+[data-theme="blossom"] {
+  /* ── Surfaces ────────────────────────────────────────────────────── */
+  --background: #fbf1ee;
+  --panel: #f6e9e5;
+  --card: #ffffff;
+  --border: #e5d0ca;
+  --divider: #eedcd7;
+  --chip: #f4e5e1;
+  --track: #eedcd8;
+  --overlay: rgba(90, 40, 35, 0.16);
+
+  /* ── Text (rosewood ladder) ───────────────────────────────────────── */
+  --text: #3b2428;
+  --text-secondary: #8a6568;
+  --text-tertiary: #a38083;
+
+  /* Control affordance — the light family's muted values, warmed. */
+  --on-control: #8a6568;
+  --control-border: #e0c6c0;
+  --control-hover: #f5e8e5;
+  --control-active: #efdcd7;
+
+  /* ── Brand & status ───────────────────────────────────────────────── */
+  --ink: #d8506b;
+  --ink-strong: #c7405d;
+  --on-ink: #ffffff;
+  --ink-soft: rgba(216, 80, 107, 0.12);
+  --ink-grad: linear-gradient(180deg, #ec6d84 0%, #d8506b 55%, #c43b58 100%);
+  --ink-glow: 0 2px 8px rgba(216, 80, 107, 0.3), 0 1px 2px rgba(196, 59, 88, 0.18);
+  --ink-glow-strong: 0 4px 14px rgba(216, 80, 107, 0.4), 0 1px 3px rgba(196, 59, 88, 0.2);
+  --used: #ff3b30;
+  --used-soft: rgba(255, 59, 48, 0.1);
+  --used-tint: rgba(255, 59, 48, 0.055);
+  --free: #34c759;
+  --free-soft: rgba(52, 199, 89, 0.12);
+  --focus-ring: rgba(216, 80, 107, 0.8);
+
+  /* Blush skeleton (the neutral gray reads cold on cream). */
+  --skeleton: #eee0dc;
+  --shimmer: rgba(255, 255, 255, 0.65);
+
+  color-scheme: light;
+}

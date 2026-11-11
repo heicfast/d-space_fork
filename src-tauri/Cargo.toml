@@ -1,15 +1,15 @@
 [package]
-name = "dspace"
-version = "0.3.0"
-description = "D-Space — Windows için akıllı disk analiz ve geri kazanım platformu"
-authors = ["D-Space contributors"]
+name = "diskwizard"
+version = "0.4.0"
+description = "DiskWizard — Windows data recovery wizard and safe disk cleanup"
+authors = ["DiskWizard contributors"]
 license = "GPL-3.0-or-later"
 repository = "https://github.com/heicfast/d-space_fork"
 edition = "2021"
 rust-version = "1.80"
 
 [lib]
-name = "dspace_lib"
+name = "diskwizard_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -17,8 +17,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
-tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
+tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "D-Space",
-  "version": "0.3.0",
-  "identifier": "app.dspace",
+  "productName": "DiskWizard",
+  "version": "0.4.0",
+  "identifier": "com.heicfast.diskwizard",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -10,31 +10,33 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": false,
     "windows": [
       {
+        "title": "DiskWizard",
         "label": "main",
-        "title": "D-Space",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 1024,
-        "minHeight": 720,
+        "width": 1240,
+        "height": 840,
+        "minWidth": 800,
+        "minHeight": 600,
+        "center": true,
         "resizable": true,
-        "fullscreen": false,
-        "decorations": true
+        "maximized": true,
+        "decorations": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' ipc: http://ipc.localhost; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src ipc: http://ipc.localhost; script-src 'self'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "publisher": "D-Space",
+    "publisher": "DiskWizard",
     "category": "Utility",
-    "shortDescription": "Akıllı disk analiz ve geri kazanım",
-    "longDescription": "D-Space, Windows üzerinde disk alanını saniyeler içinde haritalayan, ne silinebileceğini bilen ve geri alma garantisi sunan akıllı disk analiz platformudur.",
-    "copyright": "Copyright (C) 2026 D-Space contributors. Licensed under GPL-3.0-or-later.",
+    "shortDescription": "Windows data recovery wizard and safe disk cleanup",
+    "longDescription": "DiskWizard finds lost and deleted files with a raw NTFS engine, recovers them safely, visualizes disk usage, and cleans up with a guaranteed undo.",
+    "copyright": "Copyright (C) 2026 DiskWizard contributors. Licensed under GPL-3.0-or-later.",
     "licenseFile": "../LICENSE",
     "icon": [
       "icons/32x32.png",
@@ -43,10 +45,21 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "both",
+        "languages": ["English", "SimpChinese"],
+        "displayLanguageSelector": true,
+        "headerImage": "nsis-header.bmp"
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
     "createUpdaterArtifacts": true
   },
   "plugins": {
-    "//": "Bölüm 21.4 — Tauri auto-updater. Sprint 3.6 (v0.2.0-beta). Endpoint GitHub releases latest.json'u işaret eder; release workflow `includeUpdaterJson: true` ile bu dosyayı üretir. Pubkey Ed25519 (2026-05-17 üretildi); private key + password GitHub Secrets'ta (`TAURI_SIGNING_PRIVATE_KEY` + `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`). Detaylar: docs/RELEASE_CHECKLIST.md §2.",
     "updater": {
       "endpoints": [
         "https://github.com/heicfast/d-space_fork/releases/latest/download/latest.json"

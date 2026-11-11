@@ -1,0 +1,93 @@
+name: UI Smoke
+
+# E2E smoke against the built frontend served by `vite preview` in mock
+# connector mode (deterministic, fast — the UI surfaces under test are
+# connector-isolated), plus a debug Tauri build proving the desktop shell
+# links and capabilities compile.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ui-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Playwright smoke (mock connector)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build (mock connector)
+        run: pnpm build
+        env:
+          VITE_CONNECTOR: mock
+
+      - name: Run e2e
+        run: pnpm e2e
+        env:
+          CI: "true"
+
+      - name: Upload smoke screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screens
+          path: test-results/
+          retention-days: 7
+
+      - name: Upload playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  tauri-debug-build:
+    name: Tauri debug link check (mock connector)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.15.0
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Debug build (no bundle)
+        run: pnpm tauri build --debug --no-bundle
+        env:
+          VITE_CONNECTOR: mock

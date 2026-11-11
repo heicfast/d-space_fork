@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>titlebar_btn_min_nor</title>
+    <g id="titlebar_btn_min_nor" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <path d="M5.75,11.25 L18.25,11.25 C18.6642136,11.25 19,11.5857864 19,12 C19,12.4142136 18.6642136,12.75 18.25,12.75 L5.75,12.75 C5.33578644,12.75 5,12.4142136 5,12 C5,11.5857864 5.33578644,11.25 5.75,11.25 Z" id="矩形备份-2" fill="#B0B5C0" fill-rule="nonzero"></path>
+    </g>
+</svg>

@@ -9,15 +9,15 @@
 
 ## 1. Locked GitHub metadata
 
-| Alan | Değer |
-|---|---|
-| **Owner/Repo** | `heicfast/d-space_fork` |
-| **Visibility** | public |
-| **Default branch** | `main` |
-| **License (SPDX)** | `GPL-3.0` (or-later) |
-| **Description** | `Smart disk analyzer and recovery platform for Windows — MFT-fast scanning, 0-100 safe-to-delete scoring, staging+undo guarantee with cross-volume two-phase commit. Tauri v2 + Vue 3 + Rust.` |
-| **Homepage** | `https://github.com/heicfast/d-space_fork/releases` |
-| **Topics (20)** | `blake3, developer-tools, disk-analyzer, disk-space, disk-usage, filesystem, mft, ntfs, open-source, rust, safe-delete, sqlite, staging, storage, sunburst, tauri, tauri-v2, undo, vue, windows` |
+| Alan               | Değer                                                                                                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Owner/Repo**     | `heicfast/d-space_fork`                                                                                                                                                                          |
+| **Visibility**     | public                                                                                                                                                                                           |
+| **Default branch** | `main`                                                                                                                                                                                           |
+| **License (SPDX)** | `GPL-3.0` (or-later)                                                                                                                                                                             |
+| **Description**    | `Smart disk analyzer and recovery platform for Windows — MFT-fast scanning, 0-100 safe-to-delete scoring, staging+undo guarantee with cross-volume two-phase commit. Tauri v2 + Vue 3 + Rust.`   |
+| **Homepage**       | `https://github.com/heicfast/d-space_fork/releases`                                                                                                                                              |
+| **Topics (20)**    | `blake3, developer-tools, disk-analyzer, disk-space, disk-usage, filesystem, mft, ntfs, open-source, rust, safe-delete, sqlite, staging, storage, sunburst, tauri, tauri-v2, undo, vue, windows` |
 
 Değişiklik yaparsanız bu tabloyu güncelleyin + remote'a yansıtın.
 
@@ -55,8 +55,8 @@ Değişiklik yaparsanız bu tabloyu güncelleyin + remote'a yansıtın.
 
 **Smart disk analyzer and recovery platform for Windows**
 
-*MFT-hızlı tarama, güvenli silme skorlaması, garantili undo*
-*MFT-fast scanning, safe-to-delete scoring, guaranteed undo*
+_MFT-hızlı tarama, güvenli silme skorlaması, garantili undo_
+_MFT-fast scanning, safe-to-delete scoring, guaranteed undo_
 
 🌐 **TR · EN** — ...
 

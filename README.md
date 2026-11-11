@@ -3,17 +3,17 @@
 # D-Space
 
 **Akıllı Disk Analiz ve Geri Kazanım Platformu — Windows için**
-*Smart disk analysis & recovery platform for Windows*
+_Smart disk analysis & recovery platform for Windows_
 
-*Görmek, anlamak, geri kazanmak.*
-*See, understand, reclaim.*
+_Görmek, anlamak, geri kazanmak._
+_See, understand, reclaim._
 
 🌐 **TR · EN** — Bu README iki dillidir / This README is bilingual (English collapsibles below each section)
 
 > ℹ️ **Bu depo / This repository:** `heicfast/d-space_fork` — upstream
 > [AmrasElessar/d-space](https://github.com/AmrasElessar/d-space)'in sürüm kanalı
 > ayrımı. Upstream katkıları için orijinal depoyu kullanın.
-> *Release channel fork of the upstream project; use the original repo for upstream contributions.*
+> _Release channel fork of the upstream project; use the original repo for upstream contributions._
 
 </div>
 
@@ -37,7 +37,7 @@
 <div align="center">
 
 > 🎥 Demo video yakında — Faz 1 sunburst donut + drilldown + staging/undo akışlarını kapsayan kayıt hazırlanıyor.
-> *Demo video coming soon — a recording covering Phase 1 sunburst donut + drilldown + staging/undo flows is in progress.*
+> _Demo video coming soon — a recording covering Phase 1 sunburst donut + drilldown + staging/undo flows is in progress._
 
 `[ Sunburst donut · drilldown · staging recovery · cross-volume two-phase commit ]`
 
@@ -65,7 +65,7 @@ Built on **Tauri v2** + **Rust 1.80+** + **Vue 3** + **SQLite (WAL)** under the 
 ## 🆕 Yenilikler / What's Done
 
 > Faz 1 implementasyonu devam ediyor. Spec v1.4 dondurulmuş (37 bölüm); kod sırasında çıkan keşifler Bölüm 28 Discovery Log'a düşer. Aşağıda bugüne kadarki çıkış noktaları.
-> *Phase 1 in progress. Spec v1.4 is frozen (37 sections); discoveries during coding land in Section 28 Discovery Log. Highlights so far below.*
+> _Phase 1 in progress. Spec v1.4 is frozen (37 sections); discoveries during coding land in Section 28 Discovery Log. Highlights so far below._
 
 - 📦 **v0.3.0-beta · 159 Rust (+9 VSS-gated) + 34 frontend + 6 e2e test geçiyor · 5/5 pillar canlı**
 - ⚡ **MFT tarama motoru** — `ntfs` crate üzerine MFT probe + full walk + FindFirstFile fallback (3 katmanlı yetki stratejisi, UAC ilk açılışta sorulmuyor)
@@ -186,13 +186,13 @@ pnpm build
 
 ### 🏛️ Beş Pillar / Five Pillars (Bölüm / Section 3)
 
-| # | Pillar | Durum / Status |
-|---|--------|----------------|
-| 1 | **Hız / Speed** — MFT motoru / engine | ✅ MFT probe + full walk + FindFirstFile fallback |
-| 2 | **Görsel zarafet / Visual elegance** — sunburst/treemap/bubble/timeline | ✅ Sunburst donut + drilldown + breadcrumb |
-| 3 | **Zeka katmanı / Intelligence layer** — 50+ kural / rules + ML tier | ✅ 72 kural / rules, 4 renk tier / 4-color tier (kırmızı/sarı/yeşil/mavi); ML v2 |
-| 4 | **Zaman boyutu / Time dimension** — günlük snapshot + delta / daily snapshot + delta | ✅ Capture + delta (added/removed/grew/shrunk top 10) |
-| 5 | **Geri kazanım garantisi / Recovery guarantee** — staging + undo | ✅ Same-volume + cross-volume two-phase commit + WAL |
+| #   | Pillar                                                                               | Durum / Status                                                                   |
+| --- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| 1   | **Hız / Speed** — MFT motoru / engine                                                | ✅ MFT probe + full walk + FindFirstFile fallback                                |
+| 2   | **Görsel zarafet / Visual elegance** — sunburst/treemap/bubble/timeline              | ✅ Sunburst donut + drilldown + breadcrumb                                       |
+| 3   | **Zeka katmanı / Intelligence layer** — 50+ kural / rules + ML tier                  | ✅ 72 kural / rules, 4 renk tier / 4-color tier (kırmızı/sarı/yeşil/mavi); ML v2 |
+| 4   | **Zaman boyutu / Time dimension** — günlük snapshot + delta / daily snapshot + delta | ✅ Capture + delta (added/removed/grew/shrunk top 10)                            |
+| 5   | **Geri kazanım garantisi / Recovery guarantee** — staging + undo                     | ✅ Same-volume + cross-volume two-phase commit + WAL                             |
 
 ### 🏗️ Mimari İlkeler / Architectural Principles
 
@@ -244,18 +244,18 @@ pnpm build
 
 ## 🛠️ Teknoloji / Tech Stack
 
-| Katman / Layer | Teknoloji / Technology |
-|----------------|------------------------|
-| **Backend** | Rust 1.80+ — `ntfs`, `windows-rs`, `rusqlite` + `rusqlite_migration`, `blake3`, `tokio`, `tracing`, `thiserror`, `dirs` |
-| **Frontend** | Vue 3 + TypeScript + Vite — hand-rolled SVG sunburst (d3 yok / no d3) |
-| **Shell** | Tauri 2.x |
-| **DB** | SQLite — WAL mode, `busy_timeout=5000`, `synchronous=NORMAL` |
-| **Platform** | Windows 10/11 x64 (ARM64 Faz 2 / Phase 2) |
+| Katman / Layer | Teknoloji / Technology                                                                                                  |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **Backend**    | Rust 1.80+ — `ntfs`, `windows-rs`, `rusqlite` + `rusqlite_migration`, `blake3`, `tokio`, `tracing`, `thiserror`, `dirs` |
+| **Frontend**   | Vue 3 + TypeScript + Vite — hand-rolled SVG sunburst (d3 yok / no d3)                                                   |
+| **Shell**      | Tauri 2.x                                                                                                               |
+| **DB**         | SQLite — WAL mode, `busy_timeout=5000`, `synchronous=NORMAL`                                                            |
+| **Platform**   | Windows 10/11 x64 (ARM64 Faz 2 / Phase 2)                                                                               |
 
 ### 📐 Mimari Belgeleri / Architecture Documents
 
 Mimari kararlar ve detaylı tasarım için: **`D-Space-Mimari-v1.4.docx`** (repo kökü / repo root) — 37 bölüm, dondurulmuş / frozen.
-*For architectural decisions and detailed design: see `D-Space-Mimari-v1.4.docx` in the repo root — 37 sections, frozen.*
+_For architectural decisions and detailed design: see `D-Space-Mimari-v1.4.docx` in the repo root — 37 sections, frozen._
 
 > 🌐 Domain: `dspace.app` (planlanan / planned)
 
@@ -263,15 +263,15 @@ Mimari kararlar ve detaylı tasarım için: **`D-Space-Mimari-v1.4.docx`** (repo
 
 ## 🗺️ Yol Haritası / Roadmap
 
-| Faz / Phase | Hedef / Target | İçerik / Content |
-|-------------|----------------|------------------|
-| **Faz 1 / Phase 1** | 🟡 devam ediyor / in progress | Spec v1.4 dondurulmuş / frozen; 5/5 pillar canlı / live; sunburst donut + staging/undo + cross-volume two-phase commit; 33 kural / rules; 36/36 test |
-| **Faz 1.5 / Phase 1.5** | sonraki / next | Treemap + bubble + timeline görselleri / visuals; kural sayısı 50+ / rule count 50+; performans tuning |
-| **Faz 2 / Phase 2** | ileri / later | **ARM64 desteği / support**, **ML v2** zeka katmanı / intelligence layer (kullanıcı davranışı kalibrasyonu / user-behavior calibration), Microsoft Store hazırlığı / prep |
-| **Faz 3 / Phase 3** | — | Çoklu dil / Multi-language UI, paylaşılan rapor / shared reports, plugin sistemi / plugin system |
+| Faz / Phase             | Hedef / Target                | İçerik / Content                                                                                                                                                          |
+| ----------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Faz 1 / Phase 1**     | 🟡 devam ediyor / in progress | Spec v1.4 dondurulmuş / frozen; 5/5 pillar canlı / live; sunburst donut + staging/undo + cross-volume two-phase commit; 33 kural / rules; 36/36 test                      |
+| **Faz 1.5 / Phase 1.5** | sonraki / next                | Treemap + bubble + timeline görselleri / visuals; kural sayısı 50+ / rule count 50+; performans tuning                                                                    |
+| **Faz 2 / Phase 2**     | ileri / later                 | **ARM64 desteği / support**, **ML v2** zeka katmanı / intelligence layer (kullanıcı davranışı kalibrasyonu / user-behavior calibration), Microsoft Store hazırlığı / prep |
+| **Faz 3 / Phase 3**     | —                             | Çoklu dil / Multi-language UI, paylaşılan rapor / shared reports, plugin sistemi / plugin system                                                                          |
 
 > 📌 Spec v1.4 dondurulmuş — yeni revizyon eklenmez; kod yazılırken çıkan keşifler **Bölüm 28 Discovery Log'a** düşer.
-> *Spec v1.4 is frozen — no new revisions; coding-time discoveries go into **Section 28 Discovery Log**.*
+> _Spec v1.4 is frozen — no new revisions; coding-time discoveries go into **Section 28 Discovery Log**._
 
 ---
 
@@ -304,16 +304,16 @@ Mimari kararlar ve detaylı tasarım için: **`D-Space-Mimari-v1.4.docx`** (repo
 
 D-Space **kişisel bir D Brand projesidir** ve topluluk katkı kapsamı bilinçli olarak dar tutulmuştur. Mimari spec v1.4 **dondurulmuş**; çekirdek pillar geliştirme tek elden ilerliyor. Topluluğun değer katabileceği şeritler aşağıdadır.
 
-| ✅ Kabul edilen / Accepted | ❌ Şu an kabul edilmeyen / Not currently accepted |
-|----------------------------|--------------------------------------------------|
-| 🐛 Bug raporu / Bug reports | 🏗️ Mimari / refactor PR'ları / PRs |
-| 💡 Feature **fikri / ideas** (Issue) | ✨ Yeni pillar / yeni kural / yeni view PR'ı / PRs |
+| ✅ Kabul edilen / Accepted                         | ❌ Şu an kabul edilmeyen / Not currently accepted                                       |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| 🐛 Bug raporu / Bug reports                        | 🏗️ Mimari / refactor PR'ları / PRs                                                      |
+| 💡 Feature **fikri / ideas** (Issue)               | ✨ Yeni pillar / yeni kural / yeni view PR'ı / PRs                                      |
 | 📊 Performans regression / Performance regressions | 🔧 Spec değişikliği teklifleri (spec dondurulmuş) / Spec change proposals (spec frozen) |
-| 🧪 Test case / Test cases | |
-| 📚 Belgeleme / Documentation | |
+| 🧪 Test case / Test cases                          |                                                                                         |
+| 📚 Belgeleme / Documentation                       |                                                                                         |
 
 > Spec v1.4 dondurulduğu için **mimari önerilerin Bölüm 28 Discovery Log'a** girmesi gerekir.
-> *Because spec v1.4 is frozen, **architectural proposals must go through Section 28 Discovery Log**.*
+> _Because spec v1.4 is frozen, **architectural proposals must go through Section 28 Discovery Log**._
 
 <details>
 <summary>🇬🇧 Contributing (English)</summary>
@@ -328,14 +328,14 @@ D-Space is a **personal D Brand project**, and the community contribution scope 
 
 D-Space, D Brand ailesinin Windows disk analiz ayağıdır. Aile üyeleri "Denizhan" adından ilham alır.
 
-| Ürün / Product | Platform | Açıklama / Description |
-|-----------------|----------|------------------------|
-| **D-Terminal** | Windows | Agent-aware Windows terminal *(pre-alpha — [github.com/AmrasElessar/d-terminal](https://github.com/AmrasElessar/d-terminal))* |
-| **D-Space** | Windows | Smart disk analyzer with recovery guarantee *(bu proje, alpha / this project, alpha)* |
-| **D-Player** | Android | Kişisel müzik çalar, DSP motoru / personal music player with DSP engine *(in development)* |
-| **DCar Launcher** | Android (Auto) | Head Unit araç içi OS katmanı / Head Unit in-car OS layer *(in development)* |
-| **D-Watchtower** | — | Gözetim ve izleme platformu / surveillance & monitoring platform *(in development)* |
-| **D-FTP Client** | Windows | Modern FTP/SFTP istemcisi / modern FTP/SFTP client *(in development)* |
+| Ürün / Product    | Platform       | Açıklama / Description                                                                                                        |
+| ----------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **D-Terminal**    | Windows        | Agent-aware Windows terminal _(pre-alpha — [github.com/AmrasElessar/d-terminal](https://github.com/AmrasElessar/d-terminal))_ |
+| **D-Space**       | Windows        | Smart disk analyzer with recovery guarantee _(bu proje, alpha / this project, alpha)_                                         |
+| **D-Player**      | Android        | Kişisel müzik çalar, DSP motoru / personal music player with DSP engine _(in development)_                                    |
+| **DCar Launcher** | Android (Auto) | Head Unit araç içi OS katmanı / Head Unit in-car OS layer _(in development)_                                                  |
+| **D-Watchtower**  | —              | Gözetim ve izleme platformu / surveillance & monitoring platform _(in development)_                                           |
+| **D-FTP Client**  | Windows        | Modern FTP/SFTP istemcisi / modern FTP/SFTP client _(in development)_                                                         |
 
 ---
 
@@ -357,6 +357,7 @@ D-Space is open source (GPL-3.0+) and actively developed. Sponsorships translate
 <!-- /SPONSORS:HERO -->
 
 <!-- SPONSORS:LIST -->
+
 <sub>Henüz sponsor yok / No sponsors yet. **İlk sponsor sen ol / Be the first →** [github.com/sponsors/AmrasElessar](https://github.com/sponsors/AmrasElessar)</sub>
 <!-- /SPONSORS:LIST -->
 
@@ -415,8 +416,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 <div align="center">
 
-**D Brand** — *Görmek, anlamak, geri kazanmak.*
-*See, understand, reclaim.*
+**D Brand** — _Görmek, anlamak, geri kazanmak._
+_See, understand, reclaim._
 
 📐 Master architecture document: `D-Space-Mimari-v1.4.docx` (in repo root)
 🌐 Domain: `dspace.app` (planlanan / planned)

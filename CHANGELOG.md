@@ -164,6 +164,7 @@ gelebilir.
 ### Yapıldı
 
 **Görselleştirme (Pillar 2 olgunlaşma):**
+
 - Üç-kolon workspace (Sprint 3.1c) — sol VolumeSidebar (drive listesi +
   kullanım barı + status pill) + orta workspace + sağ detay paneli;
   responsive `<960px` üst sticky.
@@ -173,6 +174,7 @@ gelebilir.
 - Light/dark/auto tema toggle (Bölüm 9.5).
 
 **Hızlı arama (Discovery #005 / Bölüm 5.6):**
+
 - NTFS USN Journal index katmanı (Sprint 3.8 + 3.8.1) — `usn_index` +
   `usn_watermark` SQLite tabloları, real-time delta watcher, `Everything`
   benzeri substring arama.
@@ -184,6 +186,7 @@ gelebilir.
 - Admin yoksa graceful: `mode="needs_admin"` rozeti.
 
 **VSS pool (Pillar 5 ek):**
+
 - Sprint 2H.3 `IVssBackupComponents` snapshot pool — `winapi 0.3.9`
   COM köprüsü (Discovery #002 çözüldü), worker thread + per-volume
   dedupe + lease renewal + reaper.
@@ -191,6 +194,7 @@ gelebilir.
 - Bölüm 34.5.4 hash-time + 34.5.6 reference counting davranışı.
 
 **Auto-updater (Bölüm 21.4) — Sprint 3.6:**
+
 - `tauri-plugin-updater` + `tauri-plugin-process` etkin;
   `tauri.conf.json` plugins.updater GitHub Releases latest.json
   endpoint'ine bağlı; release workflow `includeUpdaterJson: true`.
@@ -201,10 +205,12 @@ gelebilir.
   öncesi `pnpm tauri signer generate` ile üretmeli (RELEASE_CHECKLIST §2).
 
 **Cloud placeholder detection (Bölüm 11.1):**
+
 - Win32 `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS` bayrak detection — UI'da
   ☁ rozeti gösterir.
 
 **E2E altyapı (Sprint 3.5):**
+
 - Playwright dev dep + `playwright.config.ts` (web + webdriver iki proje).
 - 5 smoke senaryo: onboarding, görsel mod toggle, IndexSearchBar, tema
   cycle, update check fallback.
@@ -213,6 +219,7 @@ gelebilir.
 - `.github/workflows/e2e.yml` ubuntu runner; v0.2.0 sonrası required.
 
 **Disk donanım profili (2026-05-17 polish):**
+
 - `IOCTL_STORAGE_QUERY_PROPERTY` ile her sürücü için bus tipi (NVMe /
   SATA / USB / SAS / SCM), medya tipi (SSD / HDD), üretici, model,
   seri, tipik okuma hızı (MB/s, bus tipinden türetilmiş).
@@ -220,6 +227,7 @@ gelebilir.
   MB/sn") + üretici/model satırı.
 
 **Tarama durdur/iptal (2026-05-17 polish):**
+
 - `ScanCancel(Arc<AtomicBool>)` Tauri state. `scan_cancel` komutu
   bayrağı set eder, walker periyodik kontrol eder, `scan-cancelled`
   hatası ile bail.
@@ -227,12 +235,14 @@ gelebilir.
   sessizce kapatır.
 
 **Hard link dedup (2026-05-17 fix):**
+
 - Standart Mod `find_first` walker NTFS file_index tabanlı dedupe ekledi
   (Win32 GetFileInformationByHandle). 64 KB+ dosyalar için aynı fiziksel
   veri ikinci görüldüğünde data_size = 0 → toplam disk doluluğunu aşmaz.
   Önceki bug: 1 TB diskte 1.2 TB rapor (WinSxS hard link'leri).
 
 **Tema + UX iyileştirmeleri (2026-05-17 polish):**
+
 - Info popover pattern (`InfoButton.vue`): başlık yanında ⓘ → tıkla,
   paragraf açılır. Sürekli görünen intro paragrafları kaldırıldı.
 - 3-kolon workspace (Snapshot | Duplicate | Detail) >1600px'de yan
@@ -253,6 +263,7 @@ gelebilir.
   sabit "tr-TR" çağrıları locale-aware (TR/EN otomatik).
 
 **Test:**
+
 - 124 Rust default (+9 vss-gated) + 34 frontend = **158 test passing**
   (v0.1.0-alpha: 79).
 - Cargo clippy strict + cargo fmt + vue-tsc + vite build temiz.
@@ -281,12 +292,14 @@ unknown" uyarısı verecek (Bölüm 18.2 EV cert v0.2 sprint'inde).
 ### Yapıldı
 
 **Pillar 1 — Hız (Bölüm 5):**
+
 - MFT direkt okuma (`ntfs` crate) — admin ile 1 TB hedef <5 sn
 - FindFirstFile fallback — non-elevated mod, her durum çalışır
 - Üç katmanlı yetki stratejisi (Bölüm 5.2A K1+K2)
 - Volume pre-flight (Bölüm 33.2 Katman 0): ReFS/Remote/Removable/CdRom uyarıları
 
 **Pillar 2 — Görsel zarafet (Bölüm 9.1):**
+
 - Sunburst donut (hand-rolled SVG)
 - Treemap (squarified Bruls/Huijsen/van Wijk 2000)
 - Bubble pack (Vogel spiral + 80-iter force relax)
@@ -294,6 +307,7 @@ unknown" uyarısı verecek (Bölüm 18.2 EV cert v0.2 sprint'inde).
 - Lazy viewport-aware query (Bölüm 9.6): ~200 düğüm/window
 
 **Pillar 3 — Zeka katmanı (Bölüm 6):**
+
 - 63 built-in kural — dev cache / sistem koruma / cloud sync / VM disk
 - Skor tier renkleri: 0-30 kırmızı, 31-60 sarı, 61-85 yeşil, 86-100 mavi
 - Kullanıcı tanımlı kurallar — UI editör + DB persist + runtime merge (Bölüm 6.4)
@@ -301,10 +315,12 @@ unknown" uyarısı verecek (Bölüm 18.2 EV cert v0.2 sprint'inde).
 - TFLite altyapı `ml-tflite` feature gate (model v0.3'te)
 
 **Pillar 4 — Zaman boyutu (Bölüm 8):**
+
 - Snapshot capture (dir-only v0.1)
 - Delta hesaplama (added/removed/grew/shrunk top-10)
 
 **Pillar 5 — Geri kazanım garantisi (Bölüm 12):**
+
 - Same-volume staging + 24h undo
 - Cross-volume two-phase commit + WAL recovery (Bölüm 12.3 v1.4 fix)
 - Conflict resolution dialog (Bölüm 12.2.4): Overwrite/Rename/KeepBoth/Cancel
@@ -312,11 +328,13 @@ unknown" uyarısı verecek (Bölüm 18.2 EV cert v0.2 sprint'inde).
 - Lazy expiry cleanup (Bölüm 12.2.1-2.3) — rate-limited, AUTO_THRESHOLD=100
 
 **Duplicate detector (Bölüm 7) v0.1:**
+
 - Blake3 streaming hash
 - Boyut bucket → hash bucket pipeline
 - Reclaimable bytes raporu
 
 **Locked file (Bölüm 34) v0.1:**
+
 - CreateFileW share-violation probe
 - Windows Restart Manager owner detection (PID + app name)
 - Scan-time hot-path izolasyonu (Bölüm 34.5.1)
@@ -324,6 +342,7 @@ unknown" uyarısı verecek (Bölüm 18.2 EV cert v0.2 sprint'inde).
   `IVssBackupComponents` eksik, v0.2'de albertony/vss port)
 
 **UI/UX (Bölüm 15):**
+
 - Progressive Disclosure 3-seviye (özet · expand · advanced)
 - Klavye-first: Ctrl+R, Ctrl+1-4, Backspace, Delete, Ctrl+Z, Ctrl+F, Ctrl+?
 - Onboarding 3-slide + Hızlı/Standart mod seçimi (Bölüm 15.3 + 37)
@@ -331,27 +350,33 @@ unknown" uyarısı verecek (Bölüm 18.2 EV cert v0.2 sprint'inde).
 - Çakışma/permanent delete modal'ları
 
 **Çoklu dil (Bölüm 19):**
+
 - vue-i18n v10 + TR/EN locale + dil toggle chip
 - Onboarding tamamen çevrilmiş, ana akış çevrilmiş
 
 **Altyapı:**
+
 - SQLite (Bölüm 14): 9 tablo, WAL mode, 2 migration
 - Settings KV API (onboarding/dil/telemetry tercihleri)
 - Perf telemetrisi yerel (son 20 örnek, gönderim YOK)
 - Telemetry opt-in flag (default kapalı, Bölüm 18.3)
 
 **v2 trait rezervasyonları (Bölüm 26):**
+
 - 5 trait stub: MlSafeDeleteScorer · NetworkShareScanner ·
   CrossPlatformVolumeReader · Plugin · CloudBackupIntegration
 
 **Build + dağıtım:**
+
 - GitHub Actions CI: fmt + clippy `-D warnings` + cargo test + pnpm build + vitest
 - Release workflow: tag → tauri-action → MSI + NSIS + GitHub Release
 
 **Test:**
+
 - 69 Rust unit/integration + 10 frontend Vitest = **79 test**
 
 **Dokümantasyon:**
+
 - README iki dilli (TR/EN) D Brand template
 - REPO_STANDARDS.md
 - docs/DISCOVERY_LOG.md (#001-003)

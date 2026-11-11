@@ -1,0 +1,9 @@
+id: no-connector-import-outside-queries
+language: TypeScript
+severity: error
+note: Only src/queries/** and src/connector/** may import the connector factory (run with negation globs for those dirs).
+rule:
+  kind: import_statement
+  has:
+    kind: import_clause
+  pattern: "import $$$ from '@/connector'"

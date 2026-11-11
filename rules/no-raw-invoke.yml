@@ -1,0 +1,6 @@
+id: no-raw-invoke
+language: TypeScript
+severity: error
+note: Raw Tauri invoke() may only appear inside src/connector/** (run with --globs '!src/connector/**').
+rule:
+  pattern: invoke($$$)

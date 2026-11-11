@@ -1,0 +1,222 @@
+/*
+ * index.css — Tailwind v4 entry (ADR-007 token architecture):
+ *  (1) adopted raw tokens   → ../theme/adopted/tokens.css (immutable source)
+ *  (2) semantic mapping      → ./tokens.css (app names ← adopted names)
+ *  (3) dark variant          → @custom-variant below (data-scheme attribute)
+ *  (4) token mapping         → @theme inline below
+ *  (5) base defaults         → @layer base below
+ */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '../theme/adopted/tokens.css';
+@import './tokens.css';
+
+/* (3/5) attribute-based dark family (adopted two-layer system) */
+@custom-variant dark (&:is([data-scheme='dark'] *));
+
+/* (4/5) map CSS variables into Tailwind theme utilities */
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-muted: var(--surface-muted);
+  --color-surface-tint: var(--surface-tint);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-selected: var(--surface-selected);
+  --color-foreground: var(--text-primary);
+  --color-foreground-secondary: var(--text-secondary);
+  --color-foreground-muted: var(--text-muted);
+  --color-foreground-disabled: var(--text-disabled);
+  --color-primary: var(--accent);
+  --color-primary-hover: var(--accent-hover);
+  --color-primary-pressed: var(--accent-pressed);
+  --color-primary-fill: var(--accent-fill);
+  --color-primary-fill-hover: var(--accent-fill-hover);
+  --color-primary-foreground: var(--accent-foreground);
+  --color-primary-muted: var(--accent-muted);
+  --color-primary-muted-border: var(--accent-muted-border);
+  --color-success: var(--success);
+  --color-success-vivid: var(--success-vivid);
+  --color-success-muted: var(--success-muted);
+  --color-warning: var(--warning);
+  --color-warning-vivid: var(--warning-vivid);
+  --color-warning-muted: var(--warning-muted);
+  --color-danger: var(--danger);
+  --color-danger-vivid: var(--danger-vivid);
+  --color-danger-muted: var(--danger-muted);
+  --color-danger-pressed: var(--danger-pressed);
+  --color-skeleton: var(--skeleton);
+  --color-border: var(--border);
+  --color-border-inner: var(--border-inner);
+  --color-border-strong: var(--border-strong);
+  --color-ring: var(--focus-ring);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --text-2xs: var(--text-2xs);
+  --text-xs: var(--text-xs);
+  --text-sm: var(--text-sm);
+  --text-base: var(--text-base);
+  --text-md: var(--text-md);
+  --text-lg: var(--text-lg);
+  --text-xl: var(--text-xl);
+  --text-2xl: var(--text-2xl);
+  --text-hero: var(--text-hero);
+
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-overlay: var(--shadow-overlay);
+  --shadow-dialog: var(--shadow-dialog);
+
+  --duration-micro: var(--dur-micro);
+  --duration-fast: var(--dur-fast);
+  --duration-base: var(--dur-base);
+  --duration-slow: var(--dur-slow);
+
+  --animate-progress-stripes: progress-stripes 1.1s linear infinite;
+  --animate-status-pulse: status-pulse 2.4s var(--ease-in-out) infinite;
+  --animate-fade-in: fade-in var(--dur-base) var(--ease-out);
+  --animate-fade-out: fade-out var(--dur-base) var(--ease-in);
+}
+
+/* (4/4) base defaults */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--background);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: var(--surface-selected);
+  }
+  /* Tabular numerals for all data contexts (grid #9) */
+  table,
+  [role='table'],
+  [role='row'],
+  .tabular,
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Focus visibility floor (grid #24) */
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+  .hc :focus-visible {
+    outline: 3px solid var(--focus-ring);
+    outline-offset: 1px;
+  }
+  /* Scrollbars (QSS: 6px slim in dense lists, 8px general) */
+  ::-webkit-scrollbar {
+    width: var(--scrollbar-width);
+    height: var(--scrollbar-width);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: var(--radius-full);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-disabled);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  /* Reduced motion (grid #27) */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@keyframes progress-stripes {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 28px 0;
+  }
+}
+
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@layer components {
+  .gradient-cta:not(.bg-none) {
+    background-image: var(--cta-gradient);
+  }
+  .gradient-cta:not(.bg-none):hover:not(:disabled) {
+    background-image: var(--cta-gradient-hover);
+  }
+  .gradient-glow:not(.shadow-none) {
+    box-shadow: var(--cta-glow);
+  }
+
+  /* Sidebar collapse choreography (MOTION-SPEC §3.5): width settles at the
+   * slow duration while labels fade on the fast one — icons retain their
+   * gutter (18px to icon center = 26px = the 52px rail's center), so nothing
+   * re-animates but the width. Reduced motion collapses both to instant via
+   * the global media query above. */
+  .sidebar-width-transition {
+    transition: width var(--dur-slow) var(--ease-in-out);
+  }
+  .sidebar-label-fade {
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+
+  /* Route-change fade (MOTION-SPEC §3.4): the incoming page fades in at the
+   * fast duration — opacity only, so the layout box is stable (zero CLS).
+   * Reduced motion collapses it to instant via the global media query. */
+  .route-fade {
+    animation: fade-in var(--dur-fast) var(--ease-out);
+    will-change: opacity;
+  }
+}

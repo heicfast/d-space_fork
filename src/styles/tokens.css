@@ -1,0 +1,286 @@
+/*
+ * tokens.css — the app's SEMANTIC token layer (ADR-007).
+ *
+ * Token source of truth: src/theme/adopted/tokens.css + themes.ts — verbatim
+ * in-repo copies of the two adopted theme source files (diskgenie-v2
+ * src/theme/themes.ts + tokens.css). That file is IMMUTABLE; every adjustment
+ * for this application happens HERE, as a mapping, and is documented in
+ * docs/VISUAL-SPEC.md §A11 (accessibility-driven mapping choices, with
+ * measured contrast ratios).
+ *
+ * Layer order (see index.css):
+ *   1. adopted/tokens.css   — raw palette blocks (:root, [data-scheme="dark"],
+ *                             [data-theme="dark|ember|tide|blossom"])
+ *   2. this file            — semantic mapping + derived high-contrast layer
+ *                             + structural geometry (corus-derived) + density
+ *   3. index.css @theme     — Tailwind utility mapping
+ *
+ * Naming bridge (app semantic ← adopted raw):
+ *   surface ← panel · muted ← chip · tint/hover ← control-hover ·
+ *   accent(text-grade) ← ink (darkened for AA on light families) ·
+ *   accent-fill ← ink · success ← free · warning ← seg-compressed ·
+ *   danger ← used · borders ← border/divider/control-border ·
+ *   elevation ← shadow-1/2/pop · motion ← dur/ease · radius ← radius
+ */
+
+:root {
+  /* ── Canvas & surfaces ─────────────────────────────────────────────── */
+  --background: var(--panel);
+  --surface: var(--card);
+  --surface-elevated: var(--card);
+  --surface-muted: var(--chip);
+  --surface-tint: var(--control-hover);
+  --surface-hover: var(--control-hover);
+  --surface-selected: color-mix(in srgb, var(--ink) 14%, var(--card));
+
+  /* ── Text ──────────────────────────────────────────────────────────── */
+  --text-primary: var(--text);
+  --text-secondary: var(--text-secondary);
+  --text-muted: var(--text-tertiary);
+  --text-disabled: var(--text-tertiary);
+
+  /* ── Accent ──────────────────────────────────────────────────────────
+   * Text-grade accent: A11Y-ADJUSTED MAPPING (VISUAL-SPEC §A11).
+   * --ink (#ff6b4a light) measures 2.80:1 on white — below the 4.5:1 AA
+   * floor for text/links/icons. The mapping derives a darkened ink for
+   * text-grade use (#b83410, 5.94:1 on white, ≥4.79:1 on every light-family
+   * ink-soft tint — axe-verified; fills keep the source ink and the brand
+   * CTA keeps the source gradient (documented brand exception).
+   * Dark-family inks pass as text on PLAIN surfaces but the neutral dark
+   * coral fails on ink-soft TINTS (4.2:1) — see the [data-theme='dark']
+   * lift below. Ember/tide inks pass on their tints and map through. */
+  --accent: #b83410;
+  --accent-hover: #a52e0e;
+  --accent-pressed: #8f280c;
+  --accent-fill: var(--ink);
+  --accent-fill-hover: var(--ink-strong);
+  --accent-foreground: var(--on-ink);
+  --accent-muted: var(--ink-soft);
+  --accent-muted-border: color-mix(in srgb, var(--ink) 30%, transparent);
+  --cta-gradient: linear-gradient(180deg, #1f7dff 0%, #1677ff 55%, #0066ff 100%);
+  --cta-gradient-hover: linear-gradient(180deg, #1677ff 0%, #0958d9 55%, #0050b3 100%);
+  --cta-glow: 0 2px 8px rgba(22, 119, 255, 0.28), 0 1px 2px rgba(0, 102, 255, 0.16);
+
+  /* ── Status ──────────────────────────────────────────────────────────
+   * A11Y-ADJUSTED MAPPING: source status hues (--free/--used/--seg-
+   * compressed) measure 2.1–3.0:1 on white as text. Text-grade tokens are
+   * darkened derivatives; muted backgrounds and fills keep source values. */
+  --success: #1a7f37; /* ← --free #34c759, 5.08:1 on white */
+  --success-vivid: var(--free);
+  --success-muted: var(--free-soft);
+  --warning: #a84c07; /* ← --seg-compressed #f59e0b, 5.67:1 on white, 5.0:1 on the amber wash */
+  --warning-vivid: var(--seg-compressed);
+  --warning-muted: color-mix(in srgb, var(--seg-compressed) 16%, transparent);
+  --danger: #d70015; /* ← --used #ff3b30, 5.39:1 on white */
+  --danger-vivid: var(--used);
+  --danger-muted: var(--used-soft);
+  --danger-pressed: #b80011;
+
+  /* ── Focus ─────────────────────────────────────────────────────────── */
+  --focus-ring: #b83410; /* solid text-grade ink: 5.94:1 (source rgba = 2.9:1) */
+  --focus-ring-offset: var(--focus-offset, 2px);
+  --focus-ring-width: var(--focus-w, 2px);
+
+  /* ── Borders ───────────────────────────────────────────────────────── */
+  /* NOTE: tokens whose semantic name EQUALS the adopted name (--border,
+   * --skeleton, --disabled-opacity, --font-mono, --space-*, --dur-*, --
+   * ease-*, --radius-xs/xl) are NOT redeclared here — a same-name forward
+   * (`--x: var(--x)`) would be a self-referencing custom property and
+   * resolve to the fallback at computed-value time. The adopted :root
+   * already publishes them; distinct-name bridges below carry the rest. */
+  --border-inner: var(--divider);
+  --border-strong: var(--control-border);
+
+  /* ── Elevation ─────────────────────────────────────────────────────── */
+  --shadow-card: var(--shadow-1);
+  --shadow-overlay: var(--shadow-2);
+  --shadow-dialog: var(--shadow-pop);
+  --overlay-scrim: var(--overlay);
+
+  /* ── Typography ──────────────────────────────────────────────────────
+   * Family from the adopted tokens; scale is corpus-derived (Segoe UI
+   * 14px base, QSS census artifact 21/05) and CJK stacks per locale. */
+  --font-sans:
+    var(--font-ui), 'Microsoft YaHei', 'PingFang SC', 'Noto Sans SC', 'Meiryo UI',
+    'Malgun Gothic', sans-serif;
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --text-hero: 28px;
+
+  /* ── Motion: adopted ladder (120/160/240/360 + easings) publishes
+   * --dur-* and --ease-* under the SAME names this app consumes — no
+   * bridging needed. ────────────────────────────────────────────────── */
+
+  /* ── Radii (adopted scale: 6/8/10/12/14) ───────────────────────────── */
+  --radius-sm: var(--radius-s);
+  --radius-md: var(--radius-m);
+  --radius-lg: var(--radius-l);
+  --radius-full: 9999px;
+  /* --radius-xs / --radius-xl: same names as adopted — passed through. */
+
+  /* ── Spacing: adopted 4px-base ladder publishes --space-1..9 under the
+   * same names — passed through. ────────────────────────────────────── */
+
+  /* ── Loading / state ───────────────────────────────────────────────── */
+
+  /* ── Structural geometry (corpus-derived; NOT theme identity) ────────
+   * Window 1240×840 normal / 800×600 min, custom title bar ≈35px (pixel
+   * scan, atlas §1–2), sidebar per landing captures. */
+  --titlebar-height: 36px;
+  --sidebar-width: 208px;
+  --row-height: 40px;
+  --scrollbar-width: 8px;
+}
+
+/* Dark-family inks pass as text-grade accents on plain surfaces (6.4:1+);
+ * Blossom's rose (#d8506b, 3.55:1 on cream) needs the same darkening the
+ * light default gets. Status text-grades are per-family: the light-family
+ * darkened derivatives (#1a7f37/#b45309/#d70015) FAIL on dark surfaces
+ * (2.7–4.5:1, axe-verified) — the dark family consumes the adopted vivid
+ * status hues directly (≥4.5:1 on every dark-family surface), with the
+ * red lifted one step (#ff8085) to clear small-text AA. */
+[data-scheme='dark'] {
+  --accent: var(--ink);
+  --accent-hover: var(--ink-strong);
+  --accent-pressed: var(--ink);
+  --cta-gradient: var(--ink-grad);
+  --cta-gradient-hover: linear-gradient(180deg, var(--ink) 0%, var(--ink-strong) 100%);
+  --cta-glow: var(--ink-glow);
+  --focus-ring: var(--ink);
+  --success: var(--free); /* #30d158-class per theme — 6.9:1+ */
+  --warning: var(--seg-compressed); /* dark-family amber #f5a623 — 6.9:1+ */
+  --danger: #ff8085; /* lifted from --used #ff453a (4.1:1) to 5.8:1+ */
+}
+/* Neutral dark only: the coral ink on ink-soft tints (active sidebar, brand
+ * badges) reads 4.2:1 — lift the text-grade to #ff9d85 (5.4:1 on the worst
+ * tint, 7.3:1 on the panel). Ember's gold and tide's cyan already pass on
+ * their tints and keep the scheme mapping. */
+[data-theme='dark'] {
+  --accent: #ff9d85;
+  --accent-hover: #ffb4a0;
+  --accent-pressed: #ff9d85;
+  --focus-ring: #ff9d85;
+}
+[data-theme='blossom'] {
+  --accent: #a83250; /* ← rose #d8506b, 5.79:1 on #fbf1ee */
+  --accent-hover: #922a45;
+  --accent-pressed: #7c243b;
+  --cta-gradient: var(--ink-grad);
+  --cta-gradient-hover: linear-gradient(180deg, #d8506b 0%, #b5324e 100%);
+  --cta-glow: var(--ink-glow);
+  --focus-ring: #a83250;
+  --success: #157a3c; /* darkened green for cream surfaces (4.9:1 on #fbf1ee) */
+}
+
+/* ── High-contrast (DERIVED — not defined by the adopted sources) ──────
+ * Flat surfaces, saturated semantics, hard 1px borders, no gradients or
+ * shadows (scrim stays for dialog separation). Everything text-grade at
+ * maximum contrast. Documented in VISUAL-SPEC §A11. */
+.hc {
+  --background: #ffffff;
+  --surface: #ffffff;
+  --surface-muted: #ffffff;
+  --surface-tint: #ffffff;
+  --surface-hover: #f0f0f0;
+  --surface-selected: #e6e6e6;
+
+  --text-primary: #000000;
+  --text-secondary: #1a1a1a;
+  --text-disabled: #595959;
+
+  --accent: #a02800;
+  --accent-hover: #7d1f00;
+  --accent-pressed: #5c1700;
+  --accent-fill: #a02800;
+  --accent-fill-hover: #7d1f00;
+  --accent-foreground: #ffffff;
+  --accent-muted: #f2e6e0;
+  --accent-muted-border: #a02800;
+  --cta-gradient: #a02800;
+  --cta-gradient-hover: #7d1f00;
+  --cta-glow: none;
+
+  --success: #005a20;
+  --success-vivid: #005a20;
+  --success-muted: #e0f0e6;
+  --warning: #6b3f00;
+  --warning-vivid: #6b3f00;
+  --warning-muted: #f5edd9;
+  --danger: #a80000;
+  --danger-vivid: #a80000;
+  --danger-muted: #f5e0e0;
+  --danger-pressed: #800000;
+
+  --focus-ring: #000000;
+  --focus-ring-offset: 1px;
+  --focus-ring-width: 3px;
+
+  --border: #000000;
+  --border-inner: #595959;
+  --border-strong: #000000;
+
+  --shadow-card: none;
+  --shadow-overlay: none;
+  --shadow-dialog: none;
+  --overlay-scrim: rgba(0, 0, 0, 0.55);
+
+  --skeleton: #e0e0e0;
+  --shimmer: rgba(0, 0, 0, 0.08);
+}
+.hc[data-scheme='dark'] {
+  --background: #000000;
+  --surface: #000000;
+  --surface-muted: #000000;
+  --surface-tint: #000000;
+  --surface-hover: #1f1f1f;
+  --surface-selected: #2e2e2e;
+
+  --text-primary: #ffffff;
+  --text-secondary: #ededed;
+  --text-disabled: #a6a6a6;
+
+  --accent: #ffb59e;
+  --accent-hover: #ffc4b0;
+  --accent-pressed: #ffa68c;
+  --accent-fill: #ff8a5e;
+  --accent-fill-hover: #ff9c76;
+  --accent-foreground: #1a0400;
+  --accent-muted: #2b120a;
+  --accent-muted-border: #ffb59e;
+  --cta-gradient: #ff8a5e;
+  --cta-gradient-hover: #ffc4b0;
+  --cta-glow: none;
+
+  --success: #6bd98f;
+  --success-vivid: #6bd98f;
+  --success-muted: #06280f;
+  --warning: #ffcf6b;
+  --warning-vivid: #ffcf6b;
+  --warning-muted: #2b2000;
+  --danger: #ff8a80;
+  --danger-vivid: #ff8a80;
+  --danger-muted: #2b0808;
+  --danger-pressed: #ff6f64;
+
+  --focus-ring: #ffffff;
+  --border: #ffffff;
+  --border-inner: #a6a6a6;
+  --border-strong: #ffffff;
+
+  --skeleton: #1f1f1f;
+  --shimmer: rgba(255, 255, 255, 0.06);
+}
+
+/* ── Density ─────────────────────────────────────────────────────────── */
+[data-density='compact'] {
+  --row-height: 32px;
+}
+.hc[data-density='compact'] {
+  --row-height: 28px;
+}

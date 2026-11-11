@@ -1,28 +1,14 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-#
-# D-Space CI — Bölüm 20.4 (CI Gates).
-#
-# Hedefler (v0.1, build matrix faz 1):
-#   * cargo fmt --check     → format sıfır
-#   * cargo clippy -D warn  → warning sıfır
-#   * cargo test --lib      → 51+ unit + integration test
-#   * vue-tsc + vite build  → TypeScript hata sıfır, bundle üret
-#
-# Bölüm 20.4'ten henüz eklenmedi (v0.2):
-#   * Bundle size regression ±%5
-#   * Performance benchmark ±%10 (criterion harness Bölüm 7.4 v0.2)
-#   * ESLint + Vitest unit (Vue tarafı)
-#
-# Runner: windows-latest (NTFS testleri Bölüm 5/12.2 için zorunlu;
-# locked_file/detect.rs Win32 API'leri sadece Windows hedefinde derlenir).
-
 name: CI
 
+# DiskWizard merged CI — engine (Rust) + frontend (React) gates.
+# Rust jobs mirror the proven d-space pipeline (fmt/clippy/tests incl. the
+# feature-gated VSS job); the frontend job carries the full recovery-wizard
+# gate stack (typecheck/lint/format/arch-lint/ast-grep/knip/jscpd/coverage/
+# build/bundle budget).
 on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -30,91 +16,120 @@ concurrency:
 
 jobs:
   rust:
-    name: Rust ${{ matrix.toolchain }} · windows-latest
+    name: Rust (stable, windows)
     runs-on: windows-latest
     strategy:
-      fail-fast: false
       matrix:
         toolchain: [stable]
     defaults:
       run:
         working-directory: src-tauri
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Rust toolchain (${{ matrix.toolchain }})
+      - name: Install Rust ${{ matrix.toolchain }}
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.toolchain }}
           components: clippy, rustfmt
 
-      - name: Cargo cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
 
-      - name: cargo fmt --check
+      - name: Format check
         run: cargo fmt --all -- --check
 
-      - name: cargo clippy -D warnings
+      - name: Clippy (deny warnings)
         run: cargo clippy --lib --no-deps -- -D warnings
 
-      - name: cargo test --lib
+      - name: Tests
         run: cargo test --lib --no-fail-fast
 
-  # Gemini review W5 — `vss` feature'i (9 unit test + winapi COM köprüsü)
-  # varsayılan koşuda hiç derlenmiyordu; kırılma sessizce gidiyordu.
   rust-vss:
-    name: Rust stable · vss feature · windows-latest
+    name: Rust (vss feature, windows)
     runs-on: windows-latest
     defaults:
       run:
         working-directory: src-tauri
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Rust toolchain (stable)
+      - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
           components: clippy
 
-      - name: Cargo cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: "src-tauri -> target"
 
-      - name: cargo clippy --features vss -D warnings
+      - name: Clippy with vss feature (deny warnings)
         run: cargo clippy --lib --no-deps --features vss -- -D warnings
 
-      - name: cargo test --features vss --lib
+      - name: Tests with vss feature
         run: cargo test --lib --features vss --no-fail-fast
 
   frontend:
-    name: Frontend (vue-tsc + vite) · windows-latest
+    name: Frontend (React gates)
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: pnpm
+      - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 12.15.0
 
-      - name: Node 22 + pnpm cache
+      - name: Install Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
-      - name: pnpm install --frozen-lockfile
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: vue-tsc + vite build
-        run: pnpm run build
+      - name: Typecheck
+        run: pnpm typecheck
 
-      - name: vitest unit tests
-        run: pnpm test
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Architecture lint
+        run: pnpm arch:lint
+
+      - name: ast-grep rules (no raw invoke outside connector)
+        shell: bash
+        run: |
+          npx ast-grep scan --globs '!src/connector/**' rules/no-raw-invoke.yml | grep -q "error\[" && exit 1 || true
+          npx ast-grep scan rules/no-raw-invoke.yml | grep -q "error\[" && exit 1 || true
+          npx ast-grep scan --globs '!src/queries/**' --globs '!src/connector/**' rules/no-connector-import-outside-queries.yml | grep -q "error\[" && exit 1 || true
+          npx ast-grep scan rules/no-connector-import-outside-queries.yml | grep -q "error\[" && exit 1 || true
+
+      - name: Knip
+        run: pnpm knip
+        env:
+          KNIP_DISABLE_RAW_TRANSFER: "1"
+
+      - name: Copy-paste detection
+        run: pnpm jscpd
+
+      - name: Unit tests (coverage thresholds)
+        run: pnpm test:coverage
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Bundle budget
+        run: pnpm bundle:check
+        env:
+          BUDGET_MAIN_KB: "200"
+          BUDGET_TOTAL_KB: "500"
+
+      - name: Rust shell check (engine compiles with the UI)
+        run: cargo check --manifest-path src-tauri/Cargo.toml

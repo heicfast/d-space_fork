@@ -1228,7 +1228,7 @@ pub fn run() {
         .manage(ScanTreeState::default())
         .manage(ScanCancel::default())
         .manage(UsnWatchers(std::sync::Mutex::new(HashMap::new())))
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {

@@ -1,0 +1,230 @@
+{
+  "_note": "Interim assets extracted from the research corpus (easeus-drw-research). Replace 1:1 with the homegrown chrome set and delete this manifest. See docs/INTERIM-ASSETS.md §A.",
+  "convention": "src/assets/interim/** is corpus-derived by file path.",
+  "entries": [
+    {
+      "app": "src/assets/interim/chrome/light/minimize-nor.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/Titlebar/titlebar_btn_min_nor.svg",
+      "depicts": "minimize glyph, nor state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (min button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/minimize-hov.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/Titlebar/titlebar_btn_min_hov.svg",
+      "depicts": "minimize glyph, hov state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (min button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/minimize-pre.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/Titlebar/titlebar_btn_min_pre.svg",
+      "depicts": "minimize glyph, pre state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (min button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/minimize-dis.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/Titlebar/titlebar_btn_min_dis.svg",
+      "depicts": "minimize glyph, dis state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (min button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/maximize-nor.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_max_nor.svg",
+      "depicts": "maximize glyph, nor state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/maximize-hov.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_max_hov.svg",
+      "depicts": "maximize glyph, hov state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/maximize-pre.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_max_pre.svg",
+      "depicts": "maximize glyph, pre state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/maximize-dis.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_max_dis.svg",
+      "depicts": "maximize glyph, dis state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/restore-nor.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_restore_nor.svg",
+      "depicts": "restore glyph, nor state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/restore-hov.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_restore_hov.svg",
+      "depicts": "restore glyph, hov state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/restore-pre.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_restore_pre.svg",
+      "depicts": "restore glyph, pre state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/restore-dis.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_restore_dis.svg",
+      "depicts": "restore glyph, dis state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/close-nor.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_close_nor.svg",
+      "depicts": "close glyph, nor state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (close button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/close-hov.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_close_hov.svg",
+      "depicts": "close glyph, hov state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (close button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/close-pre.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_close_pre.svg",
+      "depicts": "close glyph, pre state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (close button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/light/close-dis.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_light/Resource/btn_close_dis.svg",
+      "depicts": "close glyph, dis state, light palette (24x24 viewBox)",
+      "usedAt": "WindowControls (close button, light-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/minimize-nor.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/Titlebar/titlebar_btn_min_nor.svg",
+      "depicts": "minimize glyph, nor state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (min button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/minimize-hov.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/Titlebar/titlebar_btn_min_hov.svg",
+      "depicts": "minimize glyph, hov state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (min button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/minimize-pre.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/Titlebar/titlebar_btn_min_pre.svg",
+      "depicts": "minimize glyph, pre state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (min button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/minimize-dis.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/Titlebar/titlebar_btn_min_dis.svg",
+      "depicts": "minimize glyph, dis state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (min button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/maximize-nor.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_max_nor.svg",
+      "depicts": "maximize glyph, nor state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/maximize-hov.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_max_hov.svg",
+      "depicts": "maximize glyph, hov state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/maximize-pre.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_max_pre.svg",
+      "depicts": "maximize glyph, pre state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/maximize-dis.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_max_dis.svg",
+      "depicts": "maximize glyph, dis state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/restore-nor.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_restore_nor.svg",
+      "depicts": "restore glyph, nor state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/restore-hov.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_restore_hov.svg",
+      "depicts": "restore glyph, hov state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/restore-pre.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_restore_pre.svg",
+      "depicts": "restore glyph, pre state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/restore-dis.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_restore_dis.svg",
+      "depicts": "restore glyph, dis state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (max/restore button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/close-nor.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_close_nor.svg",
+      "depicts": "close glyph, nor state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (close button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/close-hov.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_close_hov.svg",
+      "depicts": "close glyph, hov state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (close button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/close-pre.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_close_pre.svg",
+      "depicts": "close glyph, pre state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (close button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    },
+    {
+      "app": "src/assets/interim/chrome/dark/close-dis.svg",
+      "corpus": "re-workspace/reversed/ui-resources/drw_dark/ResourceDark/btn_close_dis.svg",
+      "depicts": "close glyph, dis state, dark palette (24x24 viewBox)",
+      "usedAt": "WindowControls (close button, dark-family themes)",
+      "replacement": "homegrown chrome set (v2 icon session)"
+    }
+  ]
+}

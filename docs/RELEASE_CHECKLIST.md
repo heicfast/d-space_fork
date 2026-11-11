@@ -19,11 +19,11 @@ Master mimari Bölüm 18.2 (Kod İmzalama) + 21.4 (Otomatik Güncelleme) + 18.4
 
 ### 1.1 Sertifika tipi seçimi
 
-| Tip | Maliyet | SmartScreen davranışı | Tavsiye |
-|---|---|---|---|
-| **Self-signed** | ücretsiz | "publisher unknown" + kırmızı uyarı | Sadece geliştirme |
-| **OV (Organization Validated)** | ~$200/yıl | "publisher unknown" 30-90 günlük reputation süresi | v0.2 beta |
-| **EV (Extended Validation)** | ~$400/yıl | "publisher unknown" YOK (instant trust) | **Stable v1.0** |
+| Tip                             | Maliyet   | SmartScreen davranışı                              | Tavsiye           |
+| ------------------------------- | --------- | -------------------------------------------------- | ----------------- |
+| **Self-signed**                 | ücretsiz  | "publisher unknown" + kırmızı uyarı                | Sadece geliştirme |
+| **OV (Organization Validated)** | ~$200/yıl | "publisher unknown" 30-90 günlük reputation süresi | v0.2 beta         |
+| **EV (Extended Validation)**    | ~$400/yıl | "publisher unknown" YOK (instant trust)            | **Stable v1.0**   |
 
 EV cert sağlayıcıları: DigiCert, Sectigo, GlobalSign, SSL.com. EV ile
 HSM-bound token gelir (USB dongle veya cloud HSM); özel anahtar export
@@ -102,12 +102,12 @@ bunu gerçek pubkey ile değiştirmeli.
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/heicfast/d-space_fork/releases/latest/download/latest.json"
+        "https://github.com/heicfast/d-space_fork/releases/latest/download/latest.json",
       ],
       "pubkey": "<v0.2 öncesi: pnpm tauri signer generate çıktısı>",
-      "windows": { "installMode": "passive" }
-    }
-  }
+      "windows": { "installMode": "passive" },
+    },
+  },
 }
 ```
 
@@ -137,17 +137,18 @@ pubkey ile doğrular, kullanıcıya UpdateNotification modal'ı gösterir,
 ### 2.5 UI akışı (`src/components/UpdateNotification.vue`)
 
 Header'da küçük "⤓ Güncelleme kontrol et" butonu. Tıklayınca:
-* Güncelleme yok → "✔ Güncel sürüm"
-* Güncelleme var → modal: yeni sürüm + notlar + "İndir ve kur" / "Kapat"
-* İndirme sırasında progress bar (event.Started.contentLength →
+
+- Güncelleme yok → "✔ Güncel sürüm"
+- Güncelleme var → modal: yeni sürüm + notlar + "İndir ve kur" / "Kapat"
+- İndirme sırasında progress bar (event.Started.contentLength →
   event.Progress.chunkLength toplamı)
-* İmza/ağ/diğer hatalar i18n'li mesaja çevrilir (`update.errorVerify` vb.)
+- İmza/ağ/diğer hatalar i18n'li mesaja çevrilir (`update.errorVerify` vb.)
 
 ### 2.6 Kanal stratejisi (v1.0+)
 
-* **Stable** — varsayılan endpoint, GA sürümler
-* **Beta** — `pre-release: true` GitHub releases (şu an v0.2.0-beta burada)
-* **Nightly** — günlük build, ayrı feed (v1.0)
+- **Stable** — varsayılan endpoint, GA sürümler
+- **Beta** — `pre-release: true` GitHub releases (şu an v0.2.0-beta burada)
+- **Nightly** — günlük build, ayrı feed (v1.0)
 
 Kullanıcı kanal seçimi `settings.update_channel`.
 
@@ -163,10 +164,10 @@ indirmelerde uyarı verir. Reputation building süresi (~2-4 hafta):
 3. VirusTotal taraması: 0/70 false positive
 4. İlk 1000 indirme süresince hızlı sorun raporu kanalı açık tut
 5. AV vendor whitelisting (Bölüm 18.4):
-   * BitDefender — submit
-   * Kaspersky — submit
-   * Symantec — submit
-   * Defender'ın kendi telemetrisi reputation building'i otomatik yürütür
+   - BitDefender — submit
+   - Kaspersky — submit
+   - Symantec — submit
+   - Defender'ın kendi telemetrisi reputation building'i otomatik yürütür
 
 ---
 
@@ -180,12 +181,12 @@ Her release tag (`v*.*.*`) push'undan önce manuel checklist:
 - [ ] `pnpm test` (Vitest) tüm suite pass
 - [ ] `pnpm run build` vue-tsc + vite hata sıfır
 - [ ] `cargo audit` (v0.2) — `cargo install cargo-audit && cargo audit`
-  güvenlik açığı sıfır
+      güvenlik açığı sıfır
 - [ ] Bundle size delta < %5 (önceki release ile)
 - [ ] `docs/DISCOVERY_LOG.md` güncel
 - [ ] Manuel smoke test: Hızlı + Standart mod tarama, drilldown 4 görsel
-  mod geçişi, staging + undo + permanent delete (test fixture'ı), tray
-  menü
+      mod geçişi, staging + undo + permanent delete (test fixture'ı), tray
+      menü
 - [ ] `docs/THREAT_MODEL.md` riskler güncel
 - [ ] CHANGELOG.md (v0.2'den itibaren) — version bump
 
@@ -195,13 +196,13 @@ Her release tag (`v*.*.*`) push'undan önce manuel checklist:
 
 Bölüm 35'te detaylı; alpha kapsamı için kısa not:
 
-* **Yol A** (premium): D-Space Cloud endpoint — staging buluta yedek
+- **Yol A** (premium): D-Space Cloud endpoint — staging buluta yedek
   (Bölüm 26.5 trait stub)
-* **Yol B** (default, free): manuel klasör scan fallback — OneDrive/
+- **Yol B** (default, free): manuel klasör scan fallback — OneDrive/
   Dropbox/Google Drive yerel klasörü taranır
-* **Hibrit** (Bölüm 35.3): yerel scan + opsiyonel bulut sync — kullanıcı
+- **Hibrit** (Bölüm 35.3): yerel scan + opsiyonel bulut sync — kullanıcı
   network maliyetini görür
-* **Cert revoke hazırlığı** (Bölüm 35.4): bulut endpoint cert revoke
+- **Cert revoke hazırlığı** (Bölüm 35.4): bulut endpoint cert revoke
   edilirse 30 gün grace period, kullanıcıya offline downgrade önerilir
 
 Faz 2H'ta gerçek bulut entegrasyonu; şu sprint'te yalnızca trait

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>btn_max_nor</title>
+    <g id="btn_max_nor" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <path d="M16,6.25 L8,6.25 C7.03350169,6.25 6.25,7.03350169 6.25,8 L6.25,16 C6.25,16.9664983 7.03350169,17.75 8,17.75 L16,17.75 C16.9664983,17.75 17.75,16.9664983 17.75,16 L17.75,8 C17.75,7.03350169 16.9664983,6.25 16,6.25 Z M16,7.75 C16.1380712,7.75 16.25,7.86192881 16.25,8 L16.25,16 C16.25,16.1380712 16.1380712,16.25 16,16.25 L8,16.25 C7.86192881,16.25 7.75,16.1380712 7.75,16 L7.75,8 C7.75,7.86192881 7.86192881,7.75 8,7.75 L16,7.75 Z" id="矩形" fill="#616777" fill-rule="nonzero"></path>
+    </g>
+</svg>
