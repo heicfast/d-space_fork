@@ -107,7 +107,7 @@ pub fn probe_cloud_state(path: &Path) -> Result<CloudProbe> {
 #[cfg(not(windows))]
 pub fn probe_cloud_state(_path: &Path) -> Result<CloudProbe> {
     Err(crate::error::Error::Scan(
-        "cloud probe yalnızca Windows hedefinde desteklenir".into(),
+        "cloud probe is only supported on Windows targets".into(),
     ))
 }
 

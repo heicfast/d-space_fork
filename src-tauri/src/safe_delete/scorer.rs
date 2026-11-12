@@ -192,7 +192,7 @@ impl TractMlScorer {
     pub fn load_from_path(_model_path: &std::path::Path) -> Result<Self> {
         // v0.3: tract::tflite::tflite().model_for_path(model_path)...
         Err(Error::Db(
-            "TractMlScorer henüz yok — model dosyası v0.3 sprint'inde".into(),
+            "TractMlScorer not yet available — model file lands in the v0.3 sprint".into(),
         ))
     }
 }

@@ -32,7 +32,7 @@ fn normalize_drive_letter(drive: &str) -> Result<char> {
         .map(|c| c.to_ascii_uppercase())
         .ok_or_else(|| {
             Error::Volume(format!(
-                "Geçersiz sürücü parametresi: '{}' (UNC/path burada desteklenmez)",
+                "Invalid drive parameter: '{}' (UNC/path not supported here)",
                 drive
             ))
         })
@@ -59,7 +59,7 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
         drive = %drive_letter,
         kind = ?drive_kind,
         code = dtype_code,
-        "drive type sorgulandı"
+        "drive type queried"
     );
 
     if matches!(drive_kind, DriveKind::NoRootDir | DriveKind::Unknown) {
@@ -109,7 +109,7 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
         Err(e) => {
             // BitLocker locked volumes typically return access denied here.
             // v0.1'de tek tip işliyoruz; v0.2'de WMI ile BitLocker ayırt edilecek.
-            debug!(?e, "GetVolumeInformationW hatası");
+            debug!(?e, "GetVolumeInformationW failed");
             (String::new(), String::new(), 0, VolumeStatus::AccessDenied)
         }
     };
@@ -129,7 +129,7 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
     let (total_bytes, free_bytes) = match free_result {
         Ok(_) => (total, total_free),
         Err(e) => {
-            debug!(?e, "GetDiskFreeSpaceExW hatası");
+            debug!(?e, "GetDiskFreeSpaceExW failed");
             (0, 0)
         }
     };
@@ -154,7 +154,7 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
         free_gb = info.free_bytes / 1_073_741_824,
         status = ?info.status,
         elapsed_ms = info.elapsed_ms,
-        "pre-flight tamamlandı"
+        "pre-flight complete"
     );
 
     Ok(info)

@@ -116,7 +116,7 @@ pub(crate) fn normalize_volume_path(drive: &str) -> Result<String> {
         .map(|c| c.to_ascii_uppercase())
         .ok_or_else(|| {
             Error::Scan(format!(
-                "Geçersiz sürücü parametresi: '{}' (MFT yolu UNC kabul etmez)",
+                "Invalid drive parameter: '{}' (the MFT path does not accept UNC)",
                 drive
             ))
         })?;
@@ -130,12 +130,12 @@ pub(crate) fn estimate_record_count<T: std::io::Read + std::io::Seek>(
 ) -> Result<u64> {
     let mft_file = ntfs
         .file(handle, KnownNtfsFileRecordNumber::MFT as u64)
-        .map_err(|e| Error::Scan(format!("MFT record 0 okunamadı: {:?}", e)))?;
+        .map_err(|e| Error::Scan(format!("cannot read MFT record 0: {:?}", e)))?;
 
     let data_attr_item = mft_file
         .data(handle, "")
-        .ok_or_else(|| Error::Scan("MFT $DATA bulunamadı".into()))?
-        .map_err(|e| Error::Scan(format!("MFT $DATA hatası: {:?}", e)))?;
+        .ok_or_else(|| Error::Scan("MFT $DATA not found".into()))?
+        .map_err(|e| Error::Scan(format!("MFT $DATA error: {:?}", e)))?;
 
     let attr = data_attr_item
         .to_attribute()
@@ -241,16 +241,16 @@ pub fn collect_mft_entries_with_progress(
     let start = Instant::now();
     let volume_path = normalize_volume_path(drive)?;
 
-    debug!(volume = %volume_path, "MFT entry koleksiyonu başlıyor");
+    debug!(volume = %volume_path, "MFT entry collection starting");
     let mut handle = File::open(&volume_path).map_err(|e| {
         Error::Scan(format!(
-            "Volume açılamadı '{}': {} (yönetici izni gerekli olabilir)",
+            "cannot open volume '{}': {} (administrator privileges may be required)",
             volume_path, e
         ))
     })?;
 
     let ntfs =
-        Ntfs::new(&mut handle).map_err(|e| Error::Scan(format!("NTFS parse hatası: {:?}", e)))?;
+        Ntfs::new(&mut handle).map_err(|e| Error::Scan(format!("NTFS parse error: {:?}", e)))?;
 
     let estimated = estimate_record_count(&ntfs, &mut handle)?;
     let cap = estimated.min(MAX_RECORD_HARD_LIMIT);
@@ -258,7 +258,7 @@ pub fn collect_mft_entries_with_progress(
         tracing::warn!(
             estimated,
             hard_limit = MAX_RECORD_HARD_LIMIT,
-            "MFT record tahmini hard limit'i aştı — tarama 50M kayıtta kesildi"
+            "MFT record estimate exceeded the hard limit — scan truncated at 50M records"
         );
     }
     info!(estimated, cap, "MFT entry koleksiyonu kapasitesi");
@@ -350,20 +350,20 @@ pub fn walk_mft(drive: &str) -> Result<MftWalkStats> {
     let start = Instant::now();
     let volume_path = normalize_volume_path(drive)?;
 
-    debug!(volume = %volume_path, "MFT full walk başlıyor");
+    debug!(volume = %volume_path, "MFT full walk starting");
     let mut handle = File::open(&volume_path).map_err(|e| {
         Error::Scan(format!(
-            "Volume açılamadı '{}': {} (yönetici izni gerekli olabilir)",
+            "cannot open volume '{}': {} (administrator privileges may be required)",
             volume_path, e
         ))
     })?;
 
     let ntfs =
-        Ntfs::new(&mut handle).map_err(|e| Error::Scan(format!("NTFS parse hatası: {:?}", e)))?;
+        Ntfs::new(&mut handle).map_err(|e| Error::Scan(format!("NTFS parse error: {:?}", e)))?;
 
     let estimated = estimate_record_count(&ntfs, &mut handle)?;
     let cap = estimated.min(MAX_RECORD_HARD_LIMIT);
-    info!(estimated, cap, "MFT record sayısı tahmini");
+    info!(estimated, cap, "MFT record count estimate");
 
     let mut visited = 0u64;
     let mut in_use = 0u64;
@@ -431,7 +431,7 @@ pub fn walk_mft(drive: &str) -> Result<MftWalkStats> {
         gb = stats.bytes_aggregate / 1_073_741_824,
         skipped = stats.skipped_errors,
         elapsed_ms = stats.elapsed_ms,
-        "MFT walk tamamlandı"
+        "MFT walk complete"
     );
 
     Ok(stats)

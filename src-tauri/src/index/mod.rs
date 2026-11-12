@@ -252,7 +252,7 @@ pub fn index_search(
         return Ok(vec![]);
     }
     let cap = limit.clamp(1, 500);
-    debug!(query = trimmed, limit = cap, "index_search çağrıldı");
+    debug!(query = trimmed, limit = cap, "index_search called");
     let mut results = persist_search(conn, trimmed, cap)?;
     // Top-N için recursive path zinciri. Hata olursa silent — full_path
     // yalnızca konfor alanı, eksikliği sorun değil.

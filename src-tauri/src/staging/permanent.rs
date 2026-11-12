@@ -46,7 +46,7 @@ fn hash_first_4kb(path: &Path) -> Result<Option<[u8; 32]>> {
         return Ok(None);
     }
     let file = fs::File::open(path)
-        .map_err(|e| Error::Staging(format!("permanent hash aç '{}': {}", path.display(), e)))?;
+        .map_err(|e| Error::Staging(format!("permanent hash open '{}': {}", path.display(), e)))?;
     let mut reader = BufReader::with_capacity(FIRST_KB, file);
     let mut buf = vec![0u8; FIRST_KB];
     let mut total = 0usize;
@@ -107,7 +107,7 @@ pub fn permanent_delete(
         .unwrap_or_default();
     if expected.is_empty() {
         return Err(Error::Staging(format!(
-            "Orijinal path'ten dosya adı çıkarılamadı: {}",
+            "cannot derive the file name from the original path: {}",
             original_path
         )));
     }
@@ -115,10 +115,10 @@ pub fn permanent_delete(
         warn!(
             expected = %expected,
             received_len = confirm_phrase.len(),
-            "permanent delete onay başarısız (phrase uyuşmuyor)"
+            "permanent delete confirmation failed (phrase mismatch)"
         );
         return Err(Error::Staging(format!(
-            "Onay başarısız. Tam dosya adını yazmalısın: '{}'",
+            "Confirmation failed. You must type the full file name: '{}'",
             expected
         )));
     }
@@ -126,7 +126,7 @@ pub fn permanent_delete(
     let staged_pb = PathBuf::from(&staged_path);
     if !staged_pb.exists() {
         return Err(Error::Staging(format!(
-            "Staging dosyası bulunamadı: {}",
+            "Staged file not found: {}",
             staged_path
         )));
     }
@@ -136,7 +136,7 @@ pub fn permanent_delete(
     let hash = match hash_first_4kb(&staged_pb) {
         Ok(h) => h,
         Err(e) => {
-            warn!(staged = %staged_pb.display(), error = %e, "forensic hash alınamadı");
+            warn!(staged = %staged_pb.display(), error = %e, "forensic hash unavailable");
             None
         }
     };
@@ -174,7 +174,7 @@ pub fn permanent_delete(
     // pahalı, kullanıcı UI'da onayladı zaten).
     let fs_result = if is_dir {
         fs::remove_dir_all(&staged_pb)
-            .map_err(|e| std::io::Error::other(format!("klasör recursive remove: {}", e)))
+            .map_err(|e| std::io::Error::other(format!("folder recursive remove: {}", e)))
     } else if secure_wipe {
         crate::staging::wipe::dod_wipe_file(&staged_pb)
             .map_err(|e| std::io::Error::other(format!("DoD wipe: {}", e)))
@@ -185,7 +185,7 @@ pub fn permanent_delete(
         warn!(
             staged = %staged_pb.display(),
             error = %e,
-            "permanent delete FS hatası — forensic ledger zaten yazıldı"
+            "permanent delete filesystem error — forensic ledger already written"
         );
         return Err(Error::Staging(format!(
             "Dosya silme başarısız ('{}'): {} — \
@@ -198,7 +198,7 @@ pub fn permanent_delete(
     // Gemini review B32 — boş kalan staging bucket dizinini temizle.
     if let Some(bucket) = staged_pb.parent() {
         if let Err(e) = fs::remove_dir(bucket) {
-            debug!(bucket = %bucket.display(), error = %e, "bucket cleanup atlandı");
+            debug!(bucket = %bucket.display(), error = %e, "bucket cleanup skipped");
         }
     }
 
@@ -209,7 +209,7 @@ pub fn permanent_delete(
         size = size_bytes,
         hash_hex = hash_hex.as_deref().unwrap_or("-"),
         secure_wipe,
-        "permanent delete tamamlandı"
+        "permanent delete complete"
     );
 
     Ok(PermanentDeleteResult {
@@ -274,7 +274,7 @@ mod tests {
         fs::write(&staged, b"sensitive").unwrap();
         let id = seed_staging(&conn, r"C:\Users\test\secret.bin", &staged, 9);
 
-        let err = permanent_delete(id, "yanlış-isim.bin", false, &mut conn);
+        let err = permanent_delete(id, "wrong-name.bin", false, &mut conn);
         assert!(err.is_err());
         // Dosya hâlâ orada
         assert!(staged.exists());
@@ -300,7 +300,8 @@ mod tests {
         fs::write(&staged, b"some content here").unwrap();
         let id = seed_staging(&conn, r"C:\Users\test\doomed.txt", &staged, 17);
 
-        let result = permanent_delete(id, "doomed.txt", false, &mut conn).expect("phrase doğru");
+        let result =
+            permanent_delete(id, "doomed.txt", false, &mut conn).expect("phrase is correct");
         assert_eq!(result.size_bytes, 17);
         assert!(result.blake3_first4kb_hex.is_some());
         assert!(!result.is_dir);
@@ -363,8 +364,8 @@ mod tests {
         );
 
         let result = permanent_delete(id, "secret.bin", true, &mut conn)
-            .expect("secure wipe başarılı olmalı");
-        assert!(!staged.exists(), "dosya silinmiş olmalı");
+            .expect("secure wipe should succeed");
+        assert!(!staged.exists(), "file should be gone");
         // Forensic kayıt yine yazıldı (hash + path)
         let forensic_count: i64 = conn
             .query_row(

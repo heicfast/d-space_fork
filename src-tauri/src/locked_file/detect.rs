@@ -94,7 +94,7 @@ pub fn probe_lock_state(path: &Path) -> Result<LockState> {
                 }
                 other => LockState::OtherError(other),
             };
-            debug!(path = %path.display(), ?state, code, "lock probe sonuç");
+            debug!(path = %path.display(), ?state, code, "lock probe result");
             Ok(state)
         }
     }
@@ -104,7 +104,7 @@ pub fn probe_lock_state(path: &Path) -> Result<LockState> {
 #[cfg(not(windows))]
 pub fn probe_lock_state(_path: &Path) -> Result<LockState> {
     Err(crate::error::Error::LockedFile(
-        "lock detection yalnızca Windows hedefinde desteklenir".into(),
+        "lock detection is only supported on Windows targets".into(),
     ))
 }
 

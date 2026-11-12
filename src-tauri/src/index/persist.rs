@@ -212,7 +212,7 @@ pub fn resolve_full_path(conn: &Connection, volume_id: &str, file_ref: i64) -> R
     }
     if parts.is_empty() {
         return Err(Error::Index(format!(
-            "file_ref bulunamadı: {} (volume={})",
+            "file_ref not found: {} (volume={})",
             file_ref, volume_id
         )));
     }

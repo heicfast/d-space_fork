@@ -75,7 +75,7 @@ pub fn probe_file(path: &Path) -> Result<LockedFileProbe> {
 
     let owners = if matches!(state, LockState::Locked) {
         find_lock_owners(path).unwrap_or_else(|e| {
-            tracing::warn!(?e, path = %path.display(), "lock owner lookup başarısız");
+            tracing::warn!(?e, path = %path.display(), "lock owner lookup failed");
             Vec::new()
         })
     } else {

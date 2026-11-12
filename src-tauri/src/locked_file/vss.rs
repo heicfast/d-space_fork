@@ -61,10 +61,8 @@ const GUID_NULL: GUID = GUID {
 pub(crate) fn hresult_to_error(hr: i32, ctx: &str) -> Error {
     let detail = match hr {
         E_ACCESSDENIED => "E_ACCESSDENIED (admin gerekli)",
-        VSS_E_BAD_STATE => "VSS_E_BAD_STATE (yanlış sıra veya zaten meşgul)",
-        VSS_E_VOLUME_NOT_SUPPORTED => {
-            "VSS_E_VOLUME_NOT_SUPPORTED (NTFS değil veya VSS desteklemiyor)"
-        }
+        VSS_E_BAD_STATE => "VSS_E_BAD_STATE (wrong sequence or already busy)",
+        VSS_E_VOLUME_NOT_SUPPORTED => "VSS_E_VOLUME_NOT_SUPPORTED (not NTFS or VSS not supported)",
         VSS_E_INSUFFICIENT_STORAGE => "VSS_E_INSUFFICIENT_STORAGE (shadow storage yetersiz)",
         _ => "bilinmeyen HRESULT",
     };
@@ -183,11 +181,11 @@ pub(crate) unsafe fn wait_async(p_async: *mut IVssAsync, ctx: &str) -> Result<()
         return Err(hresult_to_error(qs_hr, &format!("{ctx} (QueryStatus)")));
     }
     if status == 0x0004_2306 {
-        return Err(Error::Snapshot(format!("VSS {ctx}: işlem iptal edildi")));
+        return Err(Error::Snapshot(format!("VSS {ctx}: operation cancelled")));
     }
     if status == 0x0004_2305 {
         return Err(Error::Snapshot(format!(
-            "VSS {ctx}: 60 sn içinde tamamlanmadı (timeout)"
+            "VSS {ctx}: did not complete within 60 s (timeout)"
         )));
     }
     if status != S_OK && status != VSS_S_ASYNC_FINISHED {
@@ -293,7 +291,7 @@ pub(crate) unsafe fn is_volume_supported(volume_root: &str) -> Result<bool> {
 
         let vol_bstr = bstr_from_str(volume_root);
         if vol_bstr.is_null() {
-            return Err(Error::Snapshot("volume BSTR alloc başarısız".into()));
+            return Err(Error::Snapshot("volume BSTR alloc failed".into()));
         }
         let mut supported: i32 = 0;
         let hr = (*p_backup).IsVolumeSupported(GUID_NULL, vol_bstr, &mut supported);
@@ -378,7 +376,7 @@ pub(crate) unsafe fn create_snapshot(volume_root: &str) -> Result<RawSnapshot> {
     let vol_bstr = bstr_from_str(volume_root);
     if vol_bstr.is_null() {
         cleanup(false);
-        return Err(Error::Snapshot("volume BSTR alloc başarısız".into()));
+        return Err(Error::Snapshot("volume BSTR alloc failed".into()));
     }
 
     let mut supported: i32 = 0;
@@ -469,7 +467,7 @@ pub(crate) unsafe fn create_snapshot(volume_root: &str) -> Result<RawSnapshot> {
 
     if device_object.is_empty() {
         cleanup(true);
-        return Err(Error::Snapshot("snapshot device object boş".into()));
+        return Err(Error::Snapshot("snapshot device object empty".into()));
     }
 
     Ok(RawSnapshot {
@@ -564,7 +562,7 @@ mod tests {
         unsafe {
             let s = "C:\\";
             let b = bstr_from_str(s);
-            assert!(!b.is_null(), "BSTR alloc başarısız");
+            assert!(!b.is_null(), "BSTR alloc failed");
             let len = SysStringLen(b);
             assert_eq!(len as usize, s.encode_utf16().count());
 

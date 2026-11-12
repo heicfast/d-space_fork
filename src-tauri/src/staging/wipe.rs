@@ -115,7 +115,7 @@ pub fn dod_wipe_file(path: &Path) -> Result<()> {
         .map_err(|e| Error::Staging(format!("wipe: meta '{}': {}", path.display(), e)))?;
     if !metadata.is_file() {
         return Err(Error::Staging(format!(
-            "wipe yalnız düz dosya kabul eder, klasör/symlink değil: '{}'",
+            "wipe accepts only regular files, not folders/symlinks: '{}'",
             path.display()
         )));
     }
@@ -135,7 +135,7 @@ pub fn dod_wipe_file(path: &Path) -> Result<()> {
                 let mut cleared = perms;
                 cleared.set_readonly(false);
                 if let Err(e) = std::fs::set_permissions(path, cleared) {
-                    debug!(path = %path.display(), error = %e, "readonly temizleme başarısız");
+                    debug!(path = %path.display(), error = %e, "readonly clear failed");
                 }
             }
         }
@@ -144,14 +144,14 @@ pub fn dod_wipe_file(path: &Path) -> Result<()> {
     // 0-byte dosya: passes anlamsız, direkt sil.
     if len == 0 {
         std::fs::remove_file(path).map_err(|e| Error::Staging(format!("wipe remove: {}", e)))?;
-        debug!(path = %path.display(), "0-byte dosya — pass'sız sil");
+        debug!(path = %path.display(), "0-byte file — delete without passes");
         return Ok(());
     }
 
     let mut file = OpenOptions::new()
         .write(true)
         .open(path)
-        .map_err(|e| Error::Staging(format!("wipe aç '{}': {}", path.display(), e)))?;
+        .map_err(|e| Error::Staging(format!("wipe open '{}': {}", path.display(), e)))?;
 
     for (i, pass) in [Pass::Zero, Pass::Ones, Pass::Random].iter().enumerate() {
         overwrite_pass(&mut file, len, pass)
@@ -225,7 +225,7 @@ mod tests {
         assert!(p.exists());
 
         dod_wipe_file(&p).unwrap();
-        assert!(!p.exists(), "dosya silinmiş olmalı");
+        assert!(!p.exists(), "file should be gone");
     }
 
     #[test]
@@ -247,7 +247,7 @@ mod tests {
         fs::create_dir(&inner).unwrap();
         let err = dod_wipe_file(&inner).unwrap_err();
         match err {
-            Error::Staging(msg) => assert!(msg.contains("klasör") || msg.contains("dosya")),
+            Error::Staging(msg) => assert!(msg.contains("folders") || msg.contains("files")),
             _ => panic!("Staging hata bekleniyor"),
         }
         // Klasör hâlâ varlığını korumalı

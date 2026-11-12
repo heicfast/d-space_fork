@@ -77,7 +77,7 @@ pub struct BaselineSummary {
 pub fn parse_journal_data(buf: &[u8]) -> Result<JournalData> {
     if buf.len() < JOURNAL_DATA_V0_SIZE {
         return Err(Error::Index(format!(
-            "USN_JOURNAL_DATA_V0 buffer çok kısa: {} < {}",
+            "USN_JOURNAL_DATA_V0 buffer too short: {} < {}",
             buf.len(),
             JOURNAL_DATA_V0_SIZE
         )));
@@ -118,7 +118,7 @@ pub fn build_enum_request(
 pub fn parse_enum_buffer(buf: &[u8]) -> Result<(u64, Vec<UsnRecord>)> {
     if buf.len() < ENUM_BUFFER_HEADER {
         return Err(Error::Index(format!(
-            "ENUM output buffer çok kısa: {} < {}",
+            "ENUM output buffer too short: {} < {}",
             buf.len(),
             ENUM_BUFFER_HEADER
         )));
@@ -211,7 +211,7 @@ pub fn query_journal(volume_id: &str) -> Result<JournalData> {
     }
     .map_err(|e| {
         Error::Index(format!(
-            "query_journal volume açma ({}): {:?}",
+            "query_journal volume open ({}): {:?}",
             volume_id, e
         ))
     })?;
@@ -234,7 +234,7 @@ pub fn query_journal(volume_id: &str) -> Result<JournalData> {
     .map_err(|e| Error::Index(format!("query_journal DeviceIoControl: {:?}", e)))?;
     if (returned as usize) < JOURNAL_DATA_V0_SIZE {
         return Err(Error::Index(format!(
-            "query_journal kısa yanıt: {} bayt",
+            "query_journal short response: {} bytes",
             returned
         )));
     }
@@ -244,7 +244,7 @@ pub fn query_journal(volume_id: &str) -> Result<JournalData> {
 /// Non-Windows — journal sorgusu desteklenmez.
 #[cfg(not(windows))]
 pub fn query_journal(_volume_id: &str) -> Result<JournalData> {
-    Err(Error::NotImplemented("query_journal yalnız Windows"))
+    Err(Error::NotImplemented("query_journal is Windows-only"))
 }
 
 #[cfg(windows)]
@@ -297,7 +297,7 @@ pub fn enumerate_volume_baseline(
             None,
         )
     }
-    .map_err(|e| Error::Index(format!("volume açma ({}): {:?}", volume_id, e)))?;
+    .map_err(|e| Error::Index(format!("volume open ({}): {:?}", volume_id, e)))?;
     let _guard = HandleGuard(handle);
 
     // Journal verilerini al — watermark için journal_id + next_usn snapshot.
@@ -318,7 +318,7 @@ pub fn enumerate_volume_baseline(
     .map_err(|e| Error::Index(format!("FSCTL_QUERY_USN_JOURNAL: {:?}", e)))?;
     if (bytes_returned as usize) < JOURNAL_DATA_V0_SIZE {
         return Err(Error::Index(format!(
-            "USN journal query çok kısa: {} bayt",
+            "USN journal query too short: {} bytes",
             bytes_returned
         )));
     }
@@ -327,7 +327,7 @@ pub fn enumerate_volume_baseline(
         volume = volume_id,
         journal_id = journal.journal_id,
         next_usn = journal.next_usn,
-        "USN baseline başlıyor"
+        "USN baseline starting"
     );
 
     // Gemini review B6 — full rebuild öncesi eski satırları temizle.
@@ -338,7 +338,7 @@ pub fn enumerate_volume_baseline(
     let purged = super::persist::purge_volume(conn, volume_id)?;
     debug!(
         volume = volume_id,
-        purged, "baseline öncesi eski index temizlendi"
+        purged, "old index purged before baseline"
     );
 
     let mut summary = BaselineSummary {
@@ -404,7 +404,7 @@ pub fn enumerate_volume_baseline(
         volume = volume_id,
         records = summary.records_seen,
         batches = summary.batches,
-        "USN baseline tamamlandı"
+        "USN baseline complete"
     );
     Ok(summary)
 }
@@ -416,7 +416,7 @@ pub fn enumerate_volume_baseline(
     _buffer_size: usize,
 ) -> Result<BaselineSummary> {
     Err(Error::Index(
-        "USN baseline walker yalnız Windows hedefinde desteklenir".into(),
+        "USN baseline walker is only supported on Windows targets".into(),
     ))
 }
 

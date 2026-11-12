@@ -87,7 +87,7 @@ pub fn list_rules(conn: &Connection) -> Result<Vec<UserRule>> {
                     rusqlite::types::Type::Text,
                     Box::new(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("geçersiz pattern_type: {}", ptype_str),
+                        format!("invalid pattern_type: {}", ptype_str),
                     )),
                 )
             })?;
@@ -150,10 +150,10 @@ pub fn add_rule(
 ) -> Result<UserRule> {
     let p = pattern.trim();
     if p.is_empty() {
-        return Err(Error::Db("Pattern boş olamaz".into()));
+        return Err(Error::Db("Pattern cannot be empty".into()));
     }
     if score > 100 {
-        return Err(Error::Db("Skor 0-100 arası olmalı".into()));
+        return Err(Error::Db("Score must be between 0 and 100".into()));
     }
     let now = now_unix();
     conn.execute(
@@ -188,7 +188,7 @@ pub fn delete_rule(conn: &Connection, id: i64) -> Result<()> {
         .execute("DELETE FROM user_rules WHERE id = ?1", params![id])
         .map_err(|e| Error::Db(format!("user_rules delete: {}", e)))?;
     if n == 0 {
-        return Err(Error::Db(format!("Kural bulunamadı: id={}", id)));
+        return Err(Error::Db(format!("Rule not found: id={}", id)));
     }
     Ok(())
 }
@@ -202,7 +202,7 @@ pub fn toggle_rule(conn: &Connection, id: i64, enabled: bool) -> Result<()> {
         )
         .map_err(|e| Error::Db(format!("user_rules toggle: {}", e)))?;
     if n == 0 {
-        return Err(Error::Db(format!("Kural bulunamadı: id={}", id)));
+        return Err(Error::Db(format!("Rule not found: id={}", id)));
     }
     Ok(())
 }
@@ -251,7 +251,7 @@ mod tests {
         let conn = fresh_db();
         let r = add_rule(
             &conn,
-            "kişiselArşiv",
+            "personalArchive",
             UserPatternType::Name,
             5,
             "Test kural",
@@ -262,7 +262,7 @@ mod tests {
 
         let list = list_rules(&conn).unwrap();
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].pattern, "kişiselArşiv");
+        assert_eq!(list[0].pattern, "personalArchive");
     }
 
     #[test]

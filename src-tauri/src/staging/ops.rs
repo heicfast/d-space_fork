@@ -28,8 +28,8 @@ pub struct StagedItem {
 }
 
 fn staging_base() -> Result<PathBuf> {
-    let base =
-        dirs::data_local_dir().ok_or_else(|| Error::Staging("data_local_dir bulunamadı".into()))?;
+    let base = dirs::data_local_dir()
+        .ok_or_else(|| Error::Staging("data_local_dir could not be resolved".into()))?;
     Ok(base.join("DiskWizard").join("staging"))
 }
 
@@ -63,7 +63,7 @@ fn first_drive_letter(_p: &Path) -> Option<char> {
 pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
     let src = PathBuf::from(path);
     if !src.exists() {
-        return Err(Error::Staging(format!("Bulunamadı: {}", path)));
+        return Err(Error::Staging(format!("Not found: {}", path)));
     }
 
     let metadata =
@@ -86,7 +86,7 @@ pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
         dest = dest_dir.join(format!("{:03}_{}", suffix, file_name.to_string_lossy()));
         suffix += 1;
         if suffix > 999 {
-            return Err(Error::Staging("Çakışma sayısı limitini aştı".into()));
+            return Err(Error::Staging("Conflict count limit exceeded".into()));
         }
     }
 
@@ -150,7 +150,7 @@ pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
         is_dir,
         original = %path,
         staged = %dest.display(),
-        "stage başarılı"
+        "stage complete"
     );
 
     Ok(StagedItem {
@@ -323,7 +323,7 @@ fn cleanup_bucket_if_empty(staged_path: &Path) {
     if let Some(bucket) = staged_path.parent() {
         // remove_dir yalnız BOŞ dizinde başarılı olur — doluysa no-op.
         if let Err(e) = fs::remove_dir(bucket) {
-            debug!(bucket = %bucket.display(), error = %e, "bucket cleanup atlandı");
+            debug!(bucket = %bucket.display(), error = %e, "bucket cleanup skipped");
         }
     }
 }
@@ -353,7 +353,7 @@ fn undo_move_across_volumes(src: &Path, dest: &Path) -> Result<()> {
     if src_hash != dst_hash {
         let _ = fs::remove_file(&tmp_path);
         return Err(Error::Staging(
-            "Undo hash uyuşmazlığı (Blake3) — kopya iptal, staged dosya intact".into(),
+            "Undo hash mismatch (Blake3) — copy aborted, staged file intact".into(),
         ));
     }
 
@@ -403,17 +403,14 @@ pub fn undo(id: i64, conn: &Connection) -> Result<UndoOutcome> {
     let dest = Path::new(&original);
 
     if !src.exists() {
-        return Err(Error::Staging(format!(
-            "Staging dosyası bulunamadı: {}",
-            staged
-        )));
+        return Err(Error::Staging(format!("Staged file not found: {}", staged)));
     }
 
     // Hedef boş — direkt restore (cross-volume dahil, undo_move halleder).
     if !dest.exists() {
         undo_move(src, dest)?;
         delete_staging_row(conn, id)?;
-        info!(id, original = %original, "undo başarılı (Restored)");
+        info!(id, original = %original, "undo complete (Restored)");
         return Ok(UndoOutcome::Restored {
             original_path: original,
         });
@@ -447,20 +444,20 @@ pub fn undo(id: i64, conn: &Connection) -> Result<UndoOutcome> {
             Ok(()) => {
                 cleanup_bucket_if_empty(src);
                 delete_staging_row(conn, id)?;
-                info!(id, original = %original, "undo idempotent — hedef ile staged aynı");
+                info!(id, original = %original, "undo idempotent — target identical to the staged file");
                 Ok(UndoOutcome::Idempotent {
                     original_path: original,
                 })
             }
             Err(e) => {
-                warn!(staged = %src.display(), error = %e, "idempotent silme başarısız — satır korundu");
+                warn!(staged = %src.display(), error = %e, "idempotent delete failed — row preserved");
                 Err(Error::Staging(format!("Staged dosya silinemedi: {}", e)))
             }
         }
     } else {
         warn!(
             dest = %dest.display(),
-            "undo conflict — kullanıcı kararı gerekli"
+            "undo conflict — user decision required"
         );
         Ok(UndoOutcome::Conflict {
             original_path: original,
@@ -501,15 +498,12 @@ pub fn undo_with_resolution(
     let dest = Path::new(&original);
 
     if !src.exists() {
-        return Err(Error::Staging(format!(
-            "Staging dosyası bulunamadı: {}",
-            staged
-        )));
+        return Err(Error::Staging(format!("Staged file not found: {}", staged)));
     }
 
     match resolution {
         ConflictResolution::Cancel => {
-            info!(id, "undo conflict iptal — staging satırı korunuyor");
+            info!(id, "undo conflict cancelled — staging row preserved");
             Err(Error::Staging("Undo iptal edildi.".into()))
         }
         ConflictResolution::Overwrite => {
@@ -586,19 +580,19 @@ mod tests {
 
         // Staging base'ı zaten LOCALAPPDATA — bu test üzerine yazılırsa
         // gerçek staging klasörü kullanılır; sonra temizleriz.
-        let staged = stage(src.to_str().unwrap(), &conn).expect("stage başarılı");
-        assert!(!src.exists(), "kaynak taşınmış olmalı");
+        let staged = stage(src.to_str().unwrap(), &conn).expect("stage complete");
+        assert!(!src.exists(), "source should have been moved");
         assert!(Path::new(&staged.staged_path).exists());
 
         // Undo — hedef boş, Restored beklenir
-        let outcome = undo(staged.id, &conn).expect("undo başarılı");
+        let outcome = undo(staged.id, &conn).expect("undo should succeed");
         match outcome {
             UndoOutcome::Restored { original_path } => {
                 assert_eq!(original_path, src.to_string_lossy());
             }
             _ => panic!("Restored bekleniyordu"),
         }
-        assert!(src.exists(), "kaynak geri gelmiş olmalı");
+        assert!(src.exists(), "source should be restored");
         assert!(!Path::new(&staged.staged_path).exists());
 
         // DB'de staging_item silinmiş olmalı
@@ -644,7 +638,7 @@ mod tests {
         .unwrap();
         let id = conn.last_insert_rowid();
 
-        let outcome = undo(id, &conn).expect("undo conflict döner");
+        let outcome = undo(id, &conn).expect("undo should report conflict");
         match outcome {
             UndoOutcome::Conflict {
                 original_path,
@@ -701,7 +695,7 @@ mod tests {
 
         let outcome = undo(id, &conn).expect("idempotent ok");
         assert!(matches!(outcome, UndoOutcome::Idempotent { .. }));
-        assert!(target.exists(), "hedef korunmalı");
+        assert!(target.exists(), "target must be preserved");
         assert!(!staged_file.exists(), "staged silinmeli");
 
         let _ = fs::remove_dir_all(&work);
@@ -748,7 +742,7 @@ mod tests {
         match outcome {
             UndoOutcome::Restored { original_path } => {
                 let new_path = std::path::PathBuf::from(&original_path);
-                assert!(new_path.exists(), "yeni isimle dosya var olmalı");
+                assert!(new_path.exists(), "renamed file must exist");
                 assert!(new_path
                     .file_name()
                     .unwrap()

@@ -146,7 +146,7 @@ fn head_hash_inner(path: &Path) -> std::io::Result<[u8; 32]> {
 #[cfg(test)]
 fn hash_file(path: &Path) -> Result<[u8; 32]> {
     hash_file_inner(path)
-        .map_err(|e| Error::Duplicate(format!("hash aç/read '{}': {}", path.display(), e)))
+        .map_err(|e| Error::Duplicate(format!("hash open/read '{}': {}", path.display(), e)))
 }
 
 /// Bölüm 7.3 + 34.5.4 — locked dosya hash retry zinciri.
@@ -173,7 +173,7 @@ pub(crate) fn hash_file_with_retry(path: &Path) -> Result<[u8; 32]> {
             // share violation değilse ya da vss kapalıysa orijinal hata.
             let _ = is_share_violation; // dead_code uyarısı bastır
             Err(Error::Duplicate(format!(
-                "hash aç/read '{}': {}",
+                "hash open/read '{}': {}",
                 path.display(),
                 e
             )))
@@ -253,7 +253,7 @@ pub fn find_duplicates(
         filtered_small,
         bucket_count,
         candidates = total_candidates,
-        "duplicate Aşama 1 (boyut bucket) tamam"
+        "duplicate stage 1 (size buckets) complete"
     );
 
     // --- Aşama 1.5: head-hash prefilter (Bölüm 7.4 v0.2) ---------------
@@ -301,7 +301,7 @@ pub fn find_duplicates(
             head_hash_count,
             head_eliminated,
             survivors = survivors.len(),
-            "duplicate Aşama 1.5 (head-hash prefilter) tamam"
+            "duplicate stage 1.5 (head-hash prefilter) complete"
         );
         survivors
     };
@@ -351,7 +351,7 @@ pub fn find_duplicates(
                         .push(cand.path);
                 }
                 Err(e) => {
-                    warn!(path = %cand.path, error = %e, "hash atlandı");
+                    warn!(path = %cand.path, error = %e, "hash skipped");
                     hash_errors += 1;
                 }
             }
@@ -412,7 +412,7 @@ pub fn find_duplicates(
         candidate_pairs,
         hash_errors,
         elapsed_ms = stats.elapsed_ms,
-        "duplicate scan tamamlandı"
+        "duplicate scan complete"
     );
 
     Ok(DuplicateScanResult {
@@ -522,7 +522,7 @@ mod tests {
         let hb = head_hash_inner(&b).unwrap();
         assert_eq!(
             ha, hb,
-            "ilk 4 KB aynı olunca head_hash de aynı olmalı (full hash farklı olsa bile)"
+            "identical first 4 KB must yield identical head_hash (even if the full hash differs)"
         );
     }
 
@@ -581,7 +581,7 @@ mod tests {
             max_groups: 500,
         };
         let result = find_duplicates(&tree, 'C', opts).unwrap();
-        assert_eq!(result.groups.len(), 2, "iki size bucket'ı bekleniyor");
+        assert_eq!(result.groups.len(), 2, "expected two size buckets");
         // tiny'ler filtrelendi
         assert!(result.filtered_small >= 2);
     }
@@ -619,11 +619,11 @@ mod tests {
         // tutarlılığını uçtan uca doğrula.
         let head_a = head_hash_inner(&a).unwrap();
         let head_b = head_hash_inner(&b).unwrap();
-        assert_eq!(head_a, head_b, "aynı içerik → aynı head_hash");
+        assert_eq!(head_a, head_b, "same content → same head_hash");
 
         let full_a = hash_file(&a).unwrap();
         let full_b = hash_file(&b).unwrap();
-        assert_eq!(full_a, full_b, "aynı içerik → aynı full hash");
+        assert_eq!(full_a, full_b, "same content → same full hash");
 
         // Build_tree + find_duplicates yolu için synthetic raw entries:
         let raw = vec![

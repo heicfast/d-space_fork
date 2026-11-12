@@ -43,7 +43,7 @@ impl WatcherHandle {
         }
         if let Some(j) = self.join.take() {
             if let Err(e) = j.join() {
-                warn!(?e, "watcher join hatası");
+                warn!(?e, "watcher join failed");
             }
         }
     }
@@ -74,7 +74,10 @@ where
     F: FnMut(&str) -> Result<()> + Send + 'static,
 {
     if !is_admin {
-        info!(volume = volume_id, "USN watcher başlatılmadı: admin yok");
+        info!(
+            volume = volume_id,
+            "USN watcher not started: no admin privileges"
+        );
         return Ok(None);
     }
     let (tx, rx) = channel::<()>();
@@ -84,18 +87,18 @@ where
             volume_id.replace(['\\', ':'], "_")
         ))
         .spawn(move || {
-            info!(volume = volume_id, "USN watcher thread başladı");
+            info!(volume = volume_id, "USN watcher thread started");
             loop {
                 match tick(&volume_id) {
                     Ok(()) => {}
                     Err(e) => {
-                        warn!(volume = volume_id, ?e, "USN watcher tick hatası");
+                        warn!(volume = volume_id, ?e, "USN watcher tick failed");
                     }
                 }
                 // Shutdown sinyali veya 5 sn time-out
                 match rx.recv_timeout(WATCHER_POLL_INTERVAL) {
                     Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                        info!(volume = volume_id, "USN watcher kapatılıyor");
+                        info!(volume = volume_id, "USN watcher shutting down");
                         break;
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
@@ -138,7 +141,7 @@ mod tests {
         // İlk tick anında çalışmalı
         std::thread::sleep(Duration::from_millis(50));
         let before_shutdown = counter.load(Ordering::SeqCst);
-        assert!(before_shutdown >= 1, "tick en az 1 kez çalışmalı");
+        assert!(before_shutdown >= 1, "tick must run at least once");
 
         // shutdown çağrısı thread'i join etmeli
         handle.shutdown();

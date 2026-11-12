@@ -44,7 +44,7 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
     };
     if start_rc != ERROR_SUCCESS {
         return Err(Error::LockedFile(format!(
-            "RmStartSession başarısız: Win32 code {}",
+            "RmStartSession failed: Win32 code {}",
             start_rc.0
         )));
     }
@@ -61,7 +61,7 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
         let reg_rc = unsafe { RmRegisterResources(session_handle, Some(&file_array), None, None) };
         if reg_rc != ERROR_SUCCESS {
             return Err(Error::LockedFile(format!(
-                "RmRegisterResources başarısız: Win32 code {}",
+                "RmRegisterResources failed: Win32 code {}",
                 reg_rc.0
             )));
         }
@@ -86,7 +86,7 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
         };
         if probe_rc != ERROR_SUCCESS && probe_rc != ERROR_MORE_DATA {
             return Err(Error::LockedFile(format!(
-                "RmGetList (probe) başarısız: Win32 code {}",
+                "RmGetList (probe) failed: Win32 code {}",
                 probe_rc.0
             )));
         }
@@ -117,13 +117,13 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
                 continue;
             }
             return Err(Error::LockedFile(format!(
-                "RmGetList (fetch) başarısız: Win32 code {}",
+                "RmGetList (fetch) failed: Win32 code {}",
                 fetch_rc.0
             )));
         }
         if fetch_rc != ERROR_SUCCESS {
             return Err(Error::LockedFile(format!(
-                "RmGetList (fetch) retry tükendi: Win32 code {}",
+                "RmGetList (fetch) retries exhausted: Win32 code {}",
                 fetch_rc.0
             )));
         }
@@ -165,6 +165,6 @@ fn wide_to_string(buf: &[u16]) -> String {
 #[cfg(not(windows))]
 pub fn find_lock_owners(_path: &std::path::Path) -> Result<Vec<LockOwner>> {
     Err(Error::LockedFile(
-        "lock owner detection yalnızca Windows hedefinde desteklenir".into(),
+        "lock owner detection is only supported on Windows targets".into(),
     ))
 }

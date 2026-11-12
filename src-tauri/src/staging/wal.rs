@@ -115,7 +115,7 @@ pub fn recover_wal(conn: &Connection) -> Result<WalRecoveryReport> {
                 match std::fs::remove_file(tmp_path) {
                     Ok(_) => {
                         report.tmp_cleaned += 1;
-                        info!(tmp = %tmp, "crash sonrası .dspace_tmp temizlendi");
+                        info!(tmp = %tmp, "post-crash .dspace_tmp cleaned");
                     }
                     Err(e) => {
                         warn!(tmp = %tmp, error = %e, "tmp silinemedi");
@@ -155,7 +155,7 @@ pub fn recover_wal(conn: &Connection) -> Result<WalRecoveryReport> {
             scanned = report.scanned,
             aborted = report.aborted_begin,
             cleaned = report.tmp_cleaned,
-            "WAL recovery tamamlandı"
+            "WAL recovery complete"
         );
     }
     Ok(report)

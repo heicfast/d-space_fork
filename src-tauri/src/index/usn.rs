@@ -182,7 +182,7 @@ pub fn segment_of(file_ref: u64) -> i64 {
 pub fn parse_record_v2(buf: &[u8]) -> Result<(UsnRecord, usize)> {
     if buf.len() < USN_RECORD_V2_HEADER_SIZE {
         return Err(Error::Index(format!(
-            "USN_RECORD_V2 buffer çok kısa: {} < {}",
+            "USN_RECORD_V2 buffer too short: {} < {}",
             buf.len(),
             USN_RECORD_V2_HEADER_SIZE
         )));
@@ -192,13 +192,13 @@ pub fn parse_record_v2(buf: &[u8]) -> Result<(UsnRecord, usize)> {
     let _minor = read_le_u16(buf, 6);
     if major != 2 {
         return Err(Error::Index(format!(
-            "Yalnız USN_RECORD_V2 destekleniyor, gelen MajorVersion={}",
+            "only USN_RECORD_V2 is supported, got MajorVersion={}",
             major
         )));
     }
     if record_length < USN_RECORD_V2_HEADER_SIZE || record_length > buf.len() {
         return Err(Error::Index(format!(
-            "USN_RECORD_V2 record_length geçersiz: {} (buf={})",
+            "USN_RECORD_V2 record_length invalid: {} (buf={})",
             record_length,
             buf.len()
         )));
@@ -215,13 +215,13 @@ pub fn parse_record_v2(buf: &[u8]) -> Result<(UsnRecord, usize)> {
 
     if name_offset + name_length > record_length {
         return Err(Error::Index(format!(
-            "USN_RECORD_V2 isim aralığı kayıt dışı: offset={} len={} record={}",
+            "USN_RECORD_V2 name range outside the record: offset={} len={} record={}",
             name_offset, name_length, record_length
         )));
     }
     if name_length % 2 != 0 {
         return Err(Error::Index(format!(
-            "USN_RECORD_V2 isim uzunluğu tek (UTF-16 LE 2-bayt): {}",
+            "USN_RECORD_V2 name length is odd (UTF-16 LE is 2-byte): {}",
             name_length
         )));
     }
@@ -231,7 +231,7 @@ pub fn parse_record_v2(buf: &[u8]) -> Result<(UsnRecord, usize)> {
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
         .collect();
     let name = String::from_utf16(&utf16)
-        .map_err(|e| Error::Index(format!("UTF-16 decode hatası: {}", e)))?;
+        .map_err(|e| Error::Index(format!("UTF-16 decode error: {}", e)))?;
 
     Ok((
         UsnRecord {
@@ -335,7 +335,7 @@ pub fn read_journal_blocking(
             None,
         )
     }
-    .map_err(|e| Error::Index(format!("read_journal volume aç ({}): {:?}", volume_id, e)))?;
+    .map_err(|e| Error::Index(format!("read_journal volume open ({}): {:?}", volume_id, e)))?;
     let _guard = HandleGuard(handle);
 
     let request = build_read_journal_request(
@@ -390,7 +390,7 @@ pub fn read_journal_blocking(
     _buffer_size: usize,
 ) -> Result<JournalReadResult> {
     Err(Error::Index(
-        "read_journal_blocking yalnız Windows hedefinde desteklenir".into(),
+        "read_journal_blocking is only supported on Windows targets".into(),
     ))
 }
 

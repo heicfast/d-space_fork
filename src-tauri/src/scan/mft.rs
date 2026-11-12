@@ -35,7 +35,7 @@ fn normalize_volume_path(drive: &str) -> Result<String> {
         .map(|c| c.to_ascii_uppercase())
         .ok_or_else(|| {
             Error::Scan(format!(
-                "Geçersiz sürücü parametresi: '{}' (raw volume yolu UNC kabul etmez)",
+                "Invalid drive parameter: '{}' (the raw volume path does not accept UNC)",
                 drive
             ))
         })?;
@@ -52,17 +52,17 @@ pub fn probe_ntfs(drive: &str) -> Result<MftProbe> {
     let start = Instant::now();
     let volume_path = normalize_volume_path(drive)?;
 
-    debug!(volume = %volume_path, "raw volume açılıyor");
+    debug!(volume = %volume_path, "opening raw volume");
     let mut handle = File::open(&volume_path).map_err(|e| {
         Error::Scan(format!(
-            "Volume açılamadı '{}': {} (yönetici izni gerekli olabilir)",
+            "cannot open volume '{}': {} (administrator privileges may be required)",
             volume_path, e
         ))
     })?;
 
     debug!("NTFS boot sector parse ediliyor");
     let ntfs =
-        Ntfs::new(&mut handle).map_err(|e| Error::Scan(format!("NTFS parse hatası: {:?}", e)))?;
+        Ntfs::new(&mut handle).map_err(|e| Error::Scan(format!("NTFS parse error: {:?}", e)))?;
 
     let probe = MftProbe {
         drive: drive.to_string(),
@@ -79,7 +79,7 @@ pub fn probe_ntfs(drive: &str) -> Result<MftProbe> {
         cluster = probe.cluster_size,
         record = probe.file_record_size,
         elapsed_ms = probe.elapsed_ms,
-        "MFT probe başarılı"
+        "MFT probe ok"
     );
 
     Ok(probe)

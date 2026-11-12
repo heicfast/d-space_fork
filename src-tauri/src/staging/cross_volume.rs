@@ -29,7 +29,7 @@ const HASH_BUFFER: usize = 64 * 1024;
 /// Dosyanın Blake3 hash'i. Streaming, sabit RAM.
 pub fn blake3_file(path: &Path) -> Result<[u8; 32]> {
     let file = fs::File::open(path)
-        .map_err(|e| Error::Staging(format!("hash aç '{}': {}", path.display(), e)))?;
+        .map_err(|e| Error::Staging(format!("hash open '{}': {}", path.display(), e)))?;
     let mut reader = BufReader::with_capacity(HASH_BUFFER, file);
     let mut hasher = Hasher::new();
     let mut buf = vec![0u8; HASH_BUFFER];
@@ -49,9 +49,9 @@ pub fn blake3_file(path: &Path) -> Result<[u8; 32]> {
 /// (v0.2'de event stream UI'ya). Gemini review B1 — `pub(crate)`: undo
 /// cross-volume geri taşıması da aynı kopya yardımcısını kullanır.
 pub(crate) fn copy_file_streaming(src: &Path, dst: &Path) -> Result<u64> {
-    let mut s = fs::File::open(src).map_err(|e| Error::Staging(format!("copy src aç: {}", e)))?;
+    let mut s = fs::File::open(src).map_err(|e| Error::Staging(format!("copy src open: {}", e)))?;
     let mut d =
-        fs::File::create(dst).map_err(|e| Error::Staging(format!("copy dst oluştur: {}", e)))?;
+        fs::File::create(dst).map_err(|e| Error::Staging(format!("copy dst create: {}", e)))?;
     std::io::copy(&mut s, &mut d).map_err(|e| Error::Staging(format!("copy: {}", e)))
 }
 
@@ -97,7 +97,7 @@ pub fn cross_volume_stage_file(
         &tmp_path.to_string_lossy(),
         target_volume,
     )?;
-    debug!(wal_id, "two-phase commit Faz 1 başlıyor");
+    debug!(wal_id, "two-phase commit phase 1 starting");
 
     // Faz 1a: copy
     if let Err(e) = copy_file_streaming(src, &tmp_path) {
@@ -137,7 +137,7 @@ pub fn cross_volume_stage_file(
         ));
     }
 
-    debug!(wal_id, "Faz 1 tamam, Faz 2 başlıyor");
+    debug!(wal_id, "phase 1 done, phase 2 starting");
 
     // Faz 2a: atomic rename .dspace_tmp → final
     if let Err(e) = fs::rename(&tmp_path, final_path) {
@@ -179,9 +179,9 @@ pub fn cross_volume_stage_file(
     if let Err(e) = fs::remove_file(src) {
         // Kaynak silinemedi ama hedef yazıldı + DB kayıtlı. Kullanıcı her iki
         // kopyaya da sahip. Conflict ama veri kaybı YOK.
-        warn!(?e, "kaynak silinemedi — kullanıcı iki kopyaya sahip");
+        warn!(?e, "source could not be deleted — user keeps both copies");
         return Err(Error::Staging(format!(
-            "Kaynak silinemedi: {} (hedef intact, undo mümkün)",
+            "source deletion failed: {} (target intact, undo possible)",
             e
         )));
     }
@@ -196,7 +196,7 @@ pub fn cross_volume_stage_file(
         dst = %final_path.display(),
         size = size_bytes,
         elapsed_ms = started.elapsed().as_millis(),
-        "cross-volume two-phase commit başarılı"
+        "cross-volume two-phase commit complete"
     );
 
     Ok(StagedItem {
@@ -265,10 +265,10 @@ mod tests {
         let conn = fresh_db();
 
         let staged = cross_volume_stage_file(&src, &final_path, "TEST:", size, false, &conn)
-            .expect("two-phase commit başarılı");
+            .expect("two-phase commit should succeed");
 
-        assert!(!src.exists(), "kaynak silinmiş olmalı");
-        assert!(final_path.exists(), "hedef oluşmuş olmalı");
+        assert!(!src.exists(), "source should be gone");
+        assert!(final_path.exists(), "target should exist");
         assert_eq!(staged.size_bytes, size);
         assert_eq!(staged.fallback_tier, "cross_volume");
 

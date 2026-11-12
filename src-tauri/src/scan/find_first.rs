@@ -174,7 +174,7 @@ const SYNTHETIC_ID_START: u64 = 16;
 fn drive_to_root(drive: &str) -> Result<PathBuf> {
     let trimmed = drive.trim();
     if trimmed.is_empty() {
-        return Err(Error::Scan("Boş drive parametresi".into()));
+        return Err(Error::Scan("empty drive parameter".into()));
     }
     // UNC path: `\\server\share[\sub]` veya forward slash varyantı.
     let bytes = trimmed.as_bytes();
@@ -190,7 +190,7 @@ fn drive_to_root(drive: &str) -> Result<PathBuf> {
         let non_empty = parts.iter().filter(|p| !p.is_empty()).count();
         if non_empty < 2 {
             return Err(Error::Scan(format!(
-                "Geçersiz UNC path (server\\share gerekli): '{}'",
+                "invalid UNC path (server\\share required): '{}'",
                 trimmed
             )));
         }
@@ -199,7 +199,7 @@ fn drive_to_root(drive: &str) -> Result<PathBuf> {
     // Lokal sürücü harfi — katı doğrulama (Gemini review B2: "abc" gibi
     // girdiler sessizce 'A:' olmasın).
     let letter = crate::volume::parse_drive_letter(trimmed)
-        .ok_or_else(|| Error::Scan(format!("Geçersiz sürücü: '{}'", drive)))?
+        .ok_or_else(|| Error::Scan(format!("invalid drive: '{}'", drive)))?
         .to_ascii_uppercase();
     Ok(PathBuf::from(format!(r"{}:\", letter)))
 }
@@ -219,7 +219,7 @@ pub fn scan_find_first_with_progress(
 ) -> Result<MftEntries> {
     let start = Instant::now();
     let root = drive_to_root(drive)?;
-    debug!(root = %root.display(), "FindFirstFile fallback başlıyor");
+    debug!(root = %root.display(), "FindFirstFile fallback starting");
 
     let mut entries: Vec<RawMftEntry> = Vec::with_capacity(8192);
 
@@ -281,7 +281,7 @@ pub fn scan_find_first_with_progress(
         let read = match std::fs::read_dir(&dir) {
             Ok(r) => r,
             Err(e) => {
-                debug!(path = %dir.display(), error = %e, "read_dir başarısız");
+                debug!(path = %dir.display(), error = %e, "read_dir failed");
                 skipped_errors += 1;
                 continue;
             }
@@ -367,16 +367,16 @@ pub fn scan_find_first_with_progress(
     }
 
     if skipped_symlinks > 0 {
-        warn!(skipped_symlinks, "symlink/reparse point atlandı");
+        warn!(skipped_symlinks, "symlink/reparse point skipped");
     }
     if hardlink_duplicates > 0 {
         info!(
             hardlink_duplicates,
-            "hard link tespit edildi — fiziksel boyutu aşmamak için tekrarlar 0 sayıldı"
+            "hard link detected — repeats counted as 0 to avoid exceeding physical size"
         );
     }
     if max_depth_hits > 0 {
-        warn!(max_depth_hits, max_depth = MAX_DEPTH, "max_depth aşıldı");
+        warn!(max_depth_hits, max_depth = MAX_DEPTH, "max_depth exceeded");
     }
 
     let result = MftEntries {
@@ -390,7 +390,7 @@ pub fn scan_find_first_with_progress(
         entries = result.entries.len(),
         skipped = result.skipped_errors,
         elapsed_ms = result.elapsed_ms,
-        "FindFirstFile fallback tamamlandı"
+        "FindFirstFile fallback complete"
     );
     Ok(result)
 }
@@ -435,7 +435,7 @@ mod tests {
         if let Error::Scan(msg) = err {
             assert!(msg.contains("UNC"));
         } else {
-            panic!("Scan hatası bekleniyor");
+            panic!("expected a Scan error");
         }
     }
 

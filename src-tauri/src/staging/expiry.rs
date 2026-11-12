@@ -104,7 +104,7 @@ pub fn cleanup_expired(
         warn!(
             count = items.len(),
             threshold = AUTO_THRESHOLD,
-            "expired öğeler eşiği aştı — kullanıcı onayı gerekiyor"
+            "expired items exceeded the threshold — user confirmation required"
         );
         return Ok(CleanupReport {
             deleted: 0,
@@ -149,7 +149,7 @@ pub fn cleanup_expired(
                     id = item.id,
                     path = %item.original_path,
                     error = ?e,
-                    "expired permanent_delete başarısız"
+                    "expired permanent_delete failed"
                 );
             }
         }
@@ -162,7 +162,7 @@ pub fn cleanup_expired(
         elapsed_ms: started.elapsed().as_millis() as u64,
         aborted_threshold: false,
     };
-    info!(?report, "lazy expiry cleanup tamamlandı");
+    info!(?report, "lazy expiry cleanup complete");
     Ok(report)
 }
 

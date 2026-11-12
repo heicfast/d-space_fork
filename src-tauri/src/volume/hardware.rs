@@ -131,7 +131,7 @@ pub fn probe_drive_hardware(drive_letter: char) -> Result<DriveHardware> {
     }
     .map_err(|e| {
         Error::Volume(format!(
-            "donanım sorgusu için volume açılamadı '{}': {:?}",
+            "cannot open volume '{}' for the hardware query: {:?}",
             volume_path, e
         ))
     })?;
@@ -267,7 +267,7 @@ pub fn probe_drive_hardware(drive_letter: char) -> Result<DriveHardware> {
 #[cfg(not(windows))]
 pub fn probe_drive_hardware(drive_letter: char) -> Result<DriveHardware> {
     Err(Error::Volume(format!(
-        "drive hardware probe yalnız Windows hedefinde desteklenir ({})",
+        "drive hardware probe is only supported on Windows targets ({})",
         drive_letter
     )))
 }

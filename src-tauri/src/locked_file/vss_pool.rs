@@ -133,7 +133,7 @@ impl VssPool {
         thread::Builder::new()
             .name("dspace-vss-pool".into())
             .spawn(move || worker_main(rx, p))
-            .expect("vss pool worker thread spawn başarısız");
+            .expect("vss pool worker thread spawn failed");
         Self { tx }
     }
 
@@ -146,9 +146,9 @@ impl VssPool {
                 path: path.to_path_buf(),
                 reply: rtx,
             })
-            .map_err(|e| Error::Snapshot(format!("vss pool worker düşmüş: {e}")))?;
+            .map_err(|e| Error::Snapshot(format!("vss pool worker has died: {e}")))?;
         rrx.recv()
-            .map_err(|e| Error::Snapshot(format!("vss pool reply alınamadı: {e}")))?
+            .map_err(|e| Error::Snapshot(format!("vss pool reply unavailable: {e}")))?
     }
 
     /// Test/cleanup için worker thread'i durdur. Production'da çağrılmaz
@@ -185,7 +185,7 @@ fn worker_main(rx: Receiver<PoolCmd>, provider: Arc<dyn SnapshotProvider>) {
     // COM MTA init — bu thread VSS çağrılarının sahibi.
     unsafe {
         if let Err(e) = init_com_mta() {
-            error!(error = ?e, "vss pool worker COM init başarısız");
+            error!(error = ?e, "vss pool worker COM init failed");
             return;
         }
     }
@@ -196,7 +196,7 @@ fn worker_main(rx: Receiver<PoolCmd>, provider: Arc<dyn SnapshotProvider>) {
         provider,
     };
 
-    info!("vss pool worker başladı (MTA apartment)");
+    info!("vss pool worker started (MTA apartment)");
 
     loop {
         let tick = Duration::from_millis(REAPER_TICK_MS.load(Ordering::Relaxed));
@@ -229,14 +229,17 @@ fn worker_main(rx: Receiver<PoolCmd>, provider: Arc<dyn SnapshotProvider>) {
     unsafe {
         uninit_com();
     }
-    info!("vss pool worker temiz kapandı");
+    info!("vss pool worker shut down cleanly");
 }
 
 impl WorkerState {
     fn handle_acquire(&mut self, path: &Path) -> Result<VssReader> {
         // Volume harfini ayıkla.
         let volume = parse_volume_letter(path).ok_or_else(|| {
-            Error::Snapshot(format!("yol volume harfi içermiyor: {}", path.display()))
+            Error::Snapshot(format!(
+                "path does not contain a volume letter: {}",
+                path.display()
+            ))
         })?;
 
         // Cache hit? Gemini review B10 — snapshot externally silinmişse /
@@ -255,7 +258,7 @@ impl WorkerState {
                     if !stale {
                         return Err(e);
                     }
-                    debug!(%volume, "vss: ölü snapshot context evict + retry");
+                    debug!(%volume, "vss: dead snapshot context evicted + retry");
                     self.contexts.remove(&volume);
                     if let Some(raw) = self.raw.remove(&volume) {
                         if let Err(de) = unsafe { self.provider.destroy(raw) } {
@@ -269,7 +272,7 @@ impl WorkerState {
 
         // Cache miss → snapshot oluştur.
         let volume_root = format!("{}:\\", volume.to_ascii_uppercase());
-        debug!(volume = %volume_root, "vss: snapshot oluşturuluyor");
+        debug!(volume = %volume_root, "vss: creating snapshot");
 
         let raw = unsafe { self.provider.create(&volume_root)? };
         let device_object = raw.device_object.clone();
@@ -295,7 +298,7 @@ impl WorkerState {
                 // Gemini review B10 — Error::Io olarak taşı: kind() ayrımı
                 // handle_acquire'de güvenilir stale detection sağlar. Path
                 // context'i log'da korunur.
-                debug!(path = %snap_path.display(), error = %e, "vss snapshot open hatası");
+                debug!(path = %snap_path.display(), error = %e, "vss snapshot open failed");
                 return Err(Error::Io(e));
             }
         };
@@ -497,7 +500,7 @@ mod tests {
 
         assert_eq!(ctx.active_leases.load(Ordering::Acquire), 0);
         let after = ctx.last_used_at.lock().map(|g| *g).unwrap();
-        assert!(after > before, "last_used_at güncellenmedi");
+        assert!(after > before, "last_used_at was not updated");
     }
 
     #[test]
@@ -528,7 +531,7 @@ mod tests {
 
         assert!(
             mock.destroy_calls.load(Ord::SeqCst) >= 1,
-            "idle eviction sonrası destroy çağrılmalı, destroy={}",
+            "destroy must be called after idle eviction, destroy={}",
             mock.destroy_calls.load(Ord::SeqCst)
         );
 

@@ -95,7 +95,7 @@ pub fn capture_snapshot(tree: &ScanTree, conn: &mut Connection) -> Result<Snapsh
 
     let tx = conn
         .transaction()
-        .map_err(|e| Error::Snapshot(format!("transaction başlatma: {}", e)))?;
+        .map_err(|e| Error::Snapshot(format!("transaction start: {}", e)))?;
 
     tx.execute(
         "INSERT INTO snapshots
@@ -155,7 +155,7 @@ pub fn capture_snapshot(tree: &ScanTree, conn: &mut Connection) -> Result<Snapsh
                         node_id = node.id,
                         ?path,
                         error = %e,
-                        "snapshot_entries duplicate path_hash atlandı"
+                        "snapshot_entries duplicate path_hash skipped"
                     );
                 }
             }
@@ -171,7 +171,7 @@ pub fn capture_snapshot(tree: &ScanTree, conn: &mut Connection) -> Result<Snapsh
         dir_entries = entry_count,
         total_dirs_in_tree = dir_count_tree,
         file_count,
-        "snapshot yakalandı"
+        "snapshot captured"
     );
 
     Ok(SnapshotMeta {
@@ -211,13 +211,10 @@ pub fn purge_old_snapshots(conn: &Connection, retain_days: i64) -> Result<u64> {
             removed = n,
             retain_days = days,
             cutoff,
-            "snapshot retention: eski kayıtlar silindi"
+            "snapshot retention: old records deleted"
         );
     } else {
-        debug!(
-            retain_days = days,
-            "snapshot retention: silinecek kayıt yok"
-        );
+        debug!(retain_days = days, "snapshot retention: nothing to delete");
     }
     Ok(n as u64)
 }
@@ -408,7 +405,10 @@ mod tests {
         }
 
         let removed = purge_old_snapshots(&conn, 90).unwrap();
-        assert_eq!(removed, 1, "100 günden eski tek snapshot silinmeli");
+        assert_eq!(
+            removed, 1,
+            "exactly one snapshot older than 100 days should be deleted"
+        );
 
         let remaining: i64 = conn
             .query_row("SELECT COUNT(*) FROM snapshots", [], |r| r.get(0))
@@ -432,7 +432,7 @@ mod tests {
 
         // retain_days=1 kullanıcı yanlışlığını clamp et — 7 gün korunur.
         let removed = purge_old_snapshots(&conn, 1).unwrap();
-        assert_eq!(removed, 0, "MIN_RETAIN_DAYS clamp koruması");
+        assert_eq!(removed, 0, "MIN_RETAIN_DAYS clamp protection");
     }
 
     #[test]

@@ -633,7 +633,7 @@ pub fn scan_to_tree_mft_with_user_rules(
     drive: &str,
     user_rules: &[UserRuleSnapshot],
 ) -> crate::error::Result<(ScanSummary, ScanTree)> {
-    debug!(drive, "MFT full scan başlıyor");
+    debug!(drive, "MFT full scan starting");
     let collected = collect_mft_entries(drive)?;
     chain_into_summary(drive, ScanStrategy::DirectRawVolume, collected, user_rules)
 }
@@ -647,7 +647,7 @@ pub fn scan_to_tree_fallback_with_user_rules(
     drive: &str,
     user_rules: &[UserRuleSnapshot],
 ) -> crate::error::Result<(ScanSummary, ScanTree)> {
-    debug!(drive, "FindFirstFile fallback scan başlıyor");
+    debug!(drive, "FindFirstFile fallback scan starting");
     let collected = scan_find_first(drive)?;
     chain_into_summary(
         drive,
@@ -706,7 +706,7 @@ pub fn scan_to_tree_with_progress(
     // UNC tarama için `scan_unc_path` komutu vardır.
     crate::volume::parse_drive_letter(drive).ok_or_else(|| {
         crate::error::Error::Scan(format!(
-            "Geçersiz sürücü parametresi: '{}' (UNC/path desteklenmez — UNC tarama komutunu kullanın)",
+            "Invalid drive parameter: '{}' (UNC/path not supported here — use the UNC scan command)",
             drive
         ))
     })?;
@@ -725,14 +725,14 @@ pub fn scan_to_tree_with_progress(
                         return Err(e);
                     }
                 }
-                tracing::warn!(?e, "MFT path başarısız → fallback");
+                tracing::warn!(?e, "MFT path failed → fallback");
             }
         }
     } else if is_elevated() && !mft_capable {
         // Bölüm 5.5 — ReFS/exFAT/FAT32 sürücüde MFT yolu denemiyoruz.
-        debug!("elevated ama NTFS dışı — doğrudan fallback (Bölüm 5.5)");
+        debug!("elevated but non-NTFS — straight to fallback (chapter 5.5)");
     } else {
-        debug!("elevated değil — fallback yolu");
+        debug!("not elevated — fallback path");
     }
     let collected = scan_find_first_with_progress(drive, progress_cb, cancel)?;
     chain_into_summary(
@@ -839,7 +839,10 @@ mod tests {
         assert_eq!(tree.total_bytes, 64);
         assert_eq!(tree.nodes.get(&300).unwrap().parent, Some(ROOT_RECORD));
         let root_children = tree.children.get(&ROOT_RECORD).unwrap();
-        assert!(root_children.contains(&300), "self-cycle root'a bağlanmalı");
+        assert!(
+            root_children.contains(&300),
+            "self-cycle must attach to root"
+        );
         // Walk-up döngüye girmez — root aggregate tam 64.
         assert_eq!(tree.nodes.get(&ROOT_RECORD).unwrap().aggregate_size, 64);
     }
@@ -856,8 +859,8 @@ mod tests {
         let tree = build_tree("vol".into(), raw);
         let a = tree.nodes.get(&400).unwrap().aggregate_size;
         let b = tree.nodes.get(&401).unwrap().aggregate_size;
-        assert!(a <= 100, "a aggregate şişmemeli: {}", a);
-        assert!(b <= 100, "b aggregate şişmemeli: {}", b);
+        assert!(a <= 100, "aggregate a must not inflate: {}", a);
+        assert!(b <= 100, "aggregate b must not inflate: {}", b);
     }
 
     #[test]
@@ -978,7 +981,10 @@ mod tests {
         let names_v2: Vec<&str> = v2.iter().map(|p| p.name.as_str()).collect();
         assert!(names_v2.contains(&"a.txt"));
         assert!(names_v2.contains(&"sub"));
-        assert!(!names_v2.contains(&"deep.bin"), "depth 3 dışarıda kalmalı");
+        assert!(
+            !names_v2.contains(&"deep.bin"),
+            "depth 3 must stay excluded"
+        );
     }
 
     #[test]

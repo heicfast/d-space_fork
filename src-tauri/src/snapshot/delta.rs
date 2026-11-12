@@ -131,7 +131,7 @@ fn snapshot_captured_at(conn: &Connection, snapshot_id: SnapshotId) -> Result<i6
         params![snapshot_id],
         |r| r.get(0),
     )
-    .map_err(|e| Error::Snapshot(format!("snapshot id={} bulunamadı: {}", snapshot_id, e)))
+    .map_err(|e| Error::Snapshot(format!("snapshot id={} not found: {}", snapshot_id, e)))
 }
 
 /// Bölüm 8.6 — iki snapshot arasında set-difference + size-difference
@@ -146,7 +146,7 @@ pub fn compute_delta(
     to_id: SnapshotId,
     conn: &Connection,
 ) -> Result<DeltaResult> {
-    debug!(from_id, to_id, "delta hesaplanıyor (streaming)");
+    debug!(from_id, to_id, "computing delta (streaming)");
 
     let from_captured_at = snapshot_captured_at(conn, from_id)?;
     let to_captured_at = snapshot_captured_at(conn, to_id)?;
@@ -159,17 +159,19 @@ pub fn compute_delta(
             params![from_id],
             |r| r.get(0),
         )
-        .map_err(|e| Error::Snapshot(format!("snapshot id={} volume okunamadı: {}", from_id, e)))?;
+        .map_err(|e| {
+            Error::Snapshot(format!("snapshot id={} volume read failed: {}", from_id, e))
+        })?;
     let to_volume: String = conn
         .query_row(
             "SELECT volume_id FROM snapshots WHERE id = ?1",
             params![to_id],
             |r| r.get(0),
         )
-        .map_err(|e| Error::Snapshot(format!("snapshot id={} volume okunamadı: {}", to_id, e)))?;
+        .map_err(|e| Error::Snapshot(format!("snapshot id={} volume read failed: {}", to_id, e)))?;
     if from_volume != to_volume {
         return Err(Error::Snapshot(format!(
-            "Delta yalnız aynı volume içinde: '{}' vs '{}'",
+            "Delta only within the same volume: '{}' vs '{}'",
             from_volume, to_volume
         )));
     }
@@ -277,7 +279,7 @@ pub fn compute_delta(
         to_id,
         net_change_bytes = net_change,
         total_changed_paths,
-        "delta hazır"
+        "delta ready"
     );
 
     Ok(DeltaResult {
@@ -456,7 +458,7 @@ mod tests {
         let err = compute_delta(real, 9999, &conn).unwrap_err();
         match err {
             Error::Snapshot(msg) => assert!(msg.contains("9999")),
-            other => panic!("beklenen Snapshot hatası, gelen: {:?}", other),
+            other => panic!("expected a Snapshot error, got: {:?}", other),
         }
     }
 }
