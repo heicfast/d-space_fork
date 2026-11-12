@@ -95,6 +95,7 @@ export const en = {
     lostPartition: 'Lost Partition Rescue',
     chronoSnap: 'Scan Snapshot',
     diskHealth: 'Disk Health',
+    quickSearch: 'Quick Search',
     diskCleanup: 'Disk Cleanup',
     cleanupBin: 'Cleanup Bin',
     duplicateFinder: 'Duplicate Finder',
@@ -147,6 +148,25 @@ export const en = {
     noDevice: 'No memory card or USB device is connected.',
     cardPartition: 'Others',
   },
+  quickSearch: {
+    title: 'Quick Search',
+    subtitle:
+      'Find any file or folder by name across the indexed volumes — powered by the USN journal index, no rescan needed.',
+    placeholder: 'Type at least 2 characters of a file name…',
+    searching: 'Searching…',
+    resultCount: '{{count}} match(es)',
+    emptyTitle: 'Search everything, instantly',
+    emptyBody:
+      'Volumes you have scanned keep a live name index. Start typing to search it — results appear as you type.',
+    noResults: 'No matches',
+    noResultsBody:
+      'No indexed file or folder name matches. Deep-scan the volume from the home page to (re)build its index.',
+    unavailableTitle: 'Index unavailable',
+    folderBadge: 'Folder',
+    reveal: 'Open location',
+    hint: 'The index covers volumes scanned in this session or earlier (administrator). New and renamed files appear within about a minute.',
+  },
+
   tools: {
     providerBody:
       'This specialized module prepares a read-only recovery environment for complex storage topologies.',

@@ -5,6 +5,7 @@ import { ErrorBoundary } from './error-boundary';
 import { HomePage } from '@/features/device-selection/home-page';
 import { SdCardPage } from '@/features/device-selection/sd-card-page';
 import { BackupPage } from '@/features/backup/backup-page';
+import { QuickSearchPage } from '@/features/quick-search/quick-search-page';
 import { ScanProgressPage } from '@/features/scan-progress/scan-progress-page';
 import { ResultsPageFallback } from '@/features/results-explorer/page-fallback';
 import { RecoveryPage } from '@/features/recovery-queue/recovery-page';
@@ -35,6 +36,7 @@ export const router = createHashRouter([
       { path: 'sd-card', element: <SdCardPage /> },
       { path: 'tools', element: <HealthPage /> },
       { path: 'backup', element: <BackupPage /> },
+      { path: 'quick-search', element: <QuickSearchPage /> },
       { path: 'scan/:deviceId/live', element: <ScanProgressPage /> },
       { path: 'results/:scanId', element: <ResultsRoute /> },
       { path: 'recover/:scanId', element: <RecoveryPage /> },

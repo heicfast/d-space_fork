@@ -158,3 +158,15 @@ export function useSnapshotDelta(from: number | null, to: number | null) {
     staleTime: Infinity,
   });
 }
+
+/** USN-index name search (chapter 5.6 "Everything-style" quick search).
+ *  `null` disables the query (min length lives in the caller). */
+export function useIndexSearch(query: string | null) {
+  return useQuery({
+    queryKey: cleanupKeys.indexSearch(query ?? ''),
+    queryFn: () => connector.cleanup.searchIndex(query!, 100),
+    enabled: query !== null && query.length >= 2,
+    staleTime: 30_000,
+    retry: false,
+  });
+}

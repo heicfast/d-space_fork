@@ -133,6 +133,30 @@ export function SidebarDuplicatesIcon({
 }
 
 /** Size Snapshots — a camera with a growth arrow (time-dimension deltas). */
+export function SidebarQuickSearchIcon({
+  className,
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className={cn('size-5 shrink-0', className)}
+      aria-hidden
+    >
+      <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M15.5 15.5l4.5 4.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <path d="M7.5 10.5h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function SidebarSnapshotsIcon({ className }: { className?: string }): React.JSX.Element {
   return (
     <svg

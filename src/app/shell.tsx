@@ -45,6 +45,7 @@ import { WindowControls } from '@/components/ui/window-controls';
 import {
   BrandDiskWizardLogo,
   SidebarCleanupBinIcon,
+  SidebarQuickSearchIcon,
   SidebarChronoSnapIcon,
   SidebarDuplicatesIcon,
   SidebarFileRepairIcon,
@@ -115,6 +116,12 @@ const NAV_BACKUP = [
 ] as const;
 
 const NAV_CLEANUP = [
+  {
+    to: '/quick-search',
+    icon: SidebarQuickSearchIcon,
+    labelKey: 'sidebar.quickSearch',
+    end: false,
+  },
   {
     to: '/cleanup',
     icon: SidebarCleanupBinIcon,

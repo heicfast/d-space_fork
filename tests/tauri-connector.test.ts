@@ -155,7 +155,7 @@ describe('scan domain wiring', () => {
     // (an unmapped string still yields code 'unknown' but keeps the
     // message on the error object).
     expect(state.failure?.code).toBe('unknown');
-    expect((state.failure as Error).message).toBe('boom');
+    expect((state.failure as unknown as Error).message).toBe('boom');
   });
 
   it('onScanProgress subscribes to dw-scan-progress and filters by scan id', () => {
