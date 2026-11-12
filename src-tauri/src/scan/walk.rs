@@ -111,7 +111,7 @@ pub struct MftWalkStats {
 }
 
 /// "C", "c:", "C:\Users" → r"\\.\C:" — katı doğrulama (UNC reddedilir).
-fn normalize_volume_path(drive: &str) -> Result<String> {
+pub(crate) fn normalize_volume_path(drive: &str) -> Result<String> {
     let letter = crate::volume::parse_drive_letter(drive)
         .map(|c| c.to_ascii_uppercase())
         .ok_or_else(|| {
@@ -124,7 +124,10 @@ fn normalize_volume_path(drive: &str) -> Result<String> {
 }
 
 /// MFT'nin kendi `$DATA` boyutundan toplam record sayısını tahmin eder.
-fn estimate_record_count(ntfs: &Ntfs, handle: &mut File) -> Result<u64> {
+pub(crate) fn estimate_record_count<T: std::io::Read + std::io::Seek>(
+    ntfs: &Ntfs,
+    handle: &mut T,
+) -> Result<u64> {
     let mft_file = ntfs
         .file(handle, KnownNtfsFileRecordNumber::MFT as u64)
         .map_err(|e| Error::Scan(format!("MFT record 0 okunamadı: {:?}", e)))?;
@@ -148,7 +151,10 @@ fn estimate_record_count(ntfs: &Ntfs, handle: &mut File) -> Result<u64> {
 
 /// Tek bir `NtfsFile` için isim çıkarmaya çalışır. Win32 namespace tercih
 /// edilir (DOS 8.3'ün ikincil görünümlerini atlamak için).
-fn extract_name(file: &NtfsFile, handle: &mut File) -> Option<String> {
+fn extract_name<T: std::io::Read + std::io::Seek>(
+    file: &NtfsFile,
+    handle: &mut T,
+) -> Option<String> {
     // Önce Win32 namespace
     if let Some(Ok(name)) = file.name(handle, Some(NtfsFileNamespace::Win32), None) {
         return Some(name.name().to_string_lossy());
@@ -166,7 +172,10 @@ fn extract_name(file: &NtfsFile, handle: &mut File) -> Option<String> {
 /// İsim + parent_ref + data_size + is_dir + mtime tek seferde çıkarır.
 /// Win32 namespace tercih edilir. mtime için `$STANDARD_INFORMATION`
 /// (Windows yazıda update eder — canonical), başarısızsa `$FILE_NAME` fallback.
-fn extract_full(file: &NtfsFile, handle: &mut File) -> Option<(String, u64, u64, bool, i64)> {
+pub(crate) fn extract_full<T: std::io::Read + std::io::Seek>(
+    file: &NtfsFile,
+    handle: &mut T,
+) -> Option<(String, u64, u64, bool, i64)> {
     let si_mtime = file
         .info()
         .ok()

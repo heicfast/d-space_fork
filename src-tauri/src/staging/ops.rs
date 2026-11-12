@@ -30,7 +30,7 @@ pub struct StagedItem {
 fn staging_base() -> Result<PathBuf> {
     let base =
         dirs::data_local_dir().ok_or_else(|| Error::Staging("data_local_dir bulunamadı".into()))?;
-    Ok(base.join("DSpace").join("staging"))
+    Ok(base.join("DiskWizard").join("staging"))
 }
 
 pub fn now_unix() -> i64 {

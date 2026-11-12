@@ -675,7 +675,7 @@ pub fn scan_to_tree_with_user_rules(
 /// fail eder; pre_flight FS bilgisini önceden kontrol edip MFT denemesini
 /// atlayarak ~3-5 sn boş wait + log gürültüsü tasarrufu yapılır. UNC
 /// (`\\server\share`) girdisi burada reddedilir — UNC tarama için `scan_unc_path` komutu ayrılmıştır (Gemini review B2).
-fn is_mft_compatible(drive: &str) -> bool {
+pub(crate) fn is_mft_compatible(drive: &str) -> bool {
     // Gemini review B2 — UNC/radikal girdi asla sürücü harfine dönüşmesin.
     if crate::volume::parse_drive_letter(drive).is_none() {
         return false;

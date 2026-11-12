@@ -2,7 +2,7 @@
 //
 // SQLite veri modeli — Master mimari Bölüm 14.
 //
-// Konum: %LOCALAPPDATA%\DSpace\db\dspace.sqlite
+// Konum: %LOCALAPPDATA%\DiskWizard\db\diskwizard.sqlite
 // Mode: WAL, busy_timeout=5000ms, synchronous=NORMAL, foreign_keys=ON.
 //
 // Migration: rusqlite_migration crate, forward-only. Migration dosyaları
@@ -22,15 +22,15 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, info};
 
-pub const SCHEMA_VERSION: u32 = 3;
-pub const DB_FILENAME: &str = "dspace.sqlite";
+pub const SCHEMA_VERSION: u32 = 4;
+pub const DB_FILENAME: &str = "diskwizard.sqlite";
 
-/// `%LOCALAPPDATA%\DSpace\db\dspace.sqlite` — Windows.
+/// `%LOCALAPPDATA%\DiskWizard\db\diskwizard.sqlite` — Windows.
 /// Diğer platformlarda `dirs::data_local_dir()` döndüğü değer.
 pub fn db_path() -> Result<PathBuf> {
     let base =
         dirs::data_local_dir().ok_or_else(|| Error::Db("data_local_dir bulunamadı".into()))?;
-    Ok(base.join("DSpace").join("db").join(DB_FILENAME))
+    Ok(base.join("DiskWizard").join("db").join(DB_FILENAME))
 }
 
 pub(crate) fn migrations() -> Migrations<'static> {
@@ -41,6 +41,8 @@ pub(crate) fn migrations() -> Migrations<'static> {
         // tabloları (usn_index + usn_watermark). Mevcut DB üzerinde
         // forward-only uygulanır.
         M::up(include_str!("migrations/0003_usn_index.sql")),
+        // DiskWizard v0.4.0 — persisted recovery scan sessions.
+        M::up(include_str!("migrations/0004_sessions.sql")),
     ])
 }
 
@@ -164,6 +166,7 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
 /// Tek-kullanıcılı desktop için connection pool gerekmez. `Arc` sarması
 /// (Gemini review: async komutlar) `spawn_blocking` içine clonlanabilir —
 /// uzun DB işleri artık main thread'i bloklamaz.
+#[derive(Clone)]
 pub struct DbState {
     pub conn: std::sync::Arc<Mutex<Connection>>,
 }

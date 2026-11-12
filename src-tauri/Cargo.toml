@@ -32,6 +32,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 rusqlite_migration = "1"
 dirs = "5"
 blake3 = "1"
+base64 = "0.22"
 rayon = "1"
 tract = { version = "0.22", optional = true, default-features = false }
 tract-tflite = { version = "0.22", optional = true, default-features = false }

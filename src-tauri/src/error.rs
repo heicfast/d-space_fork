@@ -1,42 +1,42 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Tek tipli hata enum'u. Tüm modüller bu Error üzerinden raporlar.
-// Tauri komutlarına dönerken serde Serialize uygulanır, frontend
-// tarafında typed discriminant ile yakalanır.
+// Single unified error enum. Every module reports through this `Error`.
+// Serialized when returned from Tauri commands; the frontend receives
+// `{ kind, message }` and dispatches on the typed `kind` discriminant.
 
 use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("IO hatası: {0}")]
+    #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Veritabanı hatası: {0}")]
+    #[error("Database error: {0}")]
     Db(String),
 
-    #[error("Volume hatası: {0}")]
+    #[error("Volume error: {0}")]
     Volume(String),
 
-    #[error("Tarama hatası: {0}")]
+    #[error("Scan error: {0}")]
     Scan(String),
 
-    #[error("Staging hatası: {0}")]
+    #[error("Staging error: {0}")]
     Staging(String),
 
-    #[error("Snapshot hatası: {0}")]
+    #[error("Snapshot error: {0}")]
     Snapshot(String),
 
-    #[error("Duplicate detector hatası: {0}")]
+    #[error("Duplicate detector error: {0}")]
     Duplicate(String),
 
-    #[error("Kilitli dosya: {0}")]
+    #[error("Locked file: {0}")]
     LockedFile(String),
 
-    #[error("USN index hatası: {0}")]
+    #[error("USN index error: {0}")]
     Index(String),
 
-    #[error("Henüz uygulanmadı: {0}")]
+    #[error("Not implemented yet: {0}")]
     NotImplemented(&'static str),
 }
 
