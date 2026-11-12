@@ -964,7 +964,8 @@ mod tests {
                 std::mem::size_of::<AtaPassThroughEx>(),
             )
         };
-        assert_eq!(u16::from_le_bytes([raw[24], raw[25]]), 0); // low bytes of 48
+        // data_buffer_offset = 48 (struct-relative) at bytes 24..32.
+        assert_eq!(u64::from_le_bytes(raw[24..32].try_into().unwrap()), 48);
         assert_eq!(raw[40], 0xBB);
         assert_eq!(raw[47], 0xBB);
     }
