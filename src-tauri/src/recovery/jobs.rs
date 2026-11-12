@@ -629,6 +629,7 @@ struct SourceCtx {
     ntfs: Option<ntfs::Ntfs>,
     bitmap: Option<crate::recovery::collect::ClusterBitmap>,
     fat: Option<(crate::fsfat::FatGeometry, crate::fsfat::FatAllocMap)>,
+    ext: Option<(crate::fsext::ExtGeometry, crate::fsext::ExtAllocMap)>,
 }
 
 impl SourceCtx {
@@ -643,6 +644,7 @@ impl SourceCtx {
                         ntfs: None,
                         bitmap: None,
                         fat: None,
+                        ext: None,
                     };
                 };
                 let ntfs = match ntfs::Ntfs::new(reader) {
@@ -662,6 +664,7 @@ impl SourceCtx {
                     ntfs,
                     bitmap,
                     fat: None,
+                    ext: None,
                 }
             }
             crate::recovery::BackendGeometry::Fat(geometry) => {
@@ -670,6 +673,7 @@ impl SourceCtx {
                         ntfs: None,
                         bitmap: None,
                         fat: None,
+                        ext: None,
                     };
                 };
                 let alloc = crate::fsfat::reload_alloc(geometry, reader);
@@ -677,6 +681,24 @@ impl SourceCtx {
                     ntfs: None,
                     bitmap: None,
                     fat: Some((geometry.clone(), alloc)),
+                    ext: None,
+                }
+            }
+            crate::recovery::BackendGeometry::Ext(geometry) => {
+                let Some(reader) = reader else {
+                    return Self {
+                        ntfs: None,
+                        bitmap: None,
+                        fat: None,
+                        ext: None,
+                    };
+                };
+                let alloc = crate::fsext::reload_alloc(geometry, reader);
+                Self {
+                    ntfs: None,
+                    bitmap: None,
+                    fat: None,
+                    ext: Some((geometry.clone(), alloc)),
                 }
             }
         }
@@ -929,7 +951,45 @@ fn stream_deleted(
         crate::recovery::deleted::FreshRecord,
         u64,
         Option<&dyn crate::recovery::deleted::AllocMap>,
-    ) = if let Some((geometry, alloc)) = source.as_ref().and_then(|s| s.fat.as_ref()) {
+    ) = if let Some((geometry, alloc)) = source.as_ref().and_then(|s| s.ext.as_ref()) {
+        // ext2/3/4 path: re-parse the inode by number; the link count
+        // decides reuse. Extents are re-derived fresh when they survived.
+        let entry = stored.ok_or_else(|| {
+            (
+                "source-missing".into(),
+                "deleted entry missing from the scan".into(),
+            )
+        })?;
+        let inode_no = entry
+            .slot_key
+            .ok_or_else(|| ("source-missing".into(), "entry has no ext inode key".into()))?
+            as u32;
+        let fresh = crate::fsext::reparse_inode(
+            geometry,
+            reader,
+            inode_no,
+            entry.runs.clone(),
+            entry.data_size,
+        )
+        .map_err(|e| ("source-missing".into(), e.to_string()))?;
+        if !fresh.still_deleted {
+            return Err((
+                "record-reused".into(),
+                "the inode has been reused since the scan".into(),
+            ));
+        }
+        if fresh.encrypted {
+            return Err((
+                "unsupported-encoding".into(),
+                "fscrypt-encrypted files cannot be recovered without the key".into(),
+            ));
+        }
+        (
+            fresh,
+            0,
+            Some(alloc as &dyn crate::recovery::deleted::AllocMap),
+        )
+    } else if let Some((geometry, alloc)) = source.as_ref().and_then(|s| s.fat.as_ref()) {
         // FAT / exFAT path.
         let entry = stored.ok_or_else(|| {
             (
@@ -937,7 +997,7 @@ fn stream_deleted(
                 "deleted entry missing from the scan".into(),
             )
         })?;
-        let slot = entry.slot_offset.ok_or_else(|| {
+        let slot = entry.slot_key.ok_or_else(|| {
             (
                 "source-missing".into(),
                 "entry has no FAT slot offset".into(),

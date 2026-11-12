@@ -161,6 +161,22 @@ pub fn encode_session(scan: &RecoveryScan) -> Result<Vec<u8>> {
         crate::recovery::BackendGeometry::Ntfs => {
             put_u32(&mut buf, 0);
         }
+        crate::recovery::BackendGeometry::Ext(g) => {
+            put_u32(&mut buf, 2);
+            put_u64(&mut buf, g.block_size);
+            put_u64(&mut buf, g.blocks);
+            put_u64(&mut buf, g.first_data_block);
+            put_u64(&mut buf, g.blocks_per_group);
+            put_u64(&mut buf, g.inodes_per_group);
+            put_u64(&mut buf, g.inode_size);
+            put_u64(&mut buf, g.inodes);
+            put_u32(&mut buf, u8::from(g.filetype) as u32);
+            put_u32(&mut buf, g.groups.len() as u32);
+            for (bm, it) in &g.groups {
+                put_u64(&mut buf, *bm);
+                put_u64(&mut buf, *it);
+            }
+        }
         crate::recovery::BackendGeometry::Fat(g) => {
             put_u32(&mut buf, 1);
             put_u32(
@@ -237,8 +253,8 @@ pub fn encode_session(scan: &RecoveryScan) -> Result<Vec<u8>> {
             put_u64(&mut buf, r.clusters);
         }
         // Slot offset (FAT/exFAT read-back re-check; 0 = none).
-        put_u32(&mut buf, d.slot_offset.map(|_o| 1).unwrap_or(0));
-        put_u64(&mut buf, d.slot_offset.unwrap_or(0));
+        put_u32(&mut buf, d.slot_key.map(|_o| 1).unwrap_or(0));
+        put_u64(&mut buf, d.slot_key.unwrap_or(0));
         // Confidence byte.
         let conf = confidence.get(id).copied().unwrap_or(Confidence::Unknown);
         put_u32(&mut buf, confidence_byte(conf));
@@ -364,6 +380,35 @@ pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
     let cluster_size = c.u32()?;
     let backend = match c.u32()? {
         0 => crate::recovery::BackendGeometry::Ntfs,
+        2 => {
+            let block_size = c.u64()?;
+            let blocks = c.u64()?;
+            let first_data_block = c.u64()?;
+            let blocks_per_group = c.u64()?;
+            let inodes_per_group = c.u64()?;
+            let inode_size = c.u64()?;
+            let inodes = c.u64()?;
+            let filetype = c.u32()? != 0;
+            let groups_len = c.u32()? as usize;
+            if groups_len > 4096 {
+                return Err(Error::Db("session blob: absurd ext group count".into()));
+            }
+            let mut groups = Vec::with_capacity(groups_len);
+            for _ in 0..groups_len {
+                groups.push((c.u64()?, c.u64()?));
+            }
+            crate::recovery::BackendGeometry::Ext(crate::fsext::ExtGeometry {
+                block_size,
+                blocks,
+                first_data_block,
+                blocks_per_group,
+                inodes_per_group,
+                inode_size,
+                inodes,
+                filetype,
+                groups,
+            })
+        }
         1 => {
             let kind = match c.u32()? {
                 0 => crate::fsfat::FatKindWire::Fat12,
@@ -501,7 +546,7 @@ pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
         }
         let has_slot = c.u32()? != 0;
         let slot_v = c.u64()?;
-        let slot_offset = if has_slot { Some(slot_v) } else { None };
+        let slot_key = if has_slot { Some(slot_v) } else { None };
         let conf = confidence_from(c.u32()?);
         deleted_children.entry(parent).or_default().push(id);
         deleted.insert(
@@ -517,7 +562,7 @@ pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
                 runs,
                 compressed,
                 encrypted,
-                slot_offset,
+                slot_key,
             },
         );
         confidence.insert(id, conf);
@@ -825,7 +870,7 @@ mod tests {
                 }],
                 compressed: false,
                 encrypted: false,
-                slot_offset: None,
+                slot_key: None,
             },
         );
         *scan.deleted.write().unwrap() = std::sync::Arc::new(deleted);

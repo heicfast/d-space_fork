@@ -355,7 +355,7 @@ mod tests {
                 .collect(),
             compressed: false,
             encrypted: false,
-            slot_offset: None,
+            slot_key: None,
         }
     }
 
@@ -433,7 +433,7 @@ mod tests {
             runs: vec![],
             compressed: false,
             encrypted: false,
-            slot_offset: None,
+            slot_key: None,
         };
         assert_eq!(grade_deleted(&e, &bm(&[0x00])), Confidence::Unknown);
     }

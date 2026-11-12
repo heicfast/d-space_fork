@@ -62,10 +62,11 @@ pub struct DeletedEntry {
     pub compressed: bool,
     /// EFS-encrypted attribute — recovery not possible without the key.
     pub encrypted: bool,
-    /// FAT/exFAT only: absolute byte offset of the directory entry slot
-    /// on the volume (read-back re-checks the deletion marker byte).
-    /// `None` for NTFS (whose MFT records are re-parsed by number).
-    pub slot_offset: Option<u64>,
+    /// Backend-specific read-back key: FAT/exFAT stores the absolute
+    /// byte offset of the directory entry slot (its deletion marker byte
+    /// is re-checked); ext stores the inode number (its link count is
+    /// re-checked). `None` for NTFS (records re-parse by number).
+    pub slot_key: Option<u64>,
 }
 
 /// Result of the unified walk.
@@ -357,7 +358,7 @@ pub fn collect_mft_all(
                         runs,
                         compressed,
                         encrypted,
-                        slot_offset: None,
+                        slot_key: None,
                     });
                 }
             }
@@ -440,7 +441,7 @@ mod tests {
                 .collect(),
             compressed: false,
             encrypted: false,
-            slot_offset: None,
+            slot_key: None,
         }
     }
 
@@ -629,7 +630,7 @@ fn collect_mft_on_ntfs<T: Read + Seek>(
                         runs,
                         compressed,
                         encrypted,
-                        slot_offset: None,
+                        slot_key: None,
                     });
                 }
             }

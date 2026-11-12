@@ -339,6 +339,9 @@ pub enum BackendGeometry {
     /// FAT/exFAT — slots re-checked at their byte offset; allocation
     /// re-read from the FAT/exFAT bitmap geometry.
     Fat(crate::fsfat::FatGeometry),
+    /// ext2/3/4 — inodes re-parsed by number (link-count reuse check);
+    /// allocation re-read from the group block bitmaps.
+    Ext(crate::fsext::ExtGeometry),
 }
 
 impl RecoveryScan {

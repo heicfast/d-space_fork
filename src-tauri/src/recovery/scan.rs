@@ -293,13 +293,16 @@ fn run_scan_inner<R: tauri::Runtime>(
     // anything else (ReFS, network, unknown FS without admin) -> the
     // FindFirstFile fallback (existing files only).
     let fs_name = scan.meta.fs.to_ascii_uppercase();
-    let fat_capable = matches!(
+    let raw_target = matches!(
         scan.meta.target,
         ScanTarget::Volume { .. } | ScanTarget::LostPartition { .. }
-    ) && matches!(
-        fs_name.as_str(),
-        "FAT12" | "FAT16" | "FAT32" | "EXFAT" | "FAT"
     );
+    let fat_capable = raw_target
+        && matches!(
+            fs_name.as_str(),
+            "FAT12" | "FAT16" | "FAT32" | "EXFAT" | "FAT"
+        );
+    let ext_capable = raw_target && matches!(fs_name.as_str(), "EXT2" | "EXT3" | "EXT4" | "EXT");
     let ntfs_capable = match &scan.meta.target {
         ScanTarget::Volume { letter, .. } => {
             crate::scan::tree::is_mft_compatible(&letter.to_string())
@@ -310,6 +313,7 @@ fn run_scan_inner<R: tauri::Runtime>(
     let elevated = crate::scan::is_elevated();
     let use_mft = ntfs_capable && elevated;
     let use_fat = fat_capable && elevated;
+    let use_ext = ext_capable && elevated;
 
     let mut strategy: &'static str = "fallback";
     let finalize_input: FinalizeInput = if use_mft {
@@ -343,6 +347,20 @@ fn run_scan_inner<R: tauri::Runtime>(
             _ => "FAT",
         };
         FinalizeInput::Fat(collected)
+    } else if use_ext {
+        let stage = ScanStageWire::QuickIndex;
+        set_stage(&scan, &window, stage, 0.0);
+        let mut reader = crate::recovery::partitions::open_target_reader(&scan.meta.target)?;
+        let cb = make_progress_cb(&scan, &window);
+        let cb_ref: &dyn Fn(&crate::recovery::collect::CollectProgress) = &cb;
+        let collected = crate::fsext::collect_ext(
+            &mut reader,
+            &scan.meta.volume_id,
+            &scan.flags,
+            Some(cb_ref),
+        )?;
+        strategy = "ext";
+        FinalizeInput::Ext(collected)
     } else {
         let stage = ScanStageWire::DeepWalk;
         set_stage(&scan, &window, stage, 0.0);
@@ -398,6 +416,7 @@ fn load_user_rules() -> Vec<crate::safe_delete::UserRuleSnapshot> {
 enum FinalizeInput {
     Mft(crate::recovery::collect::CollectedScan),
     Fat(crate::fsfat::FatCollected),
+    Ext(crate::fsext::ExtCollected),
     Fallback(crate::scan::walk::MftEntries),
 }
 
@@ -572,6 +591,81 @@ fn finalize_scan<R: tauri::Runtime>(
             *scan.backend.write().unwrap_or_else(|p| p.into_inner()) =
                 crate::recovery::BackendGeometry::Fat(geometry);
             let _ = kind;
+            set_stage(scan, window, stage, 1.0);
+            Ok(())
+        }
+        FinalizeInput::Ext(c) => {
+            set_stage(scan, window, stage, 0.3);
+            let volume_id = scan.meta.volume_id.clone();
+            let skipped_errors = c.skipped_errors;
+            let crate::fsext::ExtCollected {
+                existing,
+                deleted,
+                alloc,
+                geometry,
+                ..
+            } = c;
+            let tree = build_tree_with_user_rules(volume_id, existing, user_rules);
+
+            set_stage(scan, window, stage, 0.6);
+            let deleted_map: HashMap<u64, crate::recovery::collect::DeletedEntry> =
+                deleted.into_iter().map(|d| (d.record_no, d)).collect();
+            let mut deleted_children: HashMap<u64, Vec<u64>> = HashMap::new();
+            let mut lost: Vec<u64> = Vec::new();
+            for d in deleted_map.values() {
+                let parent = d.parent_record_no;
+                if tree.nodes.contains_key(&parent) || deleted_map.contains_key(&parent) {
+                    deleted_children
+                        .entry(parent)
+                        .or_default()
+                        .push(d.record_no);
+                } else {
+                    lost.push(d.record_no);
+                }
+            }
+
+            let mut dir_sizes: HashMap<u64, u64> = HashMap::new();
+            let dir_ids: Vec<u64> = deleted_map
+                .values()
+                .filter(|d| d.is_dir)
+                .map(|d| d.record_no)
+                .collect();
+            for id in dir_ids {
+                deleted_dir_size(id, &deleted_children, &deleted_map, &mut dir_sizes);
+            }
+
+            // Confidence grading against the group block bitmaps.
+            set_stage(scan, window, stage, 0.8);
+            let mut confidence = HashMap::new();
+            for d in deleted_map.values() {
+                confidence.insert(d.record_no, grade_deleted(d, &alloc));
+            }
+
+            {
+                let mut rt = scan.runtime.write().unwrap_or_else(|p| p.into_inner());
+                rt.errors = skipped_errors;
+                rt.bytes_scanned = rt.bytes_total;
+                rt.files_found = tree.file_count;
+                rt.data_found_bytes = tree.total_bytes;
+            }
+
+            *scan.tree.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(tree));
+            *scan.deleted.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(deleted_map);
+            *scan
+                .deleted_children
+                .write()
+                .unwrap_or_else(|p| p.into_inner()) = deleted_children;
+            *scan.lost_path.write().unwrap_or_else(|p| p.into_inner()) = lost;
+            *scan
+                .deleted_dir_sizes
+                .write()
+                .unwrap_or_else(|p| p.into_inner()) = dir_sizes;
+            *scan.confidence.write().unwrap_or_else(|p| p.into_inner()) = confidence;
+            *scan.cluster_size.write().unwrap_or_else(|p| p.into_inner()) =
+                geometry.block_size as u32;
+            *scan.strategy.write().unwrap_or_else(|p| p.into_inner()) = Some(strategy);
+            *scan.backend.write().unwrap_or_else(|p| p.into_inner()) =
+                crate::recovery::BackendGeometry::Ext(geometry);
             set_stage(scan, window, stage, 1.0);
             Ok(())
         }

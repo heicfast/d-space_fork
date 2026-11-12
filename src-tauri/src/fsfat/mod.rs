@@ -613,7 +613,7 @@ pub fn collect_fat<R: Read + Seek>(
             next_id += 1;
             last_name = r.name.clone();
 
-            let slot_offset = dir_abs + entry_off as u64;
+            let slot_key = dir_abs + entry_off as u64;
 
             if !deleted_flag {
                 existing.push(RawMftEntry {
@@ -660,7 +660,7 @@ pub fn collect_fat<R: Read + Seek>(
                         .collect(),
                     compressed: false,
                     encrypted: false,
-                    slot_offset: Some(slot_offset),
+                    slot_key: Some(slot_key),
                 });
             }
 
@@ -670,7 +670,7 @@ pub fn collect_fat<R: Read + Seek>(
                     (_, false) => DirSrc::Chain(loc.first),
                     (_, true) => DirSrc::Free(loc.first),
                 };
-                queue.push_back((id, src, deleted_flag, slot_offset));
+                queue.push_back((id, src, deleted_flag, slot_key));
             }
         }
         dir_count += 1;
@@ -732,16 +732,16 @@ pub fn reload_alloc<R: Read + Seek>(geometry: &FatGeometry, reader: &mut R) -> F
 }
 
 /// Re-reads a deleted entry's directory slot and reports whether it is
-/// still deleted. `slot_offset` is the absolute byte offset recorded at
+/// still deleted. `slot_key` is the absolute byte offset recorded at
 /// scan time.
 pub fn reparse_slot<R: Read + Seek>(
     geometry: &FatGeometry,
     reader: &mut R,
-    slot_offset: u64,
+    slot_key: u64,
 ) -> Result<bool> {
     let kind: FatKind = geometry.kind.into();
     let mut entry = [0u8; 32];
-    read_at(reader, slot_offset, &mut entry)
+    read_at(reader, slot_key, &mut entry)
         .map_err(|e| Error::Scan(format!("directory slot re-read failed: {e}")))?;
     Ok(match kind {
         FatKind::ExFat => entry[0] & 0x80 == 0,
@@ -820,7 +820,7 @@ mod tests {
         // cluster 3 (data idx 1), size 6 bytes -> 1 cluster.
         assert_eq!(out.deleted.len(), 1);
         assert_eq!(out.deleted[0].name, "_X");
-        assert!(out.deleted[0].slot_offset.is_some());
+        assert!(out.deleted[0].slot_key.is_some());
         assert_eq!(out.deleted[0].runs.len(), 1);
         assert_eq!(out.deleted[0].runs[0].lcn, Some(1));
         // Cluster 2 (idx 0) is allocated (EOC in FAT); idx 1 free.
@@ -849,7 +849,7 @@ mod tests {
         let mut cursor = std::io::Cursor::new(img.clone());
         let out = collect_fat(&mut cursor, "x", &RunFlags::default(), None).unwrap();
         let g = out.geometry.clone();
-        let slot = out.deleted[0].slot_offset.unwrap();
+        let slot = out.deleted[0].slot_key.unwrap();
         let mut reread = std::io::Cursor::new(img.clone());
         // Still deleted (0xE5 first byte).
         assert!(reparse_slot(&g, &mut reread, slot).unwrap());

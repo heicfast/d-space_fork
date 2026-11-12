@@ -295,6 +295,37 @@ pub(crate) fn fresh_read(
         .unwrap_or_else(|p| p.into_inner())
         .clone();
     match backend {
+        crate::recovery::BackendGeometry::Ext(geometry) => {
+            // ext2/3/4: re-parse the inode by number (link-count reuse
+            // check), read the fresh extents against the fresh bitmaps.
+            let entry = scan
+                .deleted
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(&record_no)
+                .cloned()
+                .ok_or_else(|| Error::Scan("deleted entry missing from the scan".into()))?;
+            let inode_no = entry
+                .slot_key
+                .ok_or_else(|| Error::Scan("entry has no ext inode key".into()))?
+                as u32;
+            let fresh = crate::fsext::reparse_inode(
+                &geometry,
+                reader,
+                inode_no,
+                entry.runs.clone(),
+                entry.data_size,
+            )?;
+            if !fresh.still_deleted {
+                return Err(Error::Scan(
+                    "the inode has been reused since the scan".into(),
+                ));
+            }
+            let alloc = crate::fsext::reload_alloc(&geometry, reader);
+            let (bytes, _intact) =
+                read_deleted_range(reader, &fresh, Some(&alloc), cluster_size, 0, 0, limit)?;
+            Ok(bytes)
+        }
         crate::recovery::BackendGeometry::Fat(geometry) => {
             // FAT / exFAT: re-check the directory slot, then read the
             // stored (contiguous-assumed) runs against the fresh
@@ -307,7 +338,7 @@ pub(crate) fn fresh_read(
                 .cloned()
                 .ok_or_else(|| Error::Scan("deleted entry missing from the scan".into()))?;
             let slot = entry
-                .slot_offset
+                .slot_key
                 .ok_or_else(|| Error::Scan("entry has no FAT slot offset".into()))?;
             if !crate::fsfat::reparse_slot(&geometry, reader, slot)? {
                 return Err(Error::Scan(

@@ -274,6 +274,7 @@ pub enum FsKind {
     Fat16,
     Fat32,
     ExFat,
+    Ext,
 }
 
 impl FsKind {
@@ -284,6 +285,7 @@ impl FsKind {
             FsKind::Fat16 => "fat16",
             FsKind::Fat32 => "fat32",
             FsKind::ExFat => "exfat",
+            FsKind::Ext => "ext",
         }
     }
 }
@@ -346,6 +348,33 @@ pub fn detect_fs_boot(sector: &[u8]) -> Option<(FsKind, u64)> {
         let volume_bytes = total_sectors.saturating_mul(bps as u64);
         if volume_bytes > 1024 * 1024 {
             return Some((FsKind::ExFat, volume_bytes));
+        }
+    }
+    None
+}
+
+/// Detects a filesystem starting at byte `abs` on a raw handle: the boot
+/// sector first, then the ext superblock (which sits 1024 bytes in —
+/// two sectors past the partition start).
+pub fn detect_fs_at<R: Read + Seek>(handle: &mut R, abs: u64) -> Option<(FsKind, u64)> {
+    let mut boot = vec![0u8; 512];
+    handle.seek(SeekFrom::Start(abs)).ok()?;
+    handle.read_exact(&mut boot).ok()?;
+    if let Some(hit) = detect_fs_boot(&boot) {
+        return Some(hit);
+    }
+    // ext: superblock at +1024, magic 0xEF53 at sb+56.
+    let mut sb = vec![0u8; 1024];
+    handle.seek(SeekFrom::Start(abs + 1024)).ok()?;
+    handle.read_exact(&mut sb).ok()?;
+    if u16::from_le_bytes([sb[56], sb[57]]) == 0xEF53
+        && u32::from_le_bytes(sb[24..28].try_into().ok()?) <= 6
+    {
+        let block_size = 1024u64 << u32::from_le_bytes(sb[24..28].try_into().ok()?);
+        let blocks = u64::from(u32::from_le_bytes(sb[4..8].try_into().ok()?));
+        let volume_bytes = blocks.saturating_mul(block_size);
+        if volume_bytes > 1024 * 1024 {
+            return Some((FsKind::Ext, volume_bytes));
         }
     }
     None
@@ -704,10 +733,7 @@ fn probe_gap(
     let probe_lbas: u64 = 128.min(gap_size / sector_size as u64);
     for l in 0..probe_lbas {
         let abs = gap_start + l * sector_size as u64;
-        handle.seek(SeekFrom::Start(abs)).ok()?;
-        let mut buf = vec![0u8; sector_size as usize];
-        handle.read_exact(&mut buf).ok()?;
-        if let Some((kind, volume_bytes)) = detect_fs_boot(&buf) {
+        if let Some((kind, volume_bytes)) = detect_fs_at(handle, abs) {
             // Lost volume may be smaller than the gap (or clipped by it).
             let size = volume_bytes.min(gap_size - l * sector_size as u64);
             if size < 1024 * 1024 {
