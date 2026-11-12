@@ -22,6 +22,22 @@ use std::io::{Read, Seek, SeekFrom};
 use tracing::{debug, info, warn};
 
 // ---------------------------------------------------------------------------
+// CRC-32 (IEEE, reflected) — GPT header/entry validation
+// ---------------------------------------------------------------------------
+
+fn crc32_ieee(data: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &b in data {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            let mask = (crc & 1).wrapping_neg();
+            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    !crc
+}
+
+// ---------------------------------------------------------------------------
 // OffsetReader
 // ---------------------------------------------------------------------------
 
@@ -102,21 +118,69 @@ pub struct GptEntry {
     pub name: String,
 }
 
-/// Parses a GPT header (LBA 1, 512 bytes). Returns
+/// Parses a GPT header (LBA 1 or the backup header at the last sector,
+/// 512 bytes). Signature + geometry are validated; the header CRC field
+/// is verified with `verify_crc` (the backup path relies on it to reject
+/// a stale/corrupted header). Returns
 /// `(entries_start_lba, entry_count, entry_size, first_usable, last_usable)`.
-pub fn parse_gpt_header(sector: &[u8]) -> Option<(u64, u32, u32, u64, u64)> {
+pub fn parse_gpt_header(sector: &[u8], verify_crc: bool) -> Option<(u64, u32, u32, u64, u64)> {
     if sector.len() < 92 || &sector[0..8] != b"EFI PART" {
         return None;
     }
+    let header_size = u32::from_le_bytes(sector[12..16].try_into().ok()?) as usize;
+    if !(92..=sector.len()).contains(&header_size) {
+        return None;
+    }
+    if verify_crc {
+        let stored = u32::from_le_bytes(sector[16..20].try_into().ok()?);
+        let mut copy = sector[..header_size].to_vec();
+        copy[16..20].fill(0);
+        if crc32_ieee(&copy) != stored {
+            return None;
+        }
+    }
+    let first_usable = u64::from_le_bytes(sector[40..48].try_into().ok()?);
+    let last_usable = u64::from_le_bytes(sector[48..56].try_into().ok()?);
     let entries_start = u64::from_le_bytes(sector[72..80].try_into().ok()?);
     let count = u32::from_le_bytes(sector[80..84].try_into().ok()?);
     let size = u32::from_le_bytes(sector[84..88].try_into().ok()?);
-    let first_usable = u64::from_le_bytes(sector[40..48].try_into().ok()?);
-    let last_usable = u64::from_le_bytes(sector[48..56].try_into().ok()?);
     if size == 0 || size > 1024 || count > 1024 {
         return None;
     }
     Some((entries_start, count, size, first_usable, last_usable))
+}
+
+/// Computes the CRC-32 of a GPT entry array (for `parse_gpt_entries`).
+fn gpt_entries_crc(entries: &[u8]) -> u32 {
+    crc32_ieee(entries)
+}
+
+/// Parses GPT partition entries (each `entry_size` bytes, `count` of
+/// them) and verifies the array CRC against the header value.
+pub fn parse_gpt_entries(
+    entries: &[u8],
+    count: u32,
+    entry_size: u32,
+    expected_crc: u32,
+) -> Option<Vec<GptEntry>> {
+    if entry_size == 0 || entry_size > 1024 {
+        return None;
+    }
+    let need = (count as usize).saturating_mul(entry_size as usize);
+    if entries.len() < need {
+        return None;
+    }
+    if gpt_entries_crc(&entries[..need]) != expected_crc {
+        return None;
+    }
+    let mut out = Vec::new();
+    for i in 0..count as usize {
+        let off = i * entry_size as usize;
+        if let Some(entry) = parse_gpt_entry(&entries[off..off + entry_size as usize]) {
+            out.push(entry);
+        }
+    }
+    Some(out)
 }
 
 /// Parses one GPT partition entry (128 bytes typical).
@@ -396,108 +460,160 @@ pub fn read_disk_layout(disk_no: u32) -> Result<DiskLayoutWire> {
     let mut style = "unknown".to_string();
     let mut gaps: Vec<(u64, u64)> = Vec::new(); // (start_byte, size)
 
-    if let Some((entries_lba, count, entry_size, first_usable, last_usable)) =
-        parse_gpt_header(lba0.as_slice())
-    {
-        // GPT signature is on LBA1, not LBA0 — re-check properly.
-        let lba1 = read_sector(&mut handle, 1, sector_size);
-        let gpt = lba1.as_deref().and_then(parse_gpt_header).or(Some((
-            entries_lba,
-            count,
-            entry_size,
-            first_usable,
-            last_usable,
-        )));
-        if let Some((entries_lba, count, entry_size, first_usable, last_usable)) = gpt {
-            style = "gpt".into();
-            let mut used: Vec<(u64, u64)> = Vec::new(); // (start_lba, end_lba)
-            let mut idx = 0u32;
-            'entries: for lba in (entries_lba..entries_lba + 16).take(32) {
-                let sector = match read_sector(&mut handle, lba, sector_size) {
-                    Some(s) => s,
-                    None => break 'entries,
-                };
-                for off in (0..sector.len()).step_by(entry_size as usize) {
-                    if idx >= count {
-                        break 'entries;
+    // ---- GPT: the header lives at LBA 1, never at LBA 0 (LBA 0 holds
+    // the protective MBR). The original code parsed LBA 0 — a branch
+    // that could never fire, so every GPT disk fell through to the MBR
+    // parser and real partitions were never listed. On a damaged primary
+    // header we retry with the backup header at the last sector (with CRC
+    // validation, TestDisk-style).
+    let mut gpt_parsed = false;
+    if let Some(lba1) = read_sector(&mut handle, 1, sector_size) {
+        if let Some((entries_lba, count, entry_size, first_usable, last_usable)) =
+            parse_gpt_header(lba1.as_slice(), false)
+        {
+            let entries_crc = u32::from_le_bytes(lba1[88..92].try_into().unwrap_or([0; 4]));
+            if let Some(entries) = read_gpt_entries(
+                &mut handle,
+                entries_lba,
+                count,
+                entry_size,
+                sector_size,
+                entries_crc,
+            ) {
+                style = "gpt".into();
+                gpt_parsed = true;
+                let mut used: Vec<(u64, u64)> = Vec::new(); // (start_lba, end_lba)
+                for (idx, entry) in entries.iter().enumerate() {
+                    if entry.first_lba == 0 && entry.last_lba == 0 {
+                        continue;
                     }
-                    if off + entry_size as usize > sector.len() {
-                        break;
+                    if entry.last_lba < entry.first_lba {
+                        continue;
                     }
-                    if let Some(entry) = parse_gpt_entry(&sector[off..off + entry_size as usize]) {
+                    used.push((entry.first_lba, entry.last_lba));
+                    partitions.push(PartitionWire {
+                        index: idx as u32,
+                        kind: gpt_kind_name(&entry.type_guid).to_string(),
+                        start_byte: entry.first_lba * sector_size as u64,
+                        size_bytes: (entry.last_lba - entry.first_lba + 1) * sector_size as u64,
+                        label: if entry.name.is_empty() {
+                            None
+                        } else {
+                            Some(entry.name.clone())
+                        },
+                    });
+                }
+                used.sort_unstable();
+                // Gaps inside [first_usable, last_usable].
+                let first_usable_byte = first_usable * sector_size as u64;
+                let last_usable_byte = (last_usable + 1) * sector_size as u64;
+                let mut cursor = first_usable_byte;
+                for (start, end) in &used {
+                    let s = start * sector_size as u64;
+                    if s > cursor {
+                        gaps.push((cursor, s - cursor));
+                    }
+                    cursor = (end + 1) * sector_size as u64;
+                }
+                if last_usable_byte > cursor {
+                    gaps.push((cursor, last_usable_byte - cursor));
+                }
+            }
+        }
+    }
+    // Backup GPT header fallback (primary header damaged).
+    if !gpt_parsed && size_bytes >= sector_size as u64 * 2 {
+        let backup_lba = (size_bytes / sector_size as u64).saturating_sub(1);
+        if let Some(backup) = read_sector(&mut handle, backup_lba, sector_size) {
+            if let Some((entries_lba, count, entry_size, first_usable, last_usable)) =
+                parse_gpt_header(backup.as_slice(), true)
+            {
+                let entries_crc = u32::from_le_bytes(backup[88..92].try_into().unwrap_or([0; 4]));
+                if let Some(entries) = read_gpt_entries(
+                    &mut handle,
+                    entries_lba,
+                    count,
+                    entry_size,
+                    sector_size,
+                    entries_crc,
+                ) {
+                    style = "gpt (backup header)".into();
+                    gpt_parsed = true;
+                    let mut used: Vec<(u64, u64)> = Vec::new();
+                    for (idx, entry) in entries.iter().enumerate() {
                         if entry.first_lba == 0 && entry.last_lba == 0 {
-                            idx += 1;
                             continue;
                         }
-                        if entry.last_lba >= entry.first_lba {
-                            used.push((entry.first_lba, entry.last_lba));
-                            partitions.push(PartitionWire {
-                                index: idx,
-                                kind: gpt_kind_name(&entry.type_guid).to_string(),
-                                start_byte: entry.first_lba * sector_size as u64,
-                                size_bytes: (entry.last_lba - entry.first_lba + 1)
-                                    * sector_size as u64,
-                                label: if entry.name.is_empty() {
-                                    None
-                                } else {
-                                    Some(entry.name.clone())
-                                },
-                            });
+                        if entry.last_lba < entry.first_lba {
+                            continue;
                         }
+                        used.push((entry.first_lba, entry.last_lba));
+                        partitions.push(PartitionWire {
+                            index: idx as u32,
+                            kind: gpt_kind_name(&entry.type_guid).to_string(),
+                            start_byte: entry.first_lba * sector_size as u64,
+                            size_bytes: (entry.last_lba - entry.first_lba + 1) * sector_size as u64,
+                            label: if entry.name.is_empty() {
+                                None
+                            } else {
+                                Some(entry.name.clone())
+                            },
+                        });
                     }
-                    idx += 1;
+                    used.sort_unstable();
+                    let first_usable_byte = first_usable * sector_size as u64;
+                    let last_usable_byte = (last_usable + 1) * sector_size as u64;
+                    let mut cursor = first_usable_byte;
+                    for (start, end) in &used {
+                        let s = start * sector_size as u64;
+                        if s > cursor {
+                            gaps.push((cursor, s - cursor));
+                        }
+                        cursor = (end + 1) * sector_size as u64;
+                    }
+                    if last_usable_byte > cursor {
+                        gaps.push((cursor, last_usable_byte - cursor));
+                    }
                 }
-            }
-            used.sort_unstable();
-            // Gaps inside [first_usable, last_usable].
-            let first_usable_byte = first_usable * sector_size as u64;
-            let last_usable_byte = (last_usable + 1) * sector_size as u64;
-            let mut cursor = first_usable_byte;
-            for (start, end) in &used {
-                let s = start * sector_size as u64;
-                if s > cursor {
-                    gaps.push((cursor, s - cursor));
-                }
-                cursor = (end + 1) * sector_size as u64;
-            }
-            if last_usable_byte > cursor {
-                gaps.push((cursor, last_usable_byte - cursor));
             }
         }
     }
 
-    if style == "unknown" {
+    if !gpt_parsed {
         if let Some(entries) = parse_mbr(lba0.as_slice()) {
-            style = "mbr".into();
-            let mut used: Vec<(u64, u64)> = Vec::new();
-            for (i, e) in entries.iter().enumerate() {
-                if e.type_byte == 0xEE {
-                    style = "gpt".into(); // protective MBR — handled above; keep kind
+            let protective = entries.iter().any(|e| e.type_byte == 0xEE);
+            // A lone 0xEE protective entry means GPT with an unreadable
+            // LBA 1 + backup — keep the honest protective label without
+            // pretending to know the real layout.
+            style = if protective { "gpt" } else { "mbr" }.into();
+            if !protective {
+                let mut used: Vec<(u64, u64)> = Vec::new();
+                for (i, e) in entries.iter().enumerate() {
+                    if e.sectors == 0 {
+                        continue;
+                    }
+                    used.push((e.start_lba, e.start_lba + e.sectors.saturating_sub(1)));
+                    partitions.push(PartitionWire {
+                        index: i as u32,
+                        kind: mbr_kind_name(e.type_byte),
+                        start_byte: e.start_lba * sector_size as u64,
+                        size_bytes: e.sectors * sector_size as u64,
+                        label: None,
+                    });
                 }
-                if e.sectors == 0 {
-                    continue;
+                used.sort_unstable();
+                let mut cursor = sector_size as u64; // after MBR
+                let disk_end = size_bytes;
+                for (start, end) in &used {
+                    let s = start * sector_size as u64;
+                    if s > cursor {
+                        gaps.push((cursor, s - cursor));
+                    }
+                    cursor = (end + 1) * sector_size as u64;
                 }
-                used.push((e.start_lba, e.start_lba + e.sectors.saturating_sub(1)));
-                partitions.push(PartitionWire {
-                    index: i as u32,
-                    kind: mbr_kind_name(e.type_byte),
-                    start_byte: e.start_lba * sector_size as u64,
-                    size_bytes: e.sectors * sector_size as u64,
-                    label: None,
-                });
-            }
-            used.sort_unstable();
-            let mut cursor = sector_size as u64; // after MBR
-            let disk_end = size_bytes;
-            for (start, end) in &used {
-                let s = start * sector_size as u64;
-                if s > cursor {
-                    gaps.push((cursor, s - cursor));
+                if disk_end > cursor {
+                    gaps.push((cursor, disk_end - cursor));
                 }
-                cursor = (end + 1) * sector_size as u64;
-            }
-            if disk_end > cursor {
-                gaps.push((cursor, disk_end - cursor));
             }
         }
     }
@@ -518,6 +634,33 @@ pub fn read_disk_layout(disk_no: u32) -> Result<DiskLayoutWire> {
         partitions,
         lost_partitions: lost,
     })
+}
+
+/// Reads the GPT entry array from disk (spanning whole sectors) and
+/// validates it against the header's CRC before parsing.
+fn read_gpt_entries(
+    handle: &mut std::fs::File,
+    entries_lba: u64,
+    count: u32,
+    entry_size: u32,
+    sector_size: u32,
+    expected_crc: u32,
+) -> Option<Vec<GptEntry>> {
+    if entry_size == 0 || count == 0 {
+        return None;
+    }
+    let need_bytes = (count as u64).saturating_mul(entry_size as u64);
+    // Defensive cap: 1024 entries × 1024 bytes max.
+    if need_bytes > 1024 * 1024 {
+        return None;
+    }
+    let sectors = need_bytes.div_ceil(sector_size as u64);
+    let mut raw = vec![0u8; (sectors * sector_size as u64) as usize];
+    handle
+        .seek(SeekFrom::Start(entries_lba * sector_size as u64))
+        .ok()?;
+    handle.read_exact(&mut raw).ok()?;
+    parse_gpt_entries(&raw, count, entry_size, expected_crc)
 }
 
 /// Probes the first 128 sectors of an unallocated gap for a filesystem
@@ -641,6 +784,7 @@ mod tests {
     fn gpt_header_fixture(entries_lba: u64, count: u32, entry_size: u32) -> [u8; 512] {
         let mut s = [0u8; 512];
         s[0..8].copy_from_slice(b"EFI PART");
+        s[12..16].copy_from_slice(&92u32.to_le_bytes()); // header size
         s[40..48].copy_from_slice(&34u64.to_le_bytes()); // first usable
         s[48..56].copy_from_slice(&1000u64.to_le_bytes()); // last usable
         s[72..80].copy_from_slice(&entries_lba.to_le_bytes());
@@ -649,19 +793,63 @@ mod tests {
         s
     }
 
+    /// Stamps a valid header CRC over the first 92 bytes (crc field zeroed).
+    fn stamp_header_crc(s: &mut [u8; 512]) {
+        let mut copy = *s;
+        copy[16..20].fill(0);
+        let crc = crc32_ieee(&copy[..92]);
+        s[16..20].copy_from_slice(&crc.to_le_bytes());
+    }
+
     #[test]
     fn gpt_header_parse_roundtrip() {
-        let s = gpt_header_fixture(2, 8, 128);
-        let (entries, count, size, first, last) = parse_gpt_header(&s).unwrap();
+        let mut s = gpt_header_fixture(2, 8, 128);
+        stamp_header_crc(&mut s);
+        let (entries, count, size, first, last) = parse_gpt_header(&s, true).unwrap();
         assert_eq!((entries, count, size, first, last), (2, 8, 128, 34, 1000));
+        // Same fixture, CRC check disabled (primary-header fast path).
+        let (e2, c2, s2, f2, l2) = parse_gpt_header(&s, false).unwrap();
+        assert_eq!((e2, c2, s2, f2, l2), (2, 8, 128, 34, 1000));
     }
 
     #[test]
     fn gpt_header_rejects_bad_signature() {
         let mut s = [0u8; 512];
         s[0..8].copy_from_slice(b"NOT-GPT!");
-        assert!(parse_gpt_header(&s).is_none());
-        assert!(parse_gpt_header(&[0u8; 16]).is_none());
+        assert!(parse_gpt_header(&s, false).is_none());
+        assert!(parse_gpt_header(&[0u8; 16], false).is_none());
+    }
+
+    #[test]
+    fn gpt_header_rejects_bad_crc() {
+        let mut s = gpt_header_fixture(2, 8, 128);
+        // No CRC stamped -> verify_crc must reject; lenient path accepts.
+        assert!(parse_gpt_header(&s, true).is_none());
+        assert!(parse_gpt_header(&s, false).is_some());
+    }
+
+    #[test]
+    fn gpt_entries_crc_validated() {
+        // 4 entries of 128 bytes; entry 0 = Microsoft basic data at lba 2048..4096.
+        let mut raw = vec![0u8; 4 * 128];
+        raw[0..16].copy_from_slice(&[
+            0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44, 0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26,
+            0x99, 0xC8,
+        ]);
+        raw[32..40].copy_from_slice(&2048u64.to_le_bytes());
+        raw[40..48].copy_from_slice(&4096u64.to_le_bytes());
+        let crc = crc32_ieee(&raw);
+        let entries = parse_gpt_entries(&raw, 4, 128, crc).unwrap();
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0].first_lba, 2048);
+        // Wrong CRC -> rejected.
+        assert!(parse_gpt_entries(&raw, 4, 128, crc ^ 0xDEAD).is_none());
+    }
+
+    #[test]
+    fn crc32_ieee_known_vector() {
+        // Classic check value for CRC-32/IEEE: "123456789" -> 0xCBF43926.
+        assert_eq!(crc32_ieee(b"123456789"), 0xCBF4_3926);
     }
 
     #[test]

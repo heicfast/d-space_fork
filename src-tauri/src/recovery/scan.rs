@@ -13,7 +13,7 @@
 // the product contract. Completed scans auto-persist a session.
 
 use crate::error::{Error, Result};
-use crate::recovery::collect::ClusterBitmap;
+use crate::recovery::collect::{ClusterBitmap, CollectedScan};
 use crate::recovery::deleted::grade_deleted;
 use crate::recovery::{
     emit_scan_progress, RecoveryScan, ScanMeta, ScanRegistry, ScanStageWire, ScanStatusWire,
@@ -144,9 +144,13 @@ pub fn apply_path_scope(meta: &mut ScanMeta, scope: Option<&str>) -> Result<()> 
 }
 
 /// Runs the whole scan pipeline on a dedicated thread, keeping the
-/// `RecoveryScan` in the registry updated. Status of completed/cancelled
-/// scans lives in the runtime state; `Err` is reserved for genuine
-/// failures (surfaced as `status = failed`).
+/// `RecoveryScan` in the registry updated. The thread is *detached*:
+/// `dw_scan_start` returns as soon as the scan id is minted and the UI
+/// follows progress via `dw_scan_state` / `dw-scan-progress` events (the
+/// previous design joined the thread inside the async command, freezing
+/// the invoke for the entire scan). Status of completed/cancelled scans
+/// lives in the runtime state; panics are caught (unwind) and mapped to
+/// `status = failed` with the panic message.
 pub fn run_scan<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
     registry: Arc<ScanRegistry>,
@@ -155,47 +159,64 @@ pub fn run_scan<R: tauri::Runtime>(
 ) {
     let app = window.app_handle().clone();
     let scan_for_task = scan.clone();
+    let registry_for_task = registry.clone();
+    let db_for_task = db;
     let window_for_task = window.clone();
-    let join = std::thread::Builder::new()
+    let spawn_result = std::thread::Builder::new()
         .name(format!("dw-scan-{}", scan.scan_id))
-        .spawn(move || run_scan_inner(window_for_task, scan_for_task));
+        .spawn(move || {
+            let scan = scan_for_task;
+            let window = window_for_task;
+            let inner_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_scan_inner(window.clone(), scan.clone())
+            }))
+            .unwrap_or_else(|panic_payload| {
+                let msg = panic_payload
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_string())
+                    .or_else(|| panic_payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "scan thread panicked".into());
+                Err(Error::Scan(format!("scan thread panicked: {msg}")))
+            });
 
-    let inner_result = match join {
-        Ok(handle) => match handle.join() {
-            Ok(r) => r,
-            Err(_) => Err(Error::Scan("scan thread panicked".into())),
-        },
-        Err(e) => Err(Error::Scan(format!("cannot start scan thread: {e}"))),
-    };
+            if let Err(e) = inner_result {
+                {
+                    let mut rt = scan.runtime.write().unwrap_or_else(|p| p.into_inner());
+                    rt.status = ScanStatusWire::Failed;
+                    rt.failure = Some(e.to_string());
+                    rt.completed_at_unix = Some(crate::recovery::now_unix());
+                }
+                warn!(scan = %scan.scan_id, error = %e, "recovery scan failed");
+                emit_scan_progress(&window, &scan);
+            }
 
-    if let Err(e) = inner_result {
-        {
-            let mut rt = scan.runtime.write().unwrap_or_else(|p| p.into_inner());
-            rt.status = ScanStatusWire::Failed;
-            rt.failure = Some(e.to_string());
-            rt.completed_at_unix = Some(crate::recovery::now_unix());
-        }
-        warn!(scan = %scan.scan_id, error = %e, "recovery scan failed");
+            // Auto-persist a session on completion (cancelled scans keep
+            // their partial session too — it is honest, browsable data).
+            let status = scan.runtime_snapshot().status;
+            if matches!(
+                status,
+                ScanStatusWire::Completed | ScanStatusWire::Cancelled
+            ) {
+                if let Err(e) = crate::recovery::sessions::auto_save_session(&db_for_task, &scan) {
+                    warn!(scan = %scan.scan_id, error = %e, "session auto-save failed");
+                }
+                // Keep the USN quick-search index warm for scanned letter
+                // volumes.
+                if let ScanTarget::Volume { volume_path, .. } = &scan.meta.target {
+                    crate::ensure_usn_watcher(&app, volume_path);
+                }
+            }
+            registry_for_task.insert(scan.clone());
+            info!(scan = %scan.scan_id, ?status, "recovery scan finished");
+        });
+    if let Err(e) = spawn_result {
+        let mut rt = scan.runtime.write().unwrap_or_else(|p| p.into_inner());
+        rt.status = ScanStatusWire::Failed;
+        rt.failure = Some(format!("cannot start scan thread: {e}"));
+        rt.completed_at_unix = Some(crate::recovery::now_unix());
+        warn!(scan = %scan.scan_id, error = %e, "cannot spawn scan thread");
         emit_scan_progress(&window, &scan);
     }
-
-    // Auto-persist a session on completion (cancelled scans keep their
-    // partial session too — it is honest, browsable data).
-    let status = scan.runtime_snapshot().status;
-    if matches!(
-        status,
-        ScanStatusWire::Completed | ScanStatusWire::Cancelled
-    ) {
-        if let Err(e) = crate::recovery::sessions::auto_save_session(&db, &scan) {
-            warn!(scan = %scan.scan_id, error = %e, "session auto-save failed");
-        }
-        // Keep the USN quick-search index warm for scanned letter volumes.
-        if let ScanTarget::Volume { volume_path, .. } = &scan.meta.target {
-            crate::ensure_usn_watcher(&app, volume_path);
-        }
-    }
-    registry.insert(scan.clone());
-    info!(scan = %scan.scan_id, ?status, "recovery scan finished");
 }
 
 fn set_stage<R: tauri::Runtime>(
@@ -308,7 +329,11 @@ fn run_scan_inner<R: tauri::Runtime>(
     // Final counters + status.
     {
         let tree_guard = scan.tree.read().unwrap_or_else(|p| p.into_inner());
-        let t = tree_guard.as_ref().expect("tree set by finalize");
+        let Some(t) = tree_guard.as_ref() else {
+            // Defensive: finalize always publishes a tree before Ok —
+            // reaching here means a bug, not a crash.
+            return Err(Error::Scan("finalize did not publish a tree".into()));
+        };
         let deleted_count = scan.deleted.read().unwrap_or_else(|p| p.into_inner()).len() as u64;
         let mut rt = scan.runtime.write().unwrap_or_else(|p| p.into_inner());
         rt.files_found = t.file_count;
@@ -355,15 +380,27 @@ fn finalize_scan<R: tauri::Runtime>(
     match input {
         FinalizeInput::Mft(c) => {
             set_stage(scan, window, stage, 0.3);
+            // Consume the collected scan: the existing entries feed the
+            // tree builder directly (no full deep clone — the collector's
+            // Vec is moved), and the deleted map is built exactly once.
             let volume_id = c.volume_path.clone();
-            let tree = build_tree_with_user_rules(volume_id, c.existing.clone(), user_rules);
+            let record_size = c.record_size;
+            let total_records = c.total_records;
+            let skipped_errors = c.skipped_errors;
+            let CollectedScan {
+                existing,
+                deleted,
+                cluster_size,
+                ..
+            } = c;
+            let tree = build_tree_with_user_rules(volume_id, existing, user_rules);
 
             set_stage(scan, window, stage, 0.6);
             let deleted_map: HashMap<u64, crate::recovery::collect::DeletedEntry> =
-                c.deleted.iter().map(|d| (d.record_no, d.clone())).collect();
+                deleted.into_iter().map(|d| (d.record_no, d)).collect();
             let mut deleted_children: HashMap<u64, Vec<u64>> = HashMap::new();
             let mut lost: Vec<u64> = Vec::new();
-            for d in &c.deleted {
+            for d in deleted_map.values() {
                 let parent = d.parent_record_no;
                 if tree.nodes.contains_key(&parent) || deleted_map.contains_key(&parent) {
                     deleted_children
@@ -377,8 +414,13 @@ fn finalize_scan<R: tauri::Runtime>(
 
             // Recursive dir sizes for deleted directories.
             let mut dir_sizes: HashMap<u64, u64> = HashMap::new();
-            for d in c.deleted.iter().filter(|d| d.is_dir) {
-                deleted_dir_size(d.record_no, &deleted_children, &deleted_map, &mut dir_sizes);
+            let dir_ids: Vec<u64> = deleted_map
+                .values()
+                .filter(|d| d.is_dir)
+                .map(|d| d.record_no)
+                .collect();
+            for id in dir_ids {
+                deleted_dir_size(id, &deleted_children, &deleted_map, &mut dir_sizes);
             }
 
             // Confidence grading against the $Bitmap.
@@ -387,12 +429,12 @@ fn finalize_scan<R: tauri::Runtime>(
             let mut confidence = HashMap::new();
             match &bitmap {
                 Some(bm) => {
-                    for d in &c.deleted {
+                    for d in deleted_map.values() {
                         confidence.insert(d.record_no, grade_deleted(d, bm));
                     }
                 }
                 None => {
-                    for d in &c.deleted {
+                    for d in deleted_map.values() {
                         confidence
                             .insert(d.record_no, crate::recovery::deleted::Confidence::Unknown);
                     }
@@ -401,14 +443,14 @@ fn finalize_scan<R: tauri::Runtime>(
 
             {
                 let mut rt = scan.runtime.write().unwrap_or_else(|p| p.into_inner());
-                rt.errors = c.skipped_errors;
-                rt.bytes_scanned = c.total_records.saturating_mul(c.record_size as u64);
+                rt.errors = skipped_errors;
+                rt.bytes_scanned = total_records.saturating_mul(record_size as u64);
                 rt.files_found = tree.file_count;
                 rt.data_found_bytes = tree.total_bytes;
             }
 
             *scan.tree.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(tree));
-            *scan.deleted.write().unwrap_or_else(|p| p.into_inner()) = deleted_map;
+            *scan.deleted.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(deleted_map);
             *scan
                 .deleted_children
                 .write()
@@ -419,7 +461,7 @@ fn finalize_scan<R: tauri::Runtime>(
                 .write()
                 .unwrap_or_else(|p| p.into_inner()) = dir_sizes;
             *scan.confidence.write().unwrap_or_else(|p| p.into_inner()) = confidence;
-            *scan.cluster_size.write().unwrap_or_else(|p| p.into_inner()) = c.cluster_size;
+            *scan.cluster_size.write().unwrap_or_else(|p| p.into_inner()) = cluster_size;
             *scan.strategy.write().unwrap_or_else(|p| p.into_inner()) = Some(strategy);
             set_stage(scan, window, stage, 1.0);
             Ok(())
@@ -431,10 +473,15 @@ fn finalize_scan<R: tauri::Runtime>(
             } else {
                 entries.volume_path.clone()
             };
-            let tree = build_tree_with_user_rules(volume_id, entries.entries.clone(), user_rules);
+            let crate::scan::walk::MftEntries {
+                entries,
+                skipped_errors,
+                ..
+            } = entries;
+            let tree = build_tree_with_user_rules(volume_id, entries, user_rules);
             {
                 let mut rt = scan.runtime.write().unwrap_or_else(|p| p.into_inner());
-                rt.errors = entries.skipped_errors;
+                rt.errors = skipped_errors;
                 rt.files_found = tree.file_count;
                 rt.data_found_bytes = tree.total_bytes;
             }
@@ -480,6 +527,10 @@ fn make_progress_cb<R: tauri::Runtime>(
     }
 }
 
+/// Aggregate size of a deleted directory (recursive over deleted
+/// children). Cycle-safe: an in-progress sentinel (`u64::MAX`) is
+/// inserted *before* recursing, so a corrupt MFT with cyclic deleted
+/// parent chains (A→B→A) terminates instead of overflowing the stack.
 fn deleted_dir_size(
     id: u64,
     children: &HashMap<u64, Vec<u64>>,
@@ -489,6 +540,8 @@ fn deleted_dir_size(
     if let Some(v) = memo.get(&id) {
         return *v;
     }
+    // Sentinel: any re-entrant visit sees 0 and stops recursing.
+    memo.insert(id, 0);
     let mut total = 0u64;
     if let Some(kids) = children.get(&id) {
         for k in kids {

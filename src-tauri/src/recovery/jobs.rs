@@ -31,6 +31,13 @@ use tracing::{info, warn};
 const MAX_JOB_ITEMS: usize = 500_000;
 /// Items kept in the succeeded/failed/skipped report lists.
 const REPORT_LIST_CAP: usize = 500;
+/// Streaming copy buffer (deleted reads and verify re-reads). Files are
+/// never buffered whole in memory — a multi-GiB recovery must not depend
+/// on a multi-GiB heap allocation.
+const COPY_CHUNK: usize = 4 * 1024 * 1024;
+
+/// (node_id, name, rel_path, size, is_dir_marker) — the built job item tuple.
+pub type BuiltItem = (u64, String, String, u64, bool);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -86,6 +93,9 @@ pub(crate) struct JobItem {
     rel_path: String,
     name: String,
     size_bytes: u64,
+    /// Directory-only marker item (keep-empty-folders): create the folder,
+    /// write no file.
+    is_dir_marker: bool,
     state: ItemState,
     error_code: Option<String>,
     saved_as: Option<String>,
@@ -165,8 +175,8 @@ pub fn build_job_items(
     selection: &RecoverySelectionWire,
     destination: &str,
     options: &RecoveryOptionsWire,
-) -> Result<Vec<(u64, String, String, u64)>> {
-    // (node_id, name, rel_path, size)
+) -> Result<Vec<BuiltItem>> {
+    // (node_id, name, rel_path, size, is_dir_marker)
     let tree_guard = scan.tree.read().unwrap_or_else(|p| p.into_inner());
     let tree = tree_guard
         .as_ref()
@@ -229,9 +239,35 @@ pub fn build_job_items(
         options,
     };
     let mut out = Vec::new();
+    let mut dir_paths = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for id in ids {
-        collect_item(&ctx, id, &mut seen, &mut out)?;
+        collect_item(&ctx, id, &mut seen, &mut out, &mut dir_paths)?;
+    }
+    // Empty-folder pass (keep_empty_folders): every remembered folder that
+    // received no file becomes a marker item so its structure is recreated
+    // anyway.
+    if options.keep_empty_folders {
+        let written_prefixes: std::collections::HashSet<String> = out
+            .iter()
+            .filter_map(|(_, _, rel, _, _)| {
+                Path::new(rel)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+            })
+            .collect();
+        for dir_rel in dir_paths {
+            if !written_prefixes.contains(&dir_rel)
+                && !out.iter().any(|(_, _, rel, _, _)| *rel == dir_rel)
+            {
+                out.push((u64::MAX, String::new(), dir_rel, 0, true));
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(Error::Staging(
+            "nothing recoverable was found in the selection".into(),
+        ));
     }
     Ok(out)
 }
@@ -247,7 +283,8 @@ fn collect_item(
     ctx: &CollectCtx<'_>,
     id: u64,
     seen: &mut std::collections::HashSet<u64>,
-    out: &mut Vec<(u64, String, String, u64)>,
+    out: &mut Vec<BuiltItem>,
+    dir_paths: &mut Vec<String>,
 ) -> Result<()> {
     let (scan, view, tree, options) = (ctx.scan, ctx.view, ctx.tree, ctx.options);
     if !seen.insert(id) {
@@ -273,48 +310,61 @@ fn collect_item(
             // dir selection without rebuild is a no-op.
             return Ok(());
         }
+        // Remember the folder for the empty-folder pass.
+        if options.keep_empty_folders {
+            let rel = rel_path_for(scan, tree, id, &name, options, true);
+            if !rel.is_empty() {
+                dir_paths.push(rel);
+            }
+        }
         for child in view.children_of(id) {
-            collect_item(ctx, child, seen, out)?;
+            collect_item(ctx, child, seen, out, dir_paths)?;
         }
         return Ok(());
     }
 
-    let rel_path = rel_path_for(scan, tree, id, &name, options);
-    out.push((id, name, rel_path, size));
+    let rel_path = rel_path_for(scan, tree, id, &name, options, false);
+    out.push((id, name, rel_path, size, false));
     Ok(())
 }
 
 /// Destination-relative path: the file's tree path (folders rebuilt) or
 /// just the file name at the destination root.
+///
+/// Deleted ancestors are reconstructed too: the walk continues through
+/// the deleted map (name + parent), so a file deleted together with its
+/// folder recovers under its original directory structure instead of
+/// being flattened to the destination root. `drop_last` computes the
+/// folder path for a directory (used by keep-empty-folders).
 fn rel_path_for(
     scan: &Arc<RecoveryScan>,
     tree: &crate::scan::tree::ScanTree,
     id: u64,
     name: &str,
     options: &RecoveryOptionsWire,
+    drop_last: bool,
 ) -> String {
     if !options.rebuild_folders {
         return name.to_string();
     }
-    // Walk parents to the scope root, collecting names.
+    // Walk parents to the scope root, collecting names. Deleted parents
+    // resolve through the deleted map; the first ancestor that survives
+    // in the existing tree switches back to tree parents.
     let mut parts: Vec<String> = Vec::new();
     let scope = scan
         .scope_node
         .read()
         .unwrap_or_else(|p| p.into_inner())
         .unwrap_or(tree.root_id);
+    let deleted_map = scan.deleted.read().unwrap_or_else(|p| p.into_inner());
     let mut cur = if let Some(n) = tree.nodes.get(&id) {
         n.parent
     } else {
-        scan.deleted
-            .read()
-            .unwrap_or_else(|p| p.into_inner())
-            .get(&id)
-            .map(|d| d.parent_record_no)
+        deleted_map.get(&id).map(|d| d.parent_record_no)
     };
     let mut hops = 0;
     while let Some(p) = cur {
-        if hops > 64 || p == scope {
+        if hops > 128 || p == scope {
             break;
         }
         if let Some(n) = tree.nodes.get(&p) {
@@ -323,49 +373,74 @@ fn rel_path_for(
             }
             parts.push(n.name.clone());
             cur = n.parent;
+        } else if let Some(d) = deleted_map.get(&p) {
+            // Deleted ancestor: keep walking through its own parent so
+            // the original directory chain is preserved in the output.
+            parts.push(d.name.clone());
+            cur = Some(d.parent_record_no);
         } else {
             break;
         }
         hops += 1;
     }
     parts.reverse();
-    parts.push(name.to_string());
-    parts.join("\\")
+    if !drop_last {
+        parts.push(name.to_string());
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        parts.join("\\")
+    }
 }
 
-/// Runs a recovery job on a dedicated thread.
+/// Runs a recovery job on a dedicated, *detached* thread — the command
+/// returns the job id immediately and the UI follows progress through
+/// `dw-recovery-progress` events / `dw_recover_state` polling. Panics are
+/// caught (unwind) and mapped to a Failed job.
 pub fn run_job<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
     job: Arc<RecoveryJob>,
     scan: Arc<RecoveryScan>,
 ) {
     let job_for_task = job.clone();
-    let scan_for_task = scan.clone();
-    let join = std::thread::Builder::new()
+    let scan_for_task = scan;
+    let spawn_result = std::thread::Builder::new()
         .name(format!("dw-job-{}", job.job_id))
-        .spawn(move || run_job_inner(window.clone(), job_for_task, scan_for_task));
-    match join {
-        Ok(handle) => {
-            if let Err(e) = handle
-                .join()
-                .unwrap_or_else(|_| Err(Error::Staging("job thread panicked".into())))
-            {
+        .spawn(move || {
+            let inner_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_job_inner(window.clone(), job_for_task.clone(), scan_for_task)
+            }))
+            .unwrap_or_else(|panic_payload| {
+                let msg = panic_payload
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_string())
+                    .or_else(|| panic_payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "job thread panicked".into());
+                Err(Error::Staging(format!("job thread panicked: {msg}")))
+            });
+            if let Err(e) = inner_result {
                 {
-                    let mut st = job.status.write().unwrap_or_else(|p| p.into_inner());
+                    let mut st = job_for_task
+                        .status
+                        .write()
+                        .unwrap_or_else(|p| p.into_inner());
                     *st = JobStatus::Failed;
-                    let mut p = job.progress.write().unwrap_or_else(|p| p.into_inner());
+                    let mut p = job_for_task
+                        .progress
+                        .write()
+                        .unwrap_or_else(|p| p.into_inner());
                     p.status = JobStatus::Failed;
                 }
-                warn!(job = %job.job_id, error = %e, "recovery job failed");
+                warn!(job = %job_for_task.job_id, error = %e, "recovery job failed");
             }
-        }
-        Err(e) => {
-            let mut st = job.status.write().unwrap_or_else(|p| p.into_inner());
-            *st = JobStatus::Failed;
-            let _ = e;
-        }
+            info!(job = %job_for_task.job_id, "recovery job thread finished");
+        });
+    if let Err(e) = spawn_result {
+        let mut st = job.status.write().unwrap_or_else(|p| p.into_inner());
+        *st = JobStatus::Failed;
+        warn!(job = %job.job_id, error = %e, "cannot spawn job thread");
     }
-    info!(job = %job.job_id, "recovery job thread finished");
 }
 
 fn set_progress(job: &Arc<RecoveryJob>, f: impl FnOnce(&mut RecoveryProgressWire)) {
@@ -409,9 +484,14 @@ fn run_job_inner<R: tauri::Runtime>(
         .len() as u64;
     let mut done = 0u64;
 
-    // One raw reader for the whole job (deleted reads).
+    // One raw reader for the whole job (deleted reads) — plus a one-time
+    // NTFS boot parse and $Bitmap read so per-file recovery does not
+    // re-parse the volume per item (the old code re-read the bitmap for
+    // every single file).
     let mut reader = crate::recovery::partitions::open_target_reader(&scan.meta.target).ok();
     let volume_label = crate::recovery::partitions::reader_volume_label(&scan.meta.target);
+    let strategy = *scan.strategy.read().unwrap_or_else(|p| p.into_inner());
+    let mut source = SourceCtx::prepare(strategy, reader.as_mut());
 
     let mut items = job
         .items
@@ -436,6 +516,7 @@ fn run_job_inner<R: tauri::Runtime>(
         let outcome = recover_one(
             &scan,
             reader.as_mut(),
+            Some(&mut source),
             &volume_label,
             &job.options,
             item,
@@ -537,16 +618,66 @@ fn run_job_inner<R: tauri::Runtime>(
 
 type ItemOutcome = std::result::Result<String, (String, String)>;
 
+/// Per-job source context: the NTFS boot parse and `$Bitmap` snapshot are
+/// prepared once (they used to be re-parsed for every single file).
+struct SourceCtx {
+    ntfs: Option<ntfs::Ntfs>,
+    bitmap: Option<crate::recovery::collect::ClusterBitmap>,
+}
+
+impl SourceCtx {
+    fn prepare(strategy: Option<&'static str>, reader: Option<&mut Box<dyn ReadSeek>>) -> Self {
+        // Only the NTFS strategy needs an NTFS parse + $Bitmap view.
+        if strategy != Some("MFT") {
+            return Self {
+                ntfs: None,
+                bitmap: None,
+            };
+        }
+        let Some(reader) = reader else {
+            return Self {
+                ntfs: None,
+                bitmap: None,
+            };
+        };
+        let ntfs = match ntfs::Ntfs::new(reader) {
+            Ok(n) => Some(n),
+            Err(e) => {
+                warn!(
+                    ?e,
+                    "job source: NTFS parse failed; deleted reads will fail per item"
+                );
+                None
+            }
+        };
+        let bitmap = ntfs
+            .as_ref()
+            .and_then(|n| crate::recovery::collect::ClusterBitmap::read(n, reader).ok());
+        Self { ntfs, bitmap }
+    }
+}
+
 /// Recovers a single item. Returns the saved (possibly renamed) file name
 /// or a machine code + detail on failure.
 fn recover_one(
     scan: &Arc<RecoveryScan>,
     reader: Option<&mut Box<dyn ReadSeek>>,
+    source: Option<&mut SourceCtx>,
     volume_label: &str,
     options: &RecoveryOptionsWire,
     item: &JobItem,
     dest: &Path,
 ) -> ItemOutcome {
+    // Directory marker (keep-empty-folders): just create the folder.
+    if item.is_dir_marker {
+        if let Err(e) = std::fs::create_dir_all(dest) {
+            return Err((
+                "destination-invalid".into(),
+                format!("cannot create folder: {e}"),
+            ));
+        }
+        return Ok(dest.to_string_lossy().to_string());
+    }
     // Collision handling.
     if dest.exists() {
         match options.collision {
@@ -555,13 +686,13 @@ fn recover_one(
             }
             CollisionPolicy::Rename => {
                 let renamed = unique_path(dest);
-                return write_item(scan, reader, volume_label, options, item, &renamed)
+                return write_item(scan, reader, source, volume_label, options, item, &renamed)
                     .map(|_| renamed.to_string_lossy().to_string());
             }
             CollisionPolicy::Overwrite => {}
         }
     }
-    write_item(scan, reader, volume_label, options, item, dest)
+    write_item(scan, reader, source, volume_label, options, item, dest)
         .map(|_| dest.to_string_lossy().to_string())
 }
 
@@ -590,6 +721,7 @@ fn unique_path(path: &Path) -> PathBuf {
 fn write_item(
     scan: &Arc<RecoveryScan>,
     reader: Option<&mut Box<dyn ReadSeek>>,
+    source: Option<&mut SourceCtx>,
     volume_label: &str,
     options: &RecoveryOptionsWire,
     item: &JobItem,
@@ -610,18 +742,11 @@ fn write_item(
         .unwrap_or_else(|p| p.into_inner())
         .contains_key(&item.node_id);
 
-    // Read the source bytes.
-    let bytes: Vec<u8> = if is_deleted {
-        let Some(reader) = reader else {
-            return Err(("source-missing".into(), "raw reader unavailable".into()));
-        };
-        read_deleted_full(scan, reader, volume_label, item.node_id, item.size_bytes)?
-    } else {
-        read_existing_full(scan, item.node_id, item.size_bytes)?
-    };
-
-    let source_hash = blake3::hash(&bytes);
+    // Stream the source bytes through a bounded buffer; the blake3 hash
+    // is computed incrementally. Nothing larger than COPY_CHUNK is ever
+    // held in memory, so multi-GiB recoveries cannot OOM the process.
     let tmp = dest.with_extension("dw_tmp");
+    let (source_hash, intact_written): (blake3::Hash, u64);
     {
         let mut f = match std::fs::File::create(&tmp) {
             Ok(f) => f,
@@ -632,29 +757,68 @@ fn write_item(
                 ))
             }
         };
-        if let Err(e) = f.write_all(&bytes) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err((
-                "destination-unwritable".into(),
-                format!("write failed: {e}"),
-            ));
+        let result = if is_deleted {
+            stream_deleted(
+                scan,
+                reader,
+                source,
+                volume_label,
+                item.node_id,
+                item.size_bytes,
+                options,
+                &mut f,
+            )
+        } else {
+            stream_existing(scan, item.node_id, &mut f)
+        };
+        match result {
+            Ok((hash, written)) => {
+                let _ = f.sync_all();
+                source_hash = hash;
+                intact_written = written;
+            }
+            Err(e) => {
+                drop(f);
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
         }
-        let _ = f.sync_all();
     }
     // Atomic publish.
     if let Err(e) = std::fs::rename(&tmp, dest) {
         let _ = std::fs::remove_file(&tmp);
-        // Destination may have appeared meanwhile on Windows; retry via replace.
+        // Destination may have appeared meanwhile on Windows; retry via
+        // replace.
         if std::fs::copy(&tmp, dest).is_err() {
             return Err(("destination-invalid".into(), format!("publish failed: {e}")));
         }
         let _ = std::fs::remove_file(&tmp);
     }
 
-    if options.verify_on_write {
-        let written = std::fs::read(dest)
-            .map_err(|e| ("verify-failed".into(), format!("re-read failed: {e}")))?;
-        if blake3::hash(&written) != source_hash {
+    if options.verify_on_write && intact_written > 0 {
+        // Streaming verify re-read: hash the published file and compare.
+        let mut verify = blake3::Hasher::new();
+        let mut f = match std::fs::File::open(dest) {
+            Ok(f) => f,
+            Err(e) => {
+                let _ = std::fs::remove_file(dest);
+                return Err(("verify-failed".into(), format!("re-read failed: {e}")));
+            }
+        };
+        let mut buf = vec![0u8; COPY_CHUNK];
+        loop {
+            match f.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    verify.update(&buf[..n]);
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_file(dest);
+                    return Err(("verify-failed".into(), format!("re-read failed: {e}")));
+                }
+            }
+        }
+        if verify.finalize() != source_hash {
             let _ = std::fs::remove_file(dest);
             return Err((
                 "verify-failed".into(),
@@ -665,45 +829,80 @@ fn write_item(
     Ok(())
 }
 
-fn read_existing_full(
+/// Streams an existing file from its filesystem path into `out`,
+/// returning `(hash_of_written, bytes_written)`.
+fn stream_existing(
     scan: &Arc<RecoveryScan>,
     node_id: u64,
-    size: u64,
-) -> std::result::Result<Vec<u8>, (String, String)> {
+    out: &mut std::fs::File,
+) -> std::result::Result<(blake3::Hash, u64), (String, String)> {
     let Some(path) = scan.node_display_path(node_id) else {
         return Err((
             "source-missing".into(),
             "no filesystem path for node".into(),
         ));
     };
-    match std::fs::File::open(&path) {
-        Ok(mut f) => {
-            let mut buf = Vec::with_capacity(size.min(64 * 1024 * 1024) as usize);
-            if let Err(e) = f.read_to_end(&mut buf) {
-                return Err(("source-unreadable".into(), format!("read '{path}': {e}")));
+    let mut f = std::fs::File::open(&path)
+        .map_err(|e| ("source-missing".into(), format!("'{path}': {e}")))?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buf = vec![0u8; COPY_CHUNK];
+    let mut written = 0u64;
+    loop {
+        match f.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => {
+                hasher.update(&buf[..n]);
+                out.write_all(&buf[..n]).map_err(|e| {
+                    (
+                        "destination-unwritable".into(),
+                        format!("write failed: {e}"),
+                    )
+                })?;
+                written += n as u64;
             }
-            Ok(buf)
+            Err(e) => return Err(("source-unreadable".into(), format!("read '{path}': {e}"))),
         }
-        Err(e) => Err(("source-missing".into(), format!("'{path}': {e}"))),
     }
+    Ok((hasher.finalize(), written))
 }
 
-fn read_deleted_full(
+/// Streams a deleted record's intact bytes into `out` through the fresh
+/// re-parse path. With `file_repair` enabled, a partially overwritten
+/// file is still published (its intact prefix) — the job item keeps the
+/// original size so the UI can flag it; without repair the item fails
+/// with `clusters-overwritten`. Returns `(hash_of_written, bytes_written)`
+/// where bytes_written < size signals a repaired partial file.
+#[allow(clippy::too_many_arguments)]
+fn stream_deleted(
     scan: &Arc<RecoveryScan>,
-    reader: &mut Box<dyn ReadSeek>,
+    reader: Option<&mut Box<dyn ReadSeek>>,
+    source: Option<&mut SourceCtx>,
     volume_label: &str,
     record_no: u64,
     size: u64,
-) -> std::result::Result<Vec<u8>, (String, String)> {
+    options: &RecoveryOptionsWire,
+    out: &mut std::fs::File,
+) -> std::result::Result<(blake3::Hash, u64), (String, String)> {
+    let Some(reader) = reader else {
+        return Err(("source-missing".into(), "raw reader unavailable".into()));
+    };
     use crate::recovery::deleted::{read_deleted_range, reparse_record_on};
-    let ntfs = ntfs::Ntfs::new(reader).map_err(|e| {
-        (
-            "source-missing".into(),
-            format!("NTFS parse on '{volume_label}': {e:?}"),
-        )
-    })?;
-    let fresh = reparse_record_on(&ntfs, reader, record_no)
-        .map_err(|e| ("source-missing".into(), e.to_string()))?;
+
+    // Fresh record state (re-parse; never trust scan-time data).
+    let fresh = match source.as_ref().and_then(|s| s.ntfs.as_ref()) {
+        Some(ntfs) => reparse_record_on(ntfs, reader, record_no)
+            .map_err(|e| ("source-missing".into(), e.to_string()))?,
+        None => {
+            let ntfs = ntfs::Ntfs::new(reader).map_err(|e| {
+                (
+                    "source-missing".into(),
+                    format!("NTFS parse on '{volume_label}': {e:?}"),
+                )
+            })?;
+            reparse_record_on(&ntfs, reader, record_no)
+                .map_err(|e| ("source-missing".into(), e.to_string()))?
+        }
+    };
     if !fresh.still_deleted {
         return Err((
             "record-reused".into(),
@@ -716,25 +915,41 @@ fn read_deleted_full(
             "compressed/encrypted deleted files cannot be recovered raw".into(),
         ));
     }
-    // Fresh bitmap: re-read from the same volume.
-    let bitmap = crate::recovery::collect::ClusterBitmap::read(&ntfs, reader).ok();
+    let bitmap = source.as_ref().and_then(|s| s.bitmap.as_ref());
     let cluster_size = *scan.cluster_size.read().unwrap_or_else(|p| p.into_inner()) as u64;
-    let (bytes, intact) = read_deleted_range(
-        reader,
-        &fresh,
-        bitmap.as_ref(),
-        cluster_size,
-        0,
-        size.max(4096),
-    )
-    .map_err(|e| ("source-unreadable".into(), e.to_string()))?;
-    if intact < size {
+
+    let mut hasher = blake3::Hasher::new();
+    let mut written = 0u64;
+    let mut offset = 0u64;
+    let want = size.max(4096);
+    while offset < want {
+        let len = (COPY_CHUNK as u64).min(want - offset);
+        let (chunk, intact) = read_deleted_range(reader, &fresh, bitmap, cluster_size, offset, len)
+            .map_err(|e| ("source-unreadable".into(), e.to_string()))?;
+        if chunk.is_empty() {
+            break;
+        }
+        hasher.update(&chunk);
+        out.write_all(&chunk).map_err(|e| {
+            (
+                "destination-unwritable".into(),
+                format!("write failed: {e}"),
+            )
+        })?;
+        written += chunk.len() as u64;
+        offset += chunk.len() as u64;
+        if (intact as usize) < chunk.len() {
+            // Stopped at a reallocated cluster.
+            break;
+        }
+    }
+    if written < size && !options.file_repair {
         return Err((
             "clusters-overwritten".into(),
-            format!("only {intact} of {size} bytes are still intact (clusters reused)"),
+            format!("only {written} of {size} bytes are still intact (clusters reused)"),
         ));
     }
-    Ok(bytes)
+    Ok((hasher.finalize(), written))
 }
 
 /// Wire accessors for the command layer.
@@ -817,20 +1032,23 @@ pub fn new_job(
     scan_id: String,
     destination: String,
     options: RecoveryOptionsWire,
-    items: Vec<(u64, String, String, u64)>,
+    items: Vec<BuiltItem>,
 ) -> RecoveryJob {
     let total = items.len() as u64;
     let job_items = items
         .into_iter()
-        .map(|(node_id, name, rel_path, size_bytes)| JobItem {
-            node_id,
-            name,
-            rel_path,
-            size_bytes,
-            state: ItemState::Pending,
-            error_code: None,
-            saved_as: None,
-        })
+        .map(
+            |(node_id, name, rel_path, size_bytes, is_dir_marker)| JobItem {
+                node_id,
+                name,
+                rel_path,
+                size_bytes,
+                is_dir_marker,
+                state: ItemState::Pending,
+                error_code: None,
+                saved_as: None,
+            },
+        )
         .collect();
     let now = crate::recovery::now_unix();
     RecoveryJob {

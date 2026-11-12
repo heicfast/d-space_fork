@@ -267,6 +267,7 @@ pub struct DecodedSession {
     pub data_found_bytes: u64,
     pub deleted_found: u64,
     pub completed: bool,
+    pub cluster_size: u32,
 }
 
 pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
@@ -452,7 +453,6 @@ pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
     let data_found_bytes = c.u64()?;
     let deleted_found = c.u64()?;
     let completed = c.u32()? == 1;
-    let _ = cluster_size;
 
     let tree = crate::scan::tree::ScanTree {
         volume_id: meta.volume_id.clone(),
@@ -478,6 +478,7 @@ pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
         data_found_bytes,
         deleted_found,
         completed,
+        cluster_size,
     })
 }
 
@@ -601,13 +602,17 @@ pub fn load_session(
         std::sync::Arc::new(crate::recovery::collect::RunFlags::default()),
     ));
     *scan.tree.write().unwrap_or_else(|p| p.into_inner()) = Some(Arc::new(decoded.tree));
-    *scan.deleted.write().unwrap_or_else(|p| p.into_inner()) = decoded.deleted;
+    *scan.deleted.write().unwrap_or_else(|p| p.into_inner()) = Arc::new(decoded.deleted);
     *scan.confidence.write().unwrap_or_else(|p| p.into_inner()) = decoded.confidence;
     *scan
         .deleted_dir_sizes
         .write()
         .unwrap_or_else(|p| p.into_inner()) = decoded.dir_sizes;
     *scan.lost_path.write().unwrap_or_else(|p| p.into_inner()) = decoded.lost;
+    // Cluster size drives deleted-file read-back math (runs are cluster
+    // indexed) — a restored session without it silently produced empty
+    // deleted previews and failed recoveries.
+    *scan.cluster_size.write().unwrap_or_else(|p| p.into_inner()) = decoded.cluster_size;
     *scan.strategy.write().unwrap_or_else(|p| p.into_inner()) = Some("session");
     {
         let mut rt = scan.runtime.write().unwrap_or_else(|p| p.into_inner());
@@ -732,7 +737,7 @@ mod tests {
                 encrypted: false,
             },
         );
-        *scan.deleted.write().unwrap() = deleted;
+        *scan.deleted.write().unwrap() = std::sync::Arc::new(deleted);
         let mut confidence = HashMap::new();
         confidence.insert(900, Confidence::Excellent);
         *scan.confidence.write().unwrap() = confidence;

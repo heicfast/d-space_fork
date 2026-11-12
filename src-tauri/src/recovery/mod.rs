@@ -301,8 +301,10 @@ pub struct RecoveryScan {
     pub runtime: RwLock<ScanRuntime>,
     /// Existing-file tree (set once the build stage finishes).
     pub tree: RwLock<Option<Arc<ScanTree>>>,
-    /// Deleted entries by record number.
-    pub deleted: RwLock<HashMap<u64, DeletedEntry>>,
+    /// Deleted entries by record number. The whole map is published once
+    /// at finalize time inside an `Arc` so per-query views (ScanView) can
+    /// share it without deep-cloning every entry.
+    pub deleted: RwLock<Arc<HashMap<u64, DeletedEntry>>>,
     /// Deleted confidence grades by record number.
     pub confidence: RwLock<HashMap<u64, Confidence>>,
     /// Parent → deleted child ids (covers both existing and deleted parents).
@@ -313,7 +315,7 @@ pub struct RecoveryScan {
     pub deleted_dir_sizes: RwLock<HashMap<u64, u64>>,
     /// Node the path scope resolved to (None = whole volume).
     pub scope_node: RwLock<Option<u64>>,
-    /// Scan strategy actually used ("MFT" | "fallback").
+    /// Scan strategy actually used ("MFT" | "FAT" | "fallback" ...).
     pub strategy: RwLock<Option<&'static str>>,
     /// Cluster size (0 when unknown / fallback scans).
     pub cluster_size: RwLock<u32>,
@@ -327,7 +329,7 @@ impl RecoveryScan {
             flags,
             runtime: RwLock::new(ScanRuntime::default()),
             tree: RwLock::new(None),
-            deleted: RwLock::new(HashMap::new()),
+            deleted: RwLock::new(Arc::new(HashMap::new())),
             confidence: RwLock::new(HashMap::new()),
             deleted_children: RwLock::new(HashMap::new()),
             lost_path: RwLock::new(Vec::new()),
@@ -420,12 +422,43 @@ impl ScanRegistry {
         format!("s{ts}-{n}")
     }
 
+    /// Monotonic sequence number of a minted id (`s<ts>-<n>`). Ids minted
+    /// later always compare greater, unlike lexicographic order where
+    /// `"s9" > "s10"` (which used to evict the wrong scan).
+    fn id_seq(id: &str) -> u64 {
+        id.rsplit('-')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0)
+    }
+
     pub fn insert(&self, scan: Arc<RecoveryScan>) {
         let mut map = self.scans.write().unwrap_or_else(|p| p.into_inner());
-        // Bound the registry: keep the 8 most recent scans.
+        // Bound the registry: keep the 8 most recent scans. Evict the
+        // oldest by mint sequence, never the lexicographic minimum.
         if map.len() >= 8 {
-            if let Some(oldest) = map.iter().min_by_key(|(k, _)| *k).map(|(k, _)| k.clone()) {
-                map.remove(&oldest);
+            if let Some(oldest) = map
+                .iter()
+                .min_by_key(|(k, _)| Self::id_seq(k))
+                .map(|(k, _)| k.clone())
+            {
+                // Never evict a scan that is still running.
+                let still_active = map
+                    .get(&oldest)
+                    .map(|s| {
+                        matches!(
+                            s.runtime_snapshot().status,
+                            ScanStatusWire::Starting
+                                | ScanStatusWire::Running
+                                | ScanStatusWire::Paused
+                                | ScanStatusWire::Pausing
+                                | ScanStatusWire::Resuming
+                        )
+                    })
+                    .unwrap_or(false);
+                if !still_active {
+                    map.remove(&oldest);
+                }
             }
         }
         map.insert(scan.scan_id.clone(), scan);
@@ -575,11 +608,34 @@ impl JobRegistry {
         format!("j{ts}-{n}")
     }
 
+    fn id_seq(id: &str) -> u64 {
+        id.rsplit('-')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0)
+    }
+
     pub fn insert(&self, job: Arc<jobs::RecoveryJob>) {
         let mut map = self.jobs.write().unwrap_or_else(|p| p.into_inner());
         if map.len() >= 8 {
-            if let Some(oldest) = map.iter().min_by_key(|(k, _)| *k).map(|(k, _)| k.clone()) {
-                map.remove(&oldest);
+            if let Some(oldest) = map
+                .iter()
+                .min_by_key(|(k, _)| Self::id_seq(k))
+                .map(|(k, _)| k.clone())
+            {
+                // Never evict a job that is still running.
+                let still_active = map
+                    .get(&oldest)
+                    .map(|j| {
+                        matches!(
+                            *j.status.read().unwrap_or_else(|p| p.into_inner()),
+                            jobs::JobStatus::Validating | jobs::JobStatus::Running
+                        )
+                    })
+                    .unwrap_or(false);
+                if !still_active {
+                    map.remove(&oldest);
+                }
             }
         }
         map.insert(job.job_id.clone(), job);

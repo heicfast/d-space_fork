@@ -314,9 +314,37 @@ fn init_tracing() {
         .try_init();
 }
 
+/// Installs a panic hook that logs every panic (message + location) to
+/// the tracing sink before the default handler runs. Worker threads wrap
+/// their bodies in `catch_unwind`, so a panic surfaces as a Failed scan /
+/// job with a log trail instead of a silent process death.
+fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown".into());
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".into());
+        tracing::error!(
+            %location,
+            message = %message,
+            thread = std::thread::current().name().unwrap_or("<unnamed>"),
+            "panic caught"
+        );
+        default(info);
+    }));
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_tracing();
+    install_panic_hook();
     info!(version = env!("CARGO_PKG_VERSION"), "DiskWizard starting");
 
     let db_state = match open_db() {
