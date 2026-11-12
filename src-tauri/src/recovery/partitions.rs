@@ -674,7 +674,7 @@ mod tests {
         ]);
         e[32..40].copy_from_slice(&2048u64.to_le_bytes());
         e[40..48].copy_from_slice(&4096u64.to_le_bytes());
-        e[56..58].copy_from_slice(&0x4100u16.to_le_bytes()); // 'A'
+        e[56..58].copy_from_slice(&0x0041u16.to_le_bytes()); // 'A' (UTF-16LE)
         let parsed = parse_gpt_entry(&e).unwrap();
         assert_eq!(parsed.first_lba, 2048);
         assert_eq!(parsed.last_lba, 4096);

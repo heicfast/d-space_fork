@@ -297,14 +297,8 @@ pub fn read_smart_sector(_physical_drive: u32) -> Result<Vec<u8>> {
 /// Full health probe for a device id ("dev:C" → resolve to physical drive
 /// by matching the volume's disk number).
 pub fn disk_health(device_id: &str) -> Result<DiskHealthWire> {
-    let letter = device_id
-        .trim_start_matches("dev:")
-        .trim_start_matches("vol:")
-        .chars()
-        .next()
-        .filter(|c| c.is_ascii_alphabetic())
-        .ok_or_else(|| Error::Volume(format!("invalid device id '{device_id}'")))?;
-    let physical = physical_drive_of_volume(letter.to_ascii_uppercase())?;
+    let letter = crate::recovery::device_letter(device_id)?;
+    let physical = physical_drive_of_volume(letter)?;
 
     let sector = read_smart_sector(physical)?;
     let attrs = parse_smart_attributes(&sector);
@@ -424,13 +418,13 @@ mod tests {
         s[12 + 3] = 100;
         s[12 + 4] = 100;
         s[12 + 5] = 4;
-        // Attribute 9: power-on hours, raw 8760
+        // Attribute 9: power-on hours, raw 8760 (0x2238)
         s[24] = 9;
         s[24 + 3] = 90;
         s[24 + 4] = 90;
-        s[24 + 5] = 0x28;
-        s[24 + 6] = 0x22; // 8760 = 0x2230
-                          // Attribute 194: temperature 42°C
+        s[24 + 5] = 0x38;
+        s[24 + 6] = 0x22;
+        // Attribute 194: temperature 42°C
         s[36] = 194;
         s[36 + 3] = 66;
         s[36 + 4] = 60;

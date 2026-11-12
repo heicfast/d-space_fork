@@ -67,7 +67,10 @@ impl FileCategory {
 
 /// Extension → category (without the leading dot, lowercase).
 pub fn category_of(extension: &str) -> FileCategory {
-    match extension {
+    // Normalize: callers usually pass through `extension_of` (already
+    // lowercased), but the function must stay correct for any casing.
+    let extension = extension.to_ascii_lowercase();
+    match extension.as_str() {
         "jpg" | "jpeg" | "png" | "gif" | "bmp" | "tif" | "tiff" | "webp" | "heic" | "heif"
         | "svg" | "ico" | "raw" | "cr2" | "cr3" | "nef" | "arw" | "dng" | "orf" | "rw2" | "psd"
         | "ai" | "eps" => FileCategory::Graphics,

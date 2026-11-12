@@ -456,8 +456,21 @@ mod tests {
             data: vec![0x00, 0x00],
             total_clusters: 16,
         };
-        let e = deleted_with_runs(vec![(Some(0), 4), (Some(100), 4)]);
+        let e = deleted_with_runs(vec![(Some(0), 4), (Some(4), 4)]);
         assert!((bm.free_fraction(&e) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn free_fraction_out_of_range_run_is_conservative() {
+        // A run whose LCN lies beyond the volume's cluster count is
+        // unverifiable (corrupt or stale run list); it must count as
+        // NOT free so recovery confidence never overpromises.
+        let bm = ClusterBitmap {
+            data: vec![0x00, 0x00],
+            total_clusters: 16,
+        };
+        let e = deleted_with_runs(vec![(Some(0), 4), (Some(100), 4)]);
+        assert!((bm.free_fraction(&e) - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]

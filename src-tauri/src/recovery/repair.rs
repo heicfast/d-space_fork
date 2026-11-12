@@ -421,14 +421,7 @@ pub fn undo_repairs(device_id: &str, log: &RepairUndoLog) -> Result<u32> {
 }
 
 fn volume_letter_of(device_id: &str) -> Result<char> {
-    let letter = device_id
-        .trim_start_matches("dev:")
-        .trim_start_matches("vol:")
-        .chars()
-        .next()
-        .filter(|c| c.is_ascii_alphabetic())
-        .ok_or_else(|| Error::Volume(format!("invalid device id '{device_id}'")))?;
-    Ok(letter.to_ascii_uppercase())
+    crate::recovery::device_letter(device_id)
 }
 
 fn is_system_volume(letter: char) -> bool {
@@ -498,7 +491,12 @@ mod tests {
     #[test]
     fn invalid_device_rejected() {
         assert!(volume_letter_of("garbage").is_err());
+        assert!(volume_letter_of("").is_err());
+        assert!(volume_letter_of("C:\\").is_err());
+        assert!(volume_letter_of("vol:XY").is_err());
         assert_eq!(volume_letter_of("vol:C").unwrap(), 'C');
         assert_eq!(volume_letter_of("dev:c").unwrap(), 'C');
+        assert_eq!(volume_letter_of("E:").unwrap(), 'E');
+        assert_eq!(volume_letter_of("f").unwrap(), 'F');
     }
 }

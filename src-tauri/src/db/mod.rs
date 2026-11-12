@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// SQLite veri modeli — Master mimari Bölüm 14.
+// SQLite data model — Master architecture, chapter 14.
 //
-// Konum: %LOCALAPPDATA%\DiskWizard\db\diskwizard.sqlite
+// Location: %LOCALAPPDATA%\DiskWizard\db\diskwizard.sqlite
 // Mode: WAL, busy_timeout=5000ms, synchronous=NORMAL, foreign_keys=ON.
 //
-// Migration: rusqlite_migration crate, forward-only. Migration dosyaları
-// `src-tauri/src/db/migrations/NNNN_<ad>.sql` — derleme sırasında
-// `include_str!` ile binary'ye gömülür (Bölüm 14.3 fixture korunur).
+// Migrations: rusqlite_migration crate, forward-only. Migration files live
+// in `src-tauri/src/db/migrations/NNNN_<name>.sql` and are embedded into
+// the binary at compile time via `include_str!` (chapter 14.3 fixtures
+// preserved).
 //
-// Tablolar (Bölüm 8.5, 12.5, 6.5.2): schema_meta, settings, snapshots,
+// Tables (chapters 8.5, 12.5, 6.5.2): schema_meta, settings, snapshots,
 // snapshot_entries, staging_items, staging_wal, permanent_deletes_forensic,
-// ml_scores.
+// ml_scores, user_rules, usn_index, usn_watermark, recovery_sessions.
 
 use crate::error::{Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -25,11 +26,11 @@ use tracing::{debug, info};
 pub const SCHEMA_VERSION: u32 = 4;
 pub const DB_FILENAME: &str = "diskwizard.sqlite";
 
-/// `%LOCALAPPDATA%\DiskWizard\db\diskwizard.sqlite` — Windows.
-/// Diğer platformlarda `dirs::data_local_dir()` döndüğü değer.
+/// `%LOCALAPPDATA%\DiskWizard\db\diskwizard.sqlite` on Windows; other
+/// platforms use whatever `dirs::data_local_dir()` resolves to.
 pub fn db_path() -> Result<PathBuf> {
-    let base =
-        dirs::data_local_dir().ok_or_else(|| Error::Db("data_local_dir bulunamadı".into()))?;
+    let base = dirs::data_local_dir()
+        .ok_or_else(|| Error::Db("data_local_dir could not be resolved".into()))?;
     Ok(base.join("DiskWizard").join("db").join(DB_FILENAME))
 }
 
@@ -37,26 +38,26 @@ pub(crate) fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
         M::up(include_str!("migrations/0001_initial.sql")),
         M::up(include_str!("migrations/0002_user_rules.sql")),
-        // Sprint 3.8 — Discovery Log #005 (Bölüm 5.6). USN Journal index
-        // tabloları (usn_index + usn_watermark). Mevcut DB üzerinde
-        // forward-only uygulanır.
+        // Sprint 3.8 — Discovery Log #005 (chapter 5.6). USN journal index
+        // tables (usn_index + usn_watermark); applied forward-only on
+        // existing databases.
         M::up(include_str!("migrations/0003_usn_index.sql")),
         // DiskWizard v0.4.0 — persisted recovery scan sessions.
         M::up(include_str!("migrations/0004_sessions.sql")),
     ])
 }
 
-/// DB dosyasını açar, PRAGMA'ları ayarlar, migrations'ı çalıştırır.
-/// Klasör yoksa oluşturur.
+/// Opens the database file, applies PRAGMAs, runs migrations, and creates
+/// the parent folder when missing.
 pub fn open_db() -> Result<Connection> {
     let path = db_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    debug!(path = %path.display(), "DB açılıyor");
+    debug!(path = %path.display(), "opening database");
 
     let mut conn = Connection::open(&path)
-        .map_err(|e| Error::Db(format!("aç '{}': {}", path.display(), e)))?;
+        .map_err(|e| Error::Db(format!("open '{}': {}", path.display(), e)))?;
 
     apply_pragmas(&conn)?;
 
@@ -67,7 +68,7 @@ pub fn open_db() -> Result<Connection> {
     let user_version: u32 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .map_err(|e| Error::Db(format!("user_version: {}", e)))?;
-    info!(user_version, expected = SCHEMA_VERSION, "DB hazır");
+    info!(user_version, expected = SCHEMA_VERSION, "database ready");
 
     Ok(conn)
 }
@@ -96,7 +97,7 @@ pub struct DbInfo {
     pub spec_version: String,
 }
 
-/// DB ile ilgili özet bilgi — UI'da göstermek için.
+/// Summary information about the database, surfaced in the UI.
 pub fn db_info(conn: &Connection) -> Result<DbInfo> {
     let path = db_path()?.display().to_string();
     let schema_version: u32 = conn
@@ -115,7 +116,7 @@ pub fn db_info(conn: &Connection) -> Result<DbInfo> {
             [],
             |r| r.get(0),
         )
-        .map_err(|e| Error::Db(format!("tablo sayımı: {}", e)))?;
+        .map_err(|e| Error::Db(format!("table count: {}", e)))?;
     let spec_version: String = conn
         .query_row(
             "SELECT value FROM schema_meta WHERE key = 'spec_version'",
@@ -136,7 +137,8 @@ pub fn db_info(conn: &Connection) -> Result<DbInfo> {
     })
 }
 
-/// Bölüm 14 — `settings` tablosu üzerinden key/value okuma. Yoksa `None`.
+/// Chapter 14 — key/value read through the `settings` table; `None` when
+/// the key is absent.
 pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>> {
     conn.query_row(
         "SELECT value FROM settings WHERE key = ?1",
@@ -147,7 +149,7 @@ pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>> {
     .map_err(|e| Error::Db(format!("settings get '{}': {}", key, e)))
 }
 
-/// Bölüm 14 — upsert: aynı anahtar varsa value günceller.
+/// Chapter 14 — upsert: updates the value when the key already exists.
 pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -162,10 +164,11 @@ pub fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// Tauri yönetilen state: tek `Connection`'ı `Arc<Mutex>` ile sarar.
-/// Tek-kullanıcılı desktop için connection pool gerekmez. `Arc` sarması
-/// (Gemini review: async komutlar) `spawn_blocking` içine clonlanabilir —
-/// uzun DB işleri artık main thread'i bloklamaz.
+/// Tauri-managed state: wraps the single `Connection` in an `Arc<Mutex>`.
+/// A connection pool is unnecessary for a single-user desktop app. The
+/// `Arc` wrapper (Gemini review: async commands) allows cloning into
+/// `spawn_blocking` so long database work no longer blocks the main
+/// thread.
 #[derive(Clone)]
 pub struct DbState {
     pub conn: std::sync::Arc<Mutex<Connection>>,
@@ -190,9 +193,10 @@ mod tests {
         let mig = migrations();
         mig.to_latest(&mut conn).unwrap();
 
-        // Tablo sayısı: schema_meta + settings + snapshots + snapshot_entries
+        // Table count: schema_meta + settings + snapshots + snapshot_entries
         // + staging_items + staging_wal + permanent_deletes_forensic + ml_scores
         // + user_rules (0002) + usn_index + usn_watermark (0003)
+        // + recovery_sessions (0004)
         let n: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master \
@@ -202,7 +206,7 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(n, 11, "Migration sonrası 11 tablo bekleniyor");
+        assert_eq!(n, 12, "expected 12 tables after all migrations");
 
         let spec: String = conn
             .query_row(
@@ -216,9 +220,9 @@ mod tests {
 
     #[test]
     fn migrations_validates() {
-        // rusqlite_migration kendi içinde her migration'ın geçerli SQL
-        // olduğunu in-memory deneyerek doğrular.
+        // rusqlite_migration validates every migration by applying it to an
+        // in-memory database internally.
         let mig = migrations();
-        mig.validate().expect("migrations valid olmalı");
+        mig.validate().expect("migrations must be valid");
     }
 }

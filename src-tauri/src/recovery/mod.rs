@@ -464,6 +464,29 @@ pub fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
+/// Strict device-id parsing shared by every recovery surface (health,
+/// repair, layouts). Accepts `vol:X`, `dev:X`, `X` or `X:` where `X` is a
+/// single ASCII drive letter; anything else — including free-form text,
+/// paths and UNC roots — is rejected. Returns the uppercase letter.
+pub fn device_letter(device_id: &str) -> crate::error::Result<char> {
+    use crate::error::Error;
+    let rest = device_id
+        .strip_prefix("dev:")
+        .or_else(|| device_id.strip_prefix("vol:"))
+        .unwrap_or(device_id);
+    let mut chars = rest.chars();
+    let invalid = || Error::Volume(format!("invalid device id '{device_id}'"));
+    let Some(letter) = chars.next().filter(|c| c.is_ascii_alphabetic()) else {
+        return Err(invalid());
+    };
+    match chars.next() {
+        // Bare letter or `X:` — both fine.
+        None => Ok(letter.to_ascii_uppercase()),
+        Some(':') if chars.next().is_none() => Ok(letter.to_ascii_uppercase()),
+        Some(_) => Err(invalid()),
+    }
+}
+
 /// Emits a scan progress event to the frontend (single event name; the
 /// payload carries the scan id so the connector routes it).
 pub fn emit_scan_progress<R: tauri::Runtime>(
