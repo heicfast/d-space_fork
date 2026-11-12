@@ -44,7 +44,7 @@ pub struct SessionMetaWire {
 // Binary codec (little-endian, length-prefixed strings)
 // ---------------------------------------------------------------------------
 
-const MAGIC: &[u8; 8] = b"DWSESS01";
+const MAGIC: &[u8; 8] = b"DWSESS02";
 
 fn put_u32(buf: &mut Vec<u8>, v: u32) {
     buf.extend_from_slice(&v.to_le_bytes());
@@ -156,6 +156,43 @@ pub fn encode_session(scan: &RecoveryScan) -> Result<Vec<u8>> {
         *scan.cluster_size.read().unwrap_or_else(|p| p.into_inner()),
     );
 
+    // ---- backend geometry (read-back dispatch) ----
+    match &*scan.backend.read().unwrap_or_else(|p| p.into_inner()) {
+        crate::recovery::BackendGeometry::Ntfs => {
+            put_u32(&mut buf, 0);
+        }
+        crate::recovery::BackendGeometry::Fat(g) => {
+            put_u32(&mut buf, 1);
+            put_u32(
+                &mut buf,
+                match g.kind {
+                    crate::fsfat::FatKindWire::Fat12 => 0,
+                    crate::fsfat::FatKindWire::Fat16 => 1,
+                    crate::fsfat::FatKindWire::Fat32 => 2,
+                    crate::fsfat::FatKindWire::ExFat => 3,
+                },
+            );
+            put_u64(&mut buf, g.cluster_size);
+            put_u64(&mut buf, g.heap_off);
+            put_u32(&mut buf, g.fat_copies.len() as u32);
+            for off in &g.fat_copies {
+                put_u64(&mut buf, *off);
+            }
+            put_u64(&mut buf, g.fat_bytes);
+            put_u32(&mut buf, g.cluster_end);
+            match g.exfat_bitmap {
+                Some((first, len)) => {
+                    put_u32(&mut buf, 1);
+                    put_u32(&mut buf, first);
+                    put_u64(&mut buf, len);
+                }
+                None => {
+                    put_u32(&mut buf, 0);
+                }
+            }
+        }
+    }
+
     // ---- existing tree nodes ----
     put_u64(&mut buf, tree.nodes.len() as u64);
     let mut ids: Vec<&u64> = tree.nodes.keys().collect();
@@ -199,6 +236,9 @@ pub fn encode_session(scan: &RecoveryScan) -> Result<Vec<u8>> {
             put_u64(&mut buf, r.lcn.unwrap_or(0));
             put_u64(&mut buf, r.clusters);
         }
+        // Slot offset (FAT/exFAT read-back re-check; 0 = none).
+        put_u32(&mut buf, d.slot_offset.map(|_o| 1).unwrap_or(0));
+        put_u64(&mut buf, d.slot_offset.unwrap_or(0));
         // Confidence byte.
         let conf = confidence.get(id).copied().unwrap_or(Confidence::Unknown);
         put_u32(&mut buf, confidence_byte(conf));
@@ -268,12 +308,18 @@ pub struct DecodedSession {
     pub deleted_found: u64,
     pub completed: bool,
     pub cluster_size: u32,
+    pub backend: crate::recovery::BackendGeometry,
 }
 
 pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
     let mut c = Cursor { data, pos: 0 };
     let magic = c.take(8)?;
     if magic != MAGIC {
+        if magic.starts_with(b"DWSESS") {
+            return Err(Error::Db(
+                "session saved by an older DiskWizard version; please re-scan".into(),
+            ));
+        }
         return Err(Error::Db("not a DiskWizard session file".into()));
     }
 
@@ -316,6 +362,44 @@ pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
         Some(scope_raw)
     };
     let cluster_size = c.u32()?;
+    let backend = match c.u32()? {
+        0 => crate::recovery::BackendGeometry::Ntfs,
+        1 => {
+            let kind = match c.u32()? {
+                0 => crate::fsfat::FatKindWire::Fat12,
+                1 => crate::fsfat::FatKindWire::Fat16,
+                2 => crate::fsfat::FatKindWire::Fat32,
+                _ => crate::fsfat::FatKindWire::ExFat,
+            };
+            let g_cluster_size = c.u64()?;
+            let heap_off = c.u64()?;
+            let copies_len = c.u32()? as usize;
+            if copies_len > 4 {
+                return Err(Error::Db("session blob: absurd FAT copy count".into()));
+            }
+            let mut fat_copies = Vec::with_capacity(copies_len);
+            for _ in 0..copies_len {
+                fat_copies.push(c.u64()?);
+            }
+            let fat_bytes = c.u64()?;
+            let cluster_end = c.u32()?;
+            let exfat_bitmap = if c.u32()? != 0 {
+                Some((c.u32()?, c.u64()?))
+            } else {
+                None
+            };
+            crate::recovery::BackendGeometry::Fat(crate::fsfat::FatGeometry {
+                kind,
+                cluster_size: g_cluster_size,
+                heap_off,
+                fat_copies,
+                fat_bytes,
+                cluster_end,
+                exfat_bitmap,
+            })
+        }
+        _ => return Err(Error::Db("session blob: unknown backend tag".into())),
+    };
 
     let meta = ScanMeta {
         target,
@@ -415,6 +499,9 @@ pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
                 clusters,
             });
         }
+        let has_slot = c.u32()? != 0;
+        let slot_v = c.u64()?;
+        let slot_offset = if has_slot { Some(slot_v) } else { None };
         let conf = confidence_from(c.u32()?);
         deleted_children.entry(parent).or_default().push(id);
         deleted.insert(
@@ -430,6 +517,7 @@ pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
                 runs,
                 compressed,
                 encrypted,
+                slot_offset,
             },
         );
         confidence.insert(id, conf);
@@ -479,6 +567,7 @@ pub fn decode_session(data: &[u8]) -> Result<DecodedSession> {
         deleted_found,
         completed,
         cluster_size,
+        backend,
     })
 }
 
@@ -613,6 +702,7 @@ pub fn load_session(
     // indexed) — a restored session without it silently produced empty
     // deleted previews and failed recoveries.
     *scan.cluster_size.write().unwrap_or_else(|p| p.into_inner()) = decoded.cluster_size;
+    *scan.backend.write().unwrap_or_else(|p| p.into_inner()) = decoded.backend;
     *scan.strategy.write().unwrap_or_else(|p| p.into_inner()) = Some("session");
     {
         let mut rt = scan.runtime.write().unwrap_or_else(|p| p.into_inner());
@@ -735,6 +825,7 @@ mod tests {
                 }],
                 compressed: false,
                 encrypted: false,
+                slot_offset: None,
             },
         );
         *scan.deleted.write().unwrap() = std::sync::Arc::new(deleted);

@@ -259,7 +259,7 @@ pub fn mbr_kind_name(type_byte: u8) -> String {
     match type_byte {
         0x07 => "NTFS/exFAT".to_string(),
         0x0B | 0x0C => "FAT32".to_string(),
-        0x0E => "FAT16".to_string(),
+        0x04 | 0x06 | 0x0E => "FAT16".to_string(),
         0xEE => "GPT protective".to_string(),
         0x27 => "Windows recovery".to_string(),
         _ => format!("MBR (0x{type_byte:02X})"),
@@ -270,6 +270,8 @@ pub fn mbr_kind_name(type_byte: u8) -> String {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FsKind {
     Ntfs,
+    Fat12,
+    Fat16,
     Fat32,
     ExFat,
 }
@@ -278,6 +280,8 @@ impl FsKind {
     pub fn wire_name(self) -> &'static str {
         match self {
             FsKind::Ntfs => "ntfs",
+            FsKind::Fat12 => "fat12",
+            FsKind::Fat16 => "fat16",
             FsKind::Fat32 => "fat32",
             FsKind::ExFat => "exfat",
         }
@@ -305,10 +309,36 @@ pub fn detect_fs_boot(sector: &[u8]) -> Option<(FsKind, u64)> {
         }
     }
     if oem.starts_with(b"MSDOS") && sane_geometry && sector[510] == 0x55 && sector[511] == 0xAA {
-        let total_sectors = u32::from_le_bytes(sector[32..36].try_into().ok()?) as u64;
+        // Total sectors: 16-bit field first, 32-bit field when zero.
+        let total_sectors = match u16::from_le_bytes(sector[19..21].try_into().ok()?) {
+            0 => u32::from_le_bytes(sector[32..36].try_into().ok()?) as u64,
+            n => u64::from(n),
+        };
+        let reserved = u16::from_le_bytes(sector[14..16].try_into().ok()?) as u64;
+        let nfats = u64::from(sector[16]);
+        let fat_sectors = match u16::from_le_bytes(sector[22..24].try_into().ok()?) {
+            0 => u32::from_le_bytes(sector[36..40].try_into().ok()?) as u64,
+            n => u64::from(n),
+        };
+        let root_ents = u16::from_le_bytes(sector[17..19].try_into().ok()?) as u64;
+        if reserved == 0 || nfats == 0 || fat_sectors == 0 || spc == 0 {
+            return None;
+        }
+        let root_sectors = (root_ents * 32).div_ceil(u64::from(bps));
+        let first_data = reserved + nfats * fat_sectors + root_sectors;
+        let data_clusters = total_sectors
+            .checked_sub(first_data)?
+            .checked_div(u64::from(spc))?;
+        // MS classification rule (matches TestDisk): cluster count decides
+        // FAT12 vs FAT16 vs FAT32 — never the OEM label.
+        let kind = match data_clusters {
+            0..4085 => FsKind::Fat12,
+            4085..65525 => FsKind::Fat16,
+            _ => FsKind::Fat32,
+        };
         let volume_bytes = total_sectors.saturating_mul(bps as u64);
         if volume_bytes > 1024 * 1024 {
-            return Some((FsKind::Fat32, volume_bytes));
+            return Some((kind, volume_bytes));
         }
     }
     if oem.starts_with(b"EXFAT") && sane_geometry {

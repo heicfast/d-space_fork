@@ -27,7 +27,49 @@ pub enum Confidence {
     Unknown,
 }
 
-/// Grades a deleted entry against the cluster bitmap.
+/// Allocation view over a volume's cluster state (NTFS `$Bitmap` or a
+/// FAT/exFAT allocation map). Cluster indices are engine-specific; each
+/// backend documents its own base (NTFS: volume-absolute LCN; FAT:
+/// 0-based data-area index).
+pub trait AllocMap {
+    fn is_allocated(&self, cluster: u64) -> bool;
+
+    /// Fraction (0.0..=1.0) of the entry's clusters that are still FREE.
+    /// Sparse runs count as free (holes read back as zeros).
+    fn free_fraction(&self, entry: &DeletedEntry) -> f64 {
+        let mut total = 0u64;
+        let mut free = 0u64;
+        for run in &entry.runs {
+            total += run.clusters;
+            let free_in_run = match run.lcn {
+                Some(lcn) => (lcn..lcn.saturating_add(run.clusters))
+                    .take(512_000) // bound pathological run lengths
+                    .filter(|c| !self.is_allocated(*c))
+                    .count(),
+                None => run.clusters as usize,
+            };
+            free += free_in_run as u64;
+        }
+        if total == 0 {
+            return 1.0;
+        }
+        free as f64 / total as f64
+    }
+}
+
+impl AllocMap for ClusterBitmap {
+    fn is_allocated(&self, cluster: u64) -> bool {
+        ClusterBitmap::is_allocated(self, cluster)
+    }
+}
+
+impl AllocMap for crate::fsfat::FatAllocMap {
+    fn is_allocated(&self, cluster: u64) -> bool {
+        self.is_allocated_idx(cluster)
+    }
+}
+
+/// Grades a deleted entry against an allocation map.
 ///
 /// Grading model (honest, allocation-based — we cannot know whether the
 /// original bytes survived, only whether their clusters were reused):
@@ -41,7 +83,7 @@ pub enum Confidence {
 /// * ≥ 60% free → `Good`
 /// * > 0% free → `Fair`
 /// * all clusters reallocated → `Poor`
-pub fn grade_deleted(entry: &DeletedEntry, bitmap: &ClusterBitmap) -> Confidence {
+pub fn grade_deleted(entry: &DeletedEntry, bitmap: &dyn AllocMap) -> Confidence {
     if entry.compressed || entry.encrypted {
         return Confidence::Poor;
     }
@@ -168,8 +210,12 @@ pub fn reparse_record_on<T: Read + Seek>(
 pub fn read_deleted_range<T: Read + Seek>(
     handle: &mut T,
     fresh: &FreshRecord,
-    bitmap: Option<&ClusterBitmap>,
+    bitmap: Option<&dyn AllocMap>,
     cluster_size: u64,
+    // Byte offset of cluster 0 in the reader's coordinate space (NTFS:
+    // 0 — LCNs are volume-absolute; FAT: the data-area start, because
+    // stored run indices are 0-based data-area clusters).
+    cluster_base: u64,
     offset: u64,
     max_len: u64,
 ) -> Result<(Vec<u8>, u64)> {
@@ -226,6 +272,7 @@ pub fn read_deleted_range<T: Read + Seek>(
             }
             let abs = lcn
                 .checked_mul(cluster_size)
+                .and_then(|b| b.checked_add(cluster_base))
                 .and_then(|b| b.checked_add(cluster_idx * cluster_size + in_cluster_off))
                 .ok_or_else(|| Error::Scan("data run offset overflow".into()))?;
             handle
@@ -264,11 +311,20 @@ pub fn read_deleted_range<T: Read + Seek>(
 pub fn read_deleted_all<T: Read + Seek>(
     handle: &mut T,
     fresh: &FreshRecord,
-    bitmap: Option<&ClusterBitmap>,
+    bitmap: Option<&dyn AllocMap>,
     cluster_size: u64,
+    cluster_base: u64,
     max_len: u64,
 ) -> Result<(Vec<u8>, u64)> {
-    read_deleted_range(handle, fresh, bitmap, cluster_size, 0, max_len)
+    read_deleted_range(
+        handle,
+        fresh,
+        bitmap,
+        cluster_size,
+        cluster_base,
+        0,
+        max_len,
+    )
 }
 
 /// Guard helper used by jobs: `true` when the run was cancelled.
@@ -299,6 +355,7 @@ mod tests {
                 .collect(),
             compressed: false,
             encrypted: false,
+            slot_offset: None,
         }
     }
 
@@ -376,6 +433,7 @@ mod tests {
             runs: vec![],
             compressed: false,
             encrypted: false,
+            slot_offset: None,
         };
         assert_eq!(grade_deleted(&e, &bm(&[0x00])), Confidence::Unknown);
     }
@@ -392,7 +450,7 @@ mod tests {
             runs: vec![],
             resident_data: b"hello world".to_vec(),
         };
-        let (bytes, n) = read_deleted_range(&mut io_empty(), &fresh, None, 4096, 6, 5).unwrap();
+        let (bytes, n) = read_deleted_range(&mut io_empty(), &fresh, None, 4096, 0, 6, 5).unwrap();
         assert_eq!(bytes, b"world");
         assert_eq!(n, 5);
     }
@@ -409,7 +467,7 @@ mod tests {
             runs: vec![],
             resident_data: b"abc".to_vec(),
         };
-        let (bytes, n) = read_deleted_range(&mut io_empty(), &fresh, None, 4096, 10, 4).unwrap();
+        let (bytes, n) = read_deleted_range(&mut io_empty(), &fresh, None, 4096, 0, 10, 4).unwrap();
         assert!(bytes.is_empty());
         assert_eq!(n, 0);
     }
@@ -460,7 +518,7 @@ mod tests {
             total_clusters: 8,
         };
         let (bytes, intact) =
-            read_deleted_range(&mut handle, &fresh, Some(&bitmap), 4096, 0, 8192).unwrap();
+            read_deleted_range(&mut handle, &fresh, Some(&bitmap), 4096, 0, 0, 8192).unwrap();
         assert_eq!(intact, 4096, "first cluster intact, second is reallocated");
         assert_eq!(bytes.len(), 4096);
     }
@@ -491,7 +549,7 @@ mod tests {
             }],
             resident_data: vec![],
         };
-        let (bytes, n) = read_deleted_range(&mut Nop, &fresh, None, 4096, 0, 8192).unwrap();
+        let (bytes, n) = read_deleted_range(&mut Nop, &fresh, None, 4096, 0, 0, 8192).unwrap();
         assert_eq!(n, 8192);
         assert!(bytes.iter().all(|&b| b == 0));
     }

@@ -174,6 +174,13 @@ pub fn list_devices_wire() -> Result<Vec<DwDevice>> {
             .unwrap_or_else(|| format!("{} Drive", letter));
 
         let used = info.total_bytes.saturating_sub(info.free_bytes);
+        // Quick scan / deleted recovery = raw engine read: NTFS, FAT and
+        // exFAT volumes (admin only).
+        let raw_engine_fs = is_ntfs
+            || fs.eq_ignore_ascii_case("FAT12")
+            || fs.eq_ignore_ascii_case("FAT16")
+            || fs.eq_ignore_ascii_case("FAT32")
+            || fs.eq_ignore_ascii_case("exFAT");
         let volume = DwVolume {
             id: format!("vol:{letter}"),
             device_id: format!("dev:{letter}"),
@@ -188,9 +195,8 @@ pub fn list_devices_wire() -> Result<Vec<DwDevice>> {
             used_bytes: used,
             free_bytes: info.free_bytes,
             status: status.clone(),
-            // Quick scan = raw MFT read: NTFS + admin only.
-            quick_scan_available: is_ntfs && elevated,
-            can_recover_deleted: is_ntfs && elevated,
+            quick_scan_available: raw_engine_fs && elevated,
+            can_recover_deleted: raw_engine_fs && elevated,
             bitlocker: bitlocker.clone(),
         };
 
@@ -319,6 +325,20 @@ pub struct RecoveryScan {
     pub strategy: RwLock<Option<&'static str>>,
     /// Cluster size (0 when unknown / fallback scans).
     pub cluster_size: RwLock<u32>,
+    /// Which raw engine produced (and must re-read) this scan's deleted
+    /// entries. Drives read-back dispatch (preview + recovery jobs).
+    pub backend: RwLock<BackendGeometry>,
+}
+
+/// Raw-engine descriptor for read-back (serialized with sessions).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum BackendGeometry {
+    /// NTFS — records are re-parsed by number through the ntfs crate.
+    #[default]
+    Ntfs,
+    /// FAT/exFAT — slots re-checked at their byte offset; allocation
+    /// re-read from the FAT/exFAT bitmap geometry.
+    Fat(crate::fsfat::FatGeometry),
 }
 
 impl RecoveryScan {
@@ -337,6 +357,7 @@ impl RecoveryScan {
             scope_node: RwLock::new(None),
             strategy: RwLock::new(None),
             cluster_size: RwLock::new(0),
+            backend: RwLock::new(BackendGeometry::Ntfs),
         }
     }
 

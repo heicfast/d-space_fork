@@ -490,8 +490,12 @@ fn run_job_inner<R: tauri::Runtime>(
     // every single file).
     let mut reader = crate::recovery::partitions::open_target_reader(&scan.meta.target).ok();
     let volume_label = crate::recovery::partitions::reader_volume_label(&scan.meta.target);
-    let strategy = *scan.strategy.read().unwrap_or_else(|p| p.into_inner());
-    let mut source = SourceCtx::prepare(strategy, reader.as_mut());
+    let backend = scan
+        .backend
+        .read()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    let mut source = SourceCtx::prepare(&backend, reader.as_mut());
 
     let mut items = job
         .items
@@ -618,42 +622,64 @@ fn run_job_inner<R: tauri::Runtime>(
 
 type ItemOutcome = std::result::Result<String, (String, String)>;
 
-/// Per-job source context: the NTFS boot parse and `$Bitmap` snapshot are
-/// prepared once (they used to be re-parsed for every single file).
+/// Per-job source context: the NTFS boot parse + `$Bitmap` snapshot (or
+/// the FAT geometry + allocation view) are prepared once — they used to
+/// be re-parsed for every single file.
 struct SourceCtx {
     ntfs: Option<ntfs::Ntfs>,
     bitmap: Option<crate::recovery::collect::ClusterBitmap>,
+    fat: Option<(crate::fsfat::FatGeometry, crate::fsfat::FatAllocMap)>,
 }
 
 impl SourceCtx {
-    fn prepare(strategy: Option<&'static str>, reader: Option<&mut Box<dyn ReadSeek>>) -> Self {
-        // Only the NTFS strategy needs an NTFS parse + $Bitmap view.
-        if strategy != Some("MFT") {
-            return Self {
-                ntfs: None,
-                bitmap: None,
-            };
-        }
-        let Some(reader) = reader else {
-            return Self {
-                ntfs: None,
-                bitmap: None,
-            };
-        };
-        let ntfs = match ntfs::Ntfs::new(reader) {
-            Ok(n) => Some(n),
-            Err(e) => {
-                warn!(
-                    ?e,
-                    "job source: NTFS parse failed; deleted reads will fail per item"
-                );
-                None
+    fn prepare(
+        backend: &crate::recovery::BackendGeometry,
+        reader: Option<&mut Box<dyn ReadSeek>>,
+    ) -> Self {
+        match backend {
+            crate::recovery::BackendGeometry::Ntfs => {
+                let Some(reader) = reader else {
+                    return Self {
+                        ntfs: None,
+                        bitmap: None,
+                        fat: None,
+                    };
+                };
+                let ntfs = match ntfs::Ntfs::new(reader) {
+                    Ok(n) => Some(n),
+                    Err(e) => {
+                        warn!(
+                            ?e,
+                            "job source: NTFS parse failed; deleted reads will fail per item"
+                        );
+                        None
+                    }
+                };
+                let bitmap = ntfs
+                    .as_ref()
+                    .and_then(|n| crate::recovery::collect::ClusterBitmap::read(n, reader).ok());
+                Self {
+                    ntfs,
+                    bitmap,
+                    fat: None,
+                }
             }
-        };
-        let bitmap = ntfs
-            .as_ref()
-            .and_then(|n| crate::recovery::collect::ClusterBitmap::read(n, reader).ok());
-        Self { ntfs, bitmap }
+            crate::recovery::BackendGeometry::Fat(geometry) => {
+                let Some(reader) = reader else {
+                    return Self {
+                        ntfs: None,
+                        bitmap: None,
+                        fat: None,
+                    };
+                };
+                let alloc = crate::fsfat::reload_alloc(geometry, reader);
+                Self {
+                    ntfs: None,
+                    bitmap: None,
+                    fat: Some((geometry.clone(), alloc)),
+                }
+            }
+        }
     }
 }
 
@@ -888,34 +914,94 @@ fn stream_deleted(
     };
     use crate::recovery::deleted::{read_deleted_range, reparse_record_on};
 
-    // Fresh record state (re-parse; never trust scan-time data).
-    let fresh = match source.as_ref().and_then(|s| s.ntfs.as_ref()) {
-        Some(ntfs) => reparse_record_on(ntfs, reader, record_no)
-            .map_err(|e| ("source-missing".into(), e.to_string()))?,
-        None => {
-            let ntfs = ntfs::Ntfs::new(reader).map_err(|e| {
-                (
-                    "source-missing".into(),
-                    format!("NTFS parse on '{volume_label}': {e:?}"),
-                )
-            })?;
-            reparse_record_on(&ntfs, reader, record_no)
-                .map_err(|e| ("source-missing".into(), e.to_string()))?
+    // The stored entry (runs/size) — needed for the FAT path and as the
+    // NTFS fallback when the per-job parse failed.
+    let stored = scan
+        .deleted
+        .read()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&record_no)
+        .cloned();
+
+    // ---- Backend dispatch: NTFS re-parses the MFT record by number;
+    // ---- FAT re-checks the directory slot byte at its recorded offset.
+    let (fresh, cluster_base, bitmap_dyn): (
+        crate::recovery::deleted::FreshRecord,
+        u64,
+        Option<&dyn crate::recovery::deleted::AllocMap>,
+    ) = if let Some((geometry, alloc)) = source.as_ref().and_then(|s| s.fat.as_ref()) {
+        // FAT / exFAT path.
+        let entry = stored.ok_or_else(|| {
+            (
+                "source-missing".into(),
+                "deleted entry missing from the scan".into(),
+            )
+        })?;
+        let slot = entry.slot_offset.ok_or_else(|| {
+            (
+                "source-missing".into(),
+                "entry has no FAT slot offset".into(),
+            )
+        })?;
+        let still_deleted = crate::fsfat::reparse_slot(geometry, reader, slot)
+            .map_err(|e| ("source-missing".into(), e.to_string()))?;
+        if !still_deleted {
+            return Err((
+                "record-reused".into(),
+                "the directory entry has been reused since the scan".into(),
+            ));
         }
+        let fresh = crate::recovery::deleted::FreshRecord {
+            still_deleted: true,
+            name: Some(entry.name.clone()),
+            data_size: entry.data_size,
+            resident: false,
+            compressed: false,
+            encrypted: false,
+            runs: entry.runs.clone(),
+            resident_data: Vec::new(),
+        };
+        (
+            fresh,
+            geometry.heap_off,
+            Some(alloc as &dyn crate::recovery::deleted::AllocMap),
+        )
+    } else {
+        // NTFS path.
+        let fresh = match source.as_ref().and_then(|s| s.ntfs.as_ref()) {
+            Some(ntfs) => reparse_record_on(ntfs, reader, record_no)
+                .map_err(|e| ("source-missing".into(), e.to_string()))?,
+            None => {
+                let ntfs = ntfs::Ntfs::new(reader).map_err(|e| {
+                    (
+                        "source-missing".into(),
+                        format!("NTFS parse on '{volume_label}': {e:?}"),
+                    )
+                })?;
+                reparse_record_on(&ntfs, reader, record_no)
+                    .map_err(|e| ("source-missing".into(), e.to_string()))?
+            }
+        };
+        if !fresh.still_deleted {
+            return Err((
+                "record-reused".into(),
+                "the MFT record has been reused since the scan".into(),
+            ));
+        }
+        if fresh.compressed || fresh.encrypted {
+            return Err((
+                "unsupported-encoding".into(),
+                "compressed/encrypted deleted files cannot be recovered raw".into(),
+            ));
+        }
+        let bitmap = source.as_ref().and_then(|s| s.bitmap.as_ref());
+        (
+            fresh,
+            0,
+            bitmap.map(|b| b as &dyn crate::recovery::deleted::AllocMap),
+        )
     };
-    if !fresh.still_deleted {
-        return Err((
-            "record-reused".into(),
-            "the MFT record has been reused since the scan".into(),
-        ));
-    }
-    if fresh.compressed || fresh.encrypted {
-        return Err((
-            "unsupported-encoding".into(),
-            "compressed/encrypted deleted files cannot be recovered raw".into(),
-        ));
-    }
-    let bitmap = source.as_ref().and_then(|s| s.bitmap.as_ref());
+    let fresh = &fresh;
     let cluster_size = *scan.cluster_size.read().unwrap_or_else(|p| p.into_inner()) as u64;
 
     let mut hasher = blake3::Hasher::new();
@@ -924,8 +1010,16 @@ fn stream_deleted(
     let want = size.max(4096);
     while offset < want {
         let len = (COPY_CHUNK as u64).min(want - offset);
-        let (chunk, intact) = read_deleted_range(reader, &fresh, bitmap, cluster_size, offset, len)
-            .map_err(|e| ("source-unreadable".into(), e.to_string()))?;
+        let (chunk, intact) = read_deleted_range(
+            reader,
+            fresh,
+            bitmap_dyn,
+            cluster_size,
+            cluster_base,
+            offset,
+            len,
+        )
+        .map_err(|e| ("source-unreadable".into(), e.to_string()))?;
         if chunk.is_empty() {
             break;
         }

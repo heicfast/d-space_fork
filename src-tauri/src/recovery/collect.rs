@@ -53,12 +53,19 @@ pub struct DeletedEntry {
     /// recoverable even after unlink).
     pub resident: bool,
     /// Extents of the non-resident `$DATA` (empty for resident/dirs).
+    /// Cluster indices: NTFS LCNs are volume-absolute; FAT/exFAT runs
+    /// are 0-based data-area indices (read-back adds heap_off from the
+    /// stored backend geometry).
     pub runs: Vec<DwRun>,
     /// NTFS-compressed attribute — raw cluster reads are NOT the logical
     /// file content; recovery is not possible without a decompressor.
     pub compressed: bool,
     /// EFS-encrypted attribute — recovery not possible without the key.
     pub encrypted: bool,
+    /// FAT/exFAT only: absolute byte offset of the directory entry slot
+    /// on the volume (read-back re-checks the deletion marker byte).
+    /// `None` for NTFS (whose MFT records are re-parsed by number).
+    pub slot_offset: Option<u64>,
 }
 
 /// Result of the unified walk.
@@ -350,6 +357,7 @@ pub fn collect_mft_all(
                         runs,
                         compressed,
                         encrypted,
+                        slot_offset: None,
                     });
                 }
             }
@@ -432,6 +440,7 @@ mod tests {
                 .collect(),
             compressed: false,
             encrypted: false,
+            slot_offset: None,
         }
     }
 
@@ -620,6 +629,7 @@ fn collect_mft_on_ntfs<T: Read + Seek>(
                         runs,
                         compressed,
                         encrypted,
+                        slot_offset: None,
                     });
                 }
             }

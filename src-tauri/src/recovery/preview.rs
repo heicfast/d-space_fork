@@ -288,17 +288,68 @@ pub(crate) fn fresh_read(
     record_no: u64,
     limit: u64,
 ) -> Result<Vec<u8>> {
-    let ntfs = ntfs::Ntfs::new(reader)
-        .map_err(|e| Error::Scan(format!("NTFS parse error on '{volume_label}': {e:?}")))?;
-    let fresh = reparse_record_on(&ntfs, reader, record_no)?;
-    if fresh.still_deleted && (fresh.compressed || fresh.encrypted) {
-        return Err(Error::Scan(
-            "file is compressed or encrypted — raw recovery is not possible".into(),
-        ));
-    }
     let cluster_size = *scan.cluster_size.read().unwrap_or_else(|p| p.into_inner()) as u64;
-    let (bytes, _intact) = read_deleted_range(reader, &fresh, None, cluster_size, 0, limit)?;
-    Ok(bytes)
+    let backend = scan
+        .backend
+        .read()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone();
+    match backend {
+        crate::recovery::BackendGeometry::Fat(geometry) => {
+            // FAT / exFAT: re-check the directory slot, then read the
+            // stored (contiguous-assumed) runs against the fresh
+            // allocation view.
+            let entry = scan
+                .deleted
+                .read()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(&record_no)
+                .cloned()
+                .ok_or_else(|| Error::Scan("deleted entry missing from the scan".into()))?;
+            let slot = entry
+                .slot_offset
+                .ok_or_else(|| Error::Scan("entry has no FAT slot offset".into()))?;
+            if !crate::fsfat::reparse_slot(&geometry, reader, slot)? {
+                return Err(Error::Scan(
+                    "the directory entry has been reused since the scan".into(),
+                ));
+            }
+            let alloc = crate::fsfat::reload_alloc(&geometry, reader);
+            let fresh = crate::recovery::deleted::FreshRecord {
+                still_deleted: true,
+                name: Some(entry.name.clone()),
+                data_size: entry.data_size,
+                resident: false,
+                compressed: false,
+                encrypted: false,
+                runs: entry.runs.clone(),
+                resident_data: Vec::new(),
+            };
+            let (bytes, _intact) = read_deleted_range(
+                reader,
+                &fresh,
+                Some(&alloc),
+                cluster_size,
+                geometry.heap_off,
+                0,
+                limit,
+            )?;
+            Ok(bytes)
+        }
+        crate::recovery::BackendGeometry::Ntfs => {
+            let ntfs = ntfs::Ntfs::new(reader)
+                .map_err(|e| Error::Scan(format!("NTFS parse error on '{volume_label}': {e:?}")))?;
+            let fresh = reparse_record_on(&ntfs, reader, record_no)?;
+            if fresh.still_deleted && (fresh.compressed || fresh.encrypted) {
+                return Err(Error::Scan(
+                    "file is compressed or encrypted — raw recovery is not possible".into(),
+                ));
+            }
+            let (bytes, _intact) =
+                read_deleted_range(reader, &fresh, None, cluster_size, 0, 0, limit)?;
+            Ok(bytes)
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

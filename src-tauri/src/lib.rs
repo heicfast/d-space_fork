@@ -10,6 +10,7 @@
 pub mod db;
 pub mod duplicate;
 pub mod error;
+pub mod fsfat;
 pub mod index;
 pub mod locked_file;
 pub mod recovery;
