@@ -540,7 +540,7 @@ mod tests {
         let e = hresult_to_error(VSS_E_BAD_STATE, "test");
         let msg = format!("{e}");
         assert!(msg.contains("VSS_E_BAD_STATE"), "msg={msg}");
-        assert!(msg.contains("80042301"), "hex code yok: {msg}");
+        assert!(msg.contains("80042301"), "hex code missing: {msg}");
 
         let e = hresult_to_error(E_ACCESSDENIED, "test");
         assert!(format!("{e}").contains("E_ACCESSDENIED"));
@@ -551,9 +551,9 @@ mod tests {
         let e = hresult_to_error(VSS_E_INSUFFICIENT_STORAGE, "test");
         assert!(format!("{e}").contains("INSUFFICIENT_STORAGE"));
 
-        // Unknown code → "bilinmeyen HRESULT"
+        // Unknown code → "unknown HRESULT"
         let e = hresult_to_error(0x12345678, "test");
-        assert!(format!("{e}").contains("bilinmeyen HRESULT"));
+        assert!(format!("{e}").contains("unknown HRESULT"));
         assert!(format!("{e}").contains("12345678"));
     }
 
