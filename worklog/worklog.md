@@ -1,0 +1,48 @@
+# d-space worklog — chronological session handoff
+
+> This file is the long-horizon handoff log for the feature-harvest session
+> ("Feature Harvest, Gap Analysis & Production Implementation", started 2026-11-12).
+> The full session SOP is archived at `worklog/session-feature-harvest-prompt.md`.
+> Prior audit trails in this repository (`docs/ui/worklog/`, `docs/DISCOVERY_LOG.md`,
+> `docs/NEXT_SESSION.md`, `CHANGELOG.md`) are preserved untouched; this root `worklog/`
+> directory is the new session's area and extends — never overwrites — them.
+
+---
+
+## 2026-11-12 — T1: session start, repos cloned and pinned
+
+**Session:** Feature harvest from six references into DiskWizard (heicfast/d-space_fork).
+
+**Done this unit:**
+
+- Session prompt archived with the token redacted (`worklog/session-feature-harvest-prompt.md`); read twice before action.
+- All seven repositories cloned and pinned at session start:
+
+| Repo | Role | HEAD (pinned) | Files |
+| --- | --- | --- | --- |
+| heicfast/d-space_fork | target | `3907f7144ad8578079186b949ef5657b5e2c2d03` | 311 |
+| terraseraph/sectorforge | base ref A (same stack) | `b292a299c18013706e81d670657ced6c43f200ca` | 197 |
+| htoklu/halim-recovery | base ref B (same stack) | `3b5d66d8537432f54b76489e717387f9da198635` | 62 |
+| cgsecurity/testdisk | feature ref C (partition & carving) | `5f5d6056696d70d3a3ff1e1eaa5a5125cb42bb6a` | 793 |
+| sleuthkit/sleuthkit | feature ref D (forensic engine) | `08167c8d6d5fc1bd4ee6d822e2fe042cabcdee6d` | 959 |
+| mjgil-rust/ntfs-recover | feature ref E (NTFS deep recovery) | `5072bbc729b293efc0b2070b38ad30c3b7e043cf` | 25 |
+| hasithahaththella/mft-rescue | feature ref F (MFT analysis) | `9b0e5ecc9d24ae9918f83e3a81e4a8616f610a22` | 8 |
+
+  References are depth-1 clones (HEAD only) — citation provenance is the HEAD SHA above. The target is a full clone.
+
+- Target license read: **GPL-3.0-or-later** (`LICENSE`). Reference licenses to be read and recorded by each Phase 0 agent in its context sheet.
+- Target CI inventory: `.github/workflows/ci.yml` (Rust fmt/clippy -D warnings/tests + vss feature job, full frontend gate stack, all on windows-latest), `release.yml`, `ui-smoke.yml`. Worklog-only pushes do not touch compiled code paths; CI must stay green at every push.
+- Token hygiene: the supplied GitHub token lives only in the session sandbox (git config for the target remote / local env file, mode 600, outside all repos). Never committed, never logged in any artifact. User rotates it after the session.
+
+**Reading method (recorded honestly, per the no-hallucination rule):**
+
+- sectorforge (197 files), halim-recovery (62 files), ntfs-recover (25 files), mft-rescue (8 files) and the target (311 files) are read **exhaustively** — every file accounted for.
+- testdisk (793 files) and sleuthkit (959 files) are covered **subsystem-exhaustively**: full file enumeration and classification, plus deep reading of the subsystems this harvest actually draws on (testdisk: partition detection/reconstruction + PhotoRec carving engine; sleuthkit: the image/volume-system/filesystem abstraction and the NTFS/FAT-family parsers). Each sheet carries an explicit coverage statement (files read vs. enumerated). This is the honest maximum for these codebases within a session; it is recorded rather than glossed as "end to end".
+
+**Context found in the target (affects the matrix):**
+
+- The target is DiskWizard v0.5.0-beta (Tauri 2, Rust engine + React 19/TS UI, Windows-first, GPL-3.0-or-later), with prior sessions already delivering: raw NTFS MFT engine, FAT12/16/32 + exFAT + ext2/3/4 engines (adapted from SectorForge per `docs/NEXT_SESSION.md`), GPT/MBR parsing with lost-partition rescue, deleted-ancestor chain reconstruction with `keep_empty_folders`, sessions (DWSESS02), SMART health, staging/undo, USN Quick Search.
+- The repo's own roadmap (`docs/NEXT_SESSION.md`) already calls for the VHDX fixture generator (matches T4) and the raw carving engine with SectorForge as reference (matches Wave 4) — this session's plan and the repo's trajectory are aligned.
+- The named feature (deleted-only reconstructed tree as a post-scan option) is therefore expected to be **PARTIAL** in the target; Agent A must grade it precisely and Agent B must extract SectorForge's exact contract for the delta.
+
+**Next:** T2 — parallel agents A–G produce the seven Phase 0 context sheets in `worklog/` (pushed before any code change), then T3 consolidates `worklog/FEATURE-MATRIX.md` as the gate document. Nothing is implemented before the matrix is committed and pushed.
