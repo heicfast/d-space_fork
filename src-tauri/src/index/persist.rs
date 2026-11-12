@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// USN Index persist katmanı — Sprint 3.8.
+// USN Index persist layer — Sprint 3.8.
 //
-// `usn_index` ve `usn_watermark` tablolarına yazma/okuma. Tüm DB
-// işlemleri tek `Connection` üzerinden, çağıran (Tauri command veya
-// watcher thread) mutex'i tutar.
+// Writes/reads against the `usn_index` and `usn_watermark` tables. All DB
+// operations go through a single `Connection`; the caller (a Tauri command
+// or the watcher thread) holds the mutex.
 
 use super::{IndexEntry, IndexSearchResult};
 use crate::error::{Error, Result};
 use rusqlite::{params, Connection};
 
-/// `usn_watermark` satırı.
+/// A `usn_watermark` row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Watermark {
     pub next_usn: i64,
     pub journal_id: i64,
 }
 
-/// Verilen ciltteki watermark'ı oku.
-/// Gemini review B5 — eski `.ok()` zinciri TÜM DB hatalarını (kilitli DB,
-/// bozulma, IO) "watermark yok" sanıp gereksiz full re-enumerate
-/// tetikliyordu. Artık yalnız satır-yok None; diğer hatalar yükselir.
+/// Read the watermark of the given volume.
+/// Gemini review B5 — the old `.ok()` chain mistook ALL DB errors (locked
+/// DB, corruption, IO) for "no watermark" and triggered needless full
+/// re-enumeration. Now only row-missing yields None; other errors propagate.
 pub fn load_watermark(conn: &Connection, volume_id: &str) -> Result<Option<Watermark>> {
     use rusqlite::OptionalExtension;
     conn.query_row(
@@ -51,7 +51,7 @@ pub fn save_watermark(conn: &Connection, volume_id: &str, wm: Watermark) -> Resu
     Ok(())
 }
 
-/// `IndexEntry` toplu upsert. Tek transaction.
+/// Bulk upsert of `IndexEntry` rows. Single transaction.
 pub fn save_entries(conn: &mut Connection, entries: &[IndexEntry]) -> Result<usize> {
     if entries.is_empty() {
         return Ok(0);
@@ -93,7 +93,7 @@ pub fn save_entries(conn: &mut Connection, entries: &[IndexEntry]) -> Result<usi
     Ok(written)
 }
 
-/// Tek bir entry sil.
+/// Delete a single entry.
 pub fn delete_entry(conn: &Connection, volume_id: &str, file_ref: i64) -> Result<bool> {
     let n = conn
         .execute(
@@ -104,7 +104,7 @@ pub fn delete_entry(conn: &Connection, volume_id: &str, file_ref: i64) -> Result
     Ok(n > 0)
 }
 
-/// Bir cilt için tüm girdileri sil (full re-enumerate öncesi).
+/// Delete all entries of a volume (before a full re-enumerate).
 pub fn purge_volume(conn: &Connection, volume_id: &str) -> Result<usize> {
     let n1 = conn
         .execute(
@@ -120,7 +120,7 @@ pub fn purge_volume(conn: &Connection, volume_id: &str) -> Result<usize> {
     Ok(n1)
 }
 
-/// Mevcut girdiyi oku.
+/// Read the existing entry.
 pub fn load_entry(conn: &Connection, volume_id: &str, file_ref: i64) -> Result<Option<IndexEntry>> {
     let row = conn
         .query_row(
@@ -144,9 +144,9 @@ pub fn load_entry(conn: &Connection, volume_id: &str, file_ref: i64) -> Result<O
     Ok(row)
 }
 
-/// LIKE '%query%' substring araması, top-N.
+/// LIKE '%query%' substring search, top-N.
 pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<IndexSearchResult>> {
-    // SQL escape karakterleri (%/_) literal aramaya ESCAPE clause ile çevir.
+    // Turn the SQL escape characters (%/_) into a literal search via the ESCAPE clause.
     let escaped = query
         .replace('\\', "\\\\")
         .replace('%', "\\%")
@@ -180,13 +180,13 @@ pub fn search(conn: &Connection, query: &str, limit: usize) -> Result<Vec<IndexS
     Ok(out)
 }
 
-/// Bir file_ref için root'a kadar parent zinciri kur. SQLite
-/// `WITH RECURSIVE` kullanılır. Yalnız ilgili cilt içinde gez,
-/// 64 seviye ile sınırla (sonsuz döngüye karşı).
+/// Build the parent chain up to the root for a file_ref. SQLite
+/// `WITH RECURSIVE` is used. Walk only inside the relevant volume,
+/// limited to 64 levels (against infinite loops).
 ///
-/// Gemini review B4 — NTFS root (file_ref 5, parent 5) self-join yapıp
-/// `C:\C:\C:\...` çöpü üretiyordu. Recursive terime `u.file_ref != c.file_ref`
-/// koşulu self-join'i keser; zincir root'ta durur.
+/// Gemini review B4 — the NTFS root (file_ref 5, parent 5) used to self-join
+/// and produce `C:\C:\C:\...` garbage. The `u.file_ref != c.file_ref` condition
+/// on the recursive term cuts the self-join; the chain stops at the root.
 pub fn resolve_full_path(conn: &Connection, volume_id: &str, file_ref: i64) -> Result<String> {
     let mut stmt = conn
         .prepare(
@@ -265,7 +265,7 @@ mod tests {
             assert_eq!(&loaded, e);
         }
 
-        // LIKE ile substring; 10 dosya hepsi "file_" ile başlar
+        // Substring via LIKE; all 10 files start with "file_"
         let r = search(&conn, "file_", 100).unwrap();
         assert_eq!(r.len(), 10);
     }
@@ -311,13 +311,13 @@ mod tests {
         save_entries(&mut conn, &entries).unwrap();
         assert!(delete_entry(&conn, r"\\.\C:", 1).unwrap());
         assert!(!delete_entry(&conn, r"\\.\C:", 999).unwrap());
-        // C: dropped row → 1 kalmalı (b.txt); D: kalsın
+        // C: dropped row → 1 must remain (b.txt); D: should stay
         assert_eq!(crate::index::count_entries(&conn, r"\\.\C:").unwrap(), 1);
         assert_eq!(crate::index::count_entries(&conn, r"\\.\D:").unwrap(), 1);
         let purged = purge_volume(&conn, r"\\.\C:").unwrap();
         assert_eq!(purged, 1);
         assert_eq!(crate::index::count_entries(&conn, r"\\.\C:").unwrap(), 0);
-        // D: dokunulmadı
+        // D: untouched
         assert_eq!(crate::index::count_entries(&conn, r"\\.\D:").unwrap(), 1);
     }
 
@@ -325,7 +325,7 @@ mod tests {
     fn full_path_recursive_chain() {
         let mut conn = open_test_db();
         let v = r"\\.\C:";
-        // Hiyerarşi: 5 root → 10 Users → 20 engin → 30 report.docx
+        // Hierarchy: 5 root → 10 Users → 20 engin → 30 report.docx
         let entries = vec![
             sample(v, 5, 5, "C:", 1), // root self-ref
             sample(v, 10, 5, "Users", 2),
@@ -333,8 +333,8 @@ mod tests {
             sample(v, 30, 20, "report.docx", 4),
         ];
         save_entries(&mut conn, &entries).unwrap();
-        // 30 → Users → C: zinciri; root self-ref KESİLMELİ (Gemini review B4 —
-        // eskiden ~61 kez tekrar ediyordu).
+        // The 30 → Users → C: chain; the root self-ref MUST be cut (Gemini review B4 —
+        // it used to repeat ~61 times).
         let path = resolve_full_path(&conn, v, 30).unwrap();
         assert_eq!(path, "C:\\Users\\engin\\report.docx");
     }

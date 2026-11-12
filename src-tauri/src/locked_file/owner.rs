@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Lock Owner Detection — Windows Restart Manager (Bölüm 34.4 alternatifi).
+// Lock Owner Detection — Windows Restart Manager (Chapter 34.4 alternative).
 //
-// Spec NtQuerySystemInformation öneriyor; v0.1'de **Restart Manager** seçildi:
-//   * Documented Win32 API (Microsoft'un kendi "What's using this file?"
-//     diyalogları RM kullanır — Sysinternals Handle.exe'ye eşdeğer).
-//   * Tek dosya için PID + process display name listesi döner.
-//   * Admin yetkisi GEREKMEZ (NtQuerySystemInformation handle table tam
-//     dump için elevated olmak ister).
+// The spec suggests NtQuerySystemInformation; v0.1 chose **Restart Manager**:
+//   * Documented Win32 API (Microsoft's own "What's using this file?"
+//     dialogs use RM — equivalent to Sysinternals Handle.exe).
+//   * Returns a PID + process display name list for a single file.
+//   * Does NOT require admin rights (NtQuerySystemInformation wants to be
+//     elevated for a full handle-table dump).
 //
-// v0.2'de NtQuerySystemInformation ile derin handle table forensics
-// (Bölüm 34.4) eklenebilir — RM yetersiz kalan kenarlar için.
+// In v0.2, deep handle-table forensics via NtQuerySystemInformation
+// (Chapter 34.4) may be added — for the edges where RM falls short.
 
 use crate::error::{Error, Result};
 use serde::Serialize;
@@ -32,7 +32,7 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
         RmEndSession, RmGetList, RmRegisterResources, RmStartSession, RM_PROCESS_INFO,
     };
 
-    // 1. Session aç. strSessionKey 32 wchar + null.
+    // 1. Open a session. strSessionKey is 32 wchar + null.
     let mut session_handle: u32 = 0;
     let mut session_key: [u16; 33] = [0; 33];
     let start_rc = unsafe {
@@ -49,9 +49,9 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
         )));
     }
 
-    // RAII benzeri: session_handle bu fonksiyondan çıkmadan kapatılır.
+    // RAII-like: session_handle is closed before leaving this function.
     let result = (|| -> Result<Vec<LockOwner>> {
-        // 2. Dosyayı kaydet.
+        // 2. Register the file.
         let wide_path: Vec<u16> = path
             .as_os_str()
             .encode_wide()
@@ -66,15 +66,15 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
             )));
         }
 
-        // 3. RmGetList — iki turlu: önce boyut, sonra dolu liste.
-        //    Gemini review B11 — probe ile fetch arasında process listesi
-        //    büyürse fetch de ERROR_MORE_DATA dönebilir; sınırlı retry
-        //    (3 deneme) ile toparlanır.
+        // 3. RmGetList — two passes: first the size, then the filled list.
+        //    Gemini review B11 — if the process list grows between the probe
+        //    and the fetch, the fetch can also return ERROR_MORE_DATA; it
+        //    recovers with a bounded retry (3 attempts).
         let mut needed: u32 = 0;
         let mut count: u32 = 0;
         let mut reboot_reasons: u32 = 0;
 
-        // İlk çağrı: pnProcInfo = 0 → MORE_DATA + pnProcInfoNeeded set olur.
+        // First call: pnProcInfo = 0 → MORE_DATA + pnProcInfoNeeded get set.
         let probe_rc = unsafe {
             RmGetList(
                 session_handle,
@@ -91,7 +91,7 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
             )));
         }
         if needed == 0 {
-            // Hiçbir process tutmuyor — temiz.
+            // No process holds it — clean.
             return Ok(Vec::new());
         }
 
@@ -113,7 +113,7 @@ pub fn find_lock_owners(path: &std::path::Path) -> Result<Vec<LockOwner>> {
                 break;
             }
             if fetch_rc == ERROR_MORE_DATA && needed > 0 {
-                // Liste yine büyüdü — yeni needed ile tekrar dene.
+                // The list grew again — retry with the new needed.
                 continue;
             }
             return Err(Error::LockedFile(format!(

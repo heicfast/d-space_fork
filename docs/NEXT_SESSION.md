@@ -5,7 +5,9 @@
 > **Last updated:** 2026-11-12 — v0.4.0-beta: DiskWizard merge complete
 > (Recovery Wizard React UI + the real recovery engine, mock-backend
 > eradication, admin manifest, cleanup feature set), post-merge CI
-> stabilization and the full English runtime-string pass.
+> stabilization, the full English runtime-string pass and the legacy
+> developer-comment translation pass (the tree is now fully English
+> except the deliberate UTF-16 decode fixture).
 > **Current version:** `v0.4.0-beta` (0.4.0 — heicfast/d-space_fork
 > channel)
 > **Target:** v0.5.0 → `v1.0.0-stable`
@@ -47,18 +49,18 @@ Open this document first thing in the next session. Flow:
 
 **Next work for the coming session:**
 
-1. Verify the v0.4.0-beta release workflow output (MSI + NSIS exe +
-   latest.json + signatures + checksums).
-2. Manual smoke test on a Windows machine: install (UAC prompt) →
+1. Manual smoke test on a Windows machine: install (UAC prompt) →
    scan → deleted-file recovery preview → recovery job → staging →
-   undo → update check.
-3. Phase 4.3 — synthetic NTFS VHDX fixture generator (requires a
+   undo → update check. (The v0.4.0-beta release workflow output is
+   verified: MSI + NSIS exe + latest.json + signatures + checksums
+   all present and matching.)
+2. Phase 4.3 — synthetic NTFS VHDX fixture generator (requires a
    Windows admin environment).
-4. Phase 5.4 — EV certificate purchase + signtool + winget/Scoop
+3. Phase 5.4 — EV certificate purchase + signtool + winget/Scoop
    (organizational action).
-5. Developer-comment translation pass over the legacy d-space core
-   (~1,300 comment lines remain in Turkish; runtime strings are all
-   English).
+4. Consider a v0.4.1-beta point release to ship the post-tag
+   follow-ups (comment pass, runtime-string stragglers, hardware
+   value fixes) documented in the CHANGELOG.
 
 ---
 
@@ -149,6 +151,12 @@ git tag -l --sort=-creatordate | head -5
   wiring tests, 12 e2e; CI/UI-Smoke pipelines merged and green.
 - Post-merge: 7 Windows test failures fixed, Tauri versions aligned,
   full English runtime-string pass, docs translated.
+- Post-tag follow-ups: updater endpoint repair (betas publish as
+  Latest), legacy developer-comment translation (~1,400 lines, 43
+  files, comment-only verified by a Rust-aware lexer diff), 30
+  runtime-string stragglers fixed, stale .github/REPO_STANDARDS.md
+  removed; v0.4.0-beta release artifacts verified (checksums match,
+  3-platform signed latest.json feed serves from releases/latest).
 
 ### 2026-11-07 session (v0.3.0-beta — review wave)
 

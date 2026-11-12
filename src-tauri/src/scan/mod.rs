@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Tarama motoru — Master mimari Bölüm 5 (MFT) + Bölüm 9.6 (lazy viewport
-// query) + Bölüm 33 (external/network drive katmanları).
+// Scan engine — Master architecture Chapter 5 (MFT) + Chapter 9.6 (lazy
+// viewport query) + Chapter 33 (external/network drive layers).
 //
-// Mimari ilkeler:
-//   * Single Source of Truth (Bölüm 4.4): `Arc<ScanTree>` Rust tarafında
-//     tek sahip. Vue sadece `NodeId` referansı tutar.
-//   * Üç katmanlı yetki stratejisi (Bölüm 5.2A): MFT Service → admin raw
+// Architectural principles:
+//   * Single Source of Truth (Chapter 4.4): `Arc<ScanTree>` has a single
+//     owner on the Rust side. Vue only holds `NodeId` references.
+//   * Three-layer privilege strategy (Chapter 5.2A): MFT Service → admin raw
 //     volume → FindFirstFile fallback.
-//   * Hot-path izolasyonu: VSS scan sırasında ASLA çalışmaz
-//     (bkz. `locked_file` Bölüm 34.5.1).
+//   * Hot-path isolation: never runs during a VSS scan
+//     (see `locked_file` Chapter 34.5.1).
 
 pub mod cloud;
 pub mod find_first;
@@ -34,21 +34,21 @@ pub use walk::{
 
 use serde::Serialize;
 
-/// MFT record numarası — düğüm kimliği olarak kullanılır (Bölüm 4.4).
+/// MFT record number — used as the node identity (Chapter 4.4).
 pub type NodeId = u64;
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub enum ScanStrategy {
-    /// Bölüm 5.2A Katman 3 — Tek seferlik kurulu Windows servisi (v2 stub).
+    /// Chapter 5.2A Layer 3 — one-shot installed Windows service (v2 stub).
     MftService,
-    /// Bölüm 5.2A Katman 1 — Process elevated, `\\.\X:` raw read.
+    /// Chapter 5.2A Layer 1 — process elevated, `\\.\X:` raw read.
     DirectRawVolume,
-    /// Bölüm 5.2A Katman 2 — Standart mod, FindFirstFile/FindNextFile.
+    /// Chapter 5.2A Layer 2 — standard mode, FindFirstFile/FindNextFile.
     FindFirstFileFallback,
 }
 
-/// Bölüm 5.2A — yetkiye göre tarama stratejisi seçimi.
-/// MFT Service v2 stub, şimdilik elevation flag'ine bakar.
+/// Chapter 5.2A — scan strategy selection based on privilege.
+/// MFT Service is a v2 stub; for now it looks at the elevation flag.
 pub fn pick_strategy() -> ScanStrategy {
     if is_elevated() {
         ScanStrategy::DirectRawVolume

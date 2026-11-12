@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// VSS (Volume Shadow Copy Service) düşük seviye COM köprüsü.
-// Master mimari Bölüm 34.2 + 34.5.4 + Discovery Log #001, #002, #004.
+// VSS (Volume Shadow Copy Service) low-level COM bridge.
+// Master architecture Chapter 34.2 + 34.5.4 + Discovery Log #001, #002, #004.
 //
-// İlkeler:
-//   * Tüm `IVssBackupComponents` çağrıları worker thread'de yapılır
-//     (MTA apartment). UI thread VSS pointer'a dokunmaz.
-//   * `RawSnapshot` Drop'ta panik yapar — manuel `destroy_snapshot`
-//     çağrılması zorunlu. BackupComplete olmadan Release veya yanlış
-//     sırayla cleanup → service-side leak + crash.
+// Principles:
+//   * All `IVssBackupComponents` calls are made on the worker thread
+//     (MTA apartment). The UI thread never touches the VSS pointer.
+//   * `RawSnapshot` panics on Drop — calling `destroy_snapshot`
+//     manually is mandatory. Release without BackupComplete or cleanup
+//     in the wrong order → service-side leak + crash.
 //   * Discovery Log #001 — `SetBackupState(false, false, VSS_BT_COPY, false)`.
-//   * Discovery Log #004 — `SetContext(VSS_CTX_FILE_SHARE_BACKUP)` seçildi
-//     (writer involvement yok, auto-release, non-persistent — sadece read).
+//   * Discovery Log #004 — `SetContext(VSS_CTX_FILE_SHARE_BACKUP)` was chosen
+//     (no writer involvement, auto-release, non-persistent — read only).
 //
-// `windows 0.61` IVssBackupComponents requester interface'ini sunmuyor
-// (Discovery Log #002). Plan A: `winapi 0.3.9` crate'i `vsbackup` feature
-// ile `IVssBackupComponentsVtbl` + `CreateVssBackupComponents` factory'sini
-// sağlıyor — manuel vtable kurulumu gereksiz.
+// `windows 0.61` does not expose the IVssBackupComponents requester
+// interface (Discovery Log #002). Plan A: the `winapi 0.3.9` crate with
+// the `vsbackup` feature provides `IVssBackupComponentsVtbl` + the
+// `CreateVssBackupComponents` factory — manual vtable setup unnecessary.
 
 #![cfg(all(windows, feature = "vss"))]
 
@@ -36,15 +36,15 @@ use winapi::um::vsbackup::{
 };
 use winapi::um::vss::{IVssAsync, VSS_BT_COPY, VSS_CTX_FILE_SHARE_BACKUP, VSS_SNAPSHOT_PROP};
 
-// Bazı winapi sürümlerinde `VSS_S_ASYNC_FINISHED` doğrudan re-export
-// edilmiyor; constant değerleri sabitleyerek kullanıyoruz.
+// Some winapi versions do not re-export `VSS_S_ASYNC_FINISHED` directly;
+// we use it by pinning the constant values.
 const VSS_S_ASYNC_FINISHED: i32 = 0x0004_230A;
 const VSS_E_VOLUME_NOT_SUPPORTED: i32 = 0x8004_230C_u32 as i32;
 const VSS_E_BAD_STATE: i32 = 0x8004_2301_u32 as i32;
 const VSS_E_INSUFFICIENT_STORAGE: i32 = 0x8004_231F_u32 as i32;
 
-// COM authentication seviyeleri — winapi sürümleri arasında farklı yerlerde
-// olabildiği için sabit literal'le tanımladık.
+// COM authentication levels — they can live in different places across
+// winapi versions, so we defined them with fixed literals.
 const RPC_C_AUTHN_LEVEL_PKT_PRIVACY: u32 = 6;
 const RPC_C_IMP_LEVEL_IDENTIFY: u32 = 2;
 const EOAC_NONE: u32 = 0;
@@ -56,37 +56,37 @@ const GUID_NULL: GUID = GUID {
     Data4: [0; 8],
 };
 
-/// HRESULT → mesajlı `Error::Snapshot`.
-/// Yaygın VSS hata kodları için açıklayıcı metin döner; aksi halde hex kod.
+/// HRESULT → `Error::Snapshot` with a message.
+/// Returns descriptive text for common VSS error codes; otherwise the hex code.
 pub(crate) fn hresult_to_error(hr: i32, ctx: &str) -> Error {
     let detail = match hr {
-        E_ACCESSDENIED => "E_ACCESSDENIED (admin gerekli)",
+        E_ACCESSDENIED => "E_ACCESSDENIED (admin required)",
         VSS_E_BAD_STATE => "VSS_E_BAD_STATE (wrong sequence or already busy)",
         VSS_E_VOLUME_NOT_SUPPORTED => "VSS_E_VOLUME_NOT_SUPPORTED (not NTFS or VSS not supported)",
-        VSS_E_INSUFFICIENT_STORAGE => "VSS_E_INSUFFICIENT_STORAGE (shadow storage yetersiz)",
-        _ => "bilinmeyen HRESULT",
+        VSS_E_INSUFFICIENT_STORAGE => "VSS_E_INSUFFICIENT_STORAGE (insufficient shadow storage)",
+        _ => "unknown HRESULT",
     };
     Error::Snapshot(format!("VSS {ctx}: {detail} (HRESULT=0x{:08X})", hr as u32))
 }
 
-/// UTF-8 → BSTR (SysAllocStringLen). Çağıran sahipliği alır, `bstr_free` ile
-/// serbest bırakmalı.
+/// UTF-8 → BSTR (SysAllocStringLen). The caller takes ownership and must
+/// free it with `bstr_free`.
 pub(crate) unsafe fn bstr_from_str(s: &str) -> BSTR {
     let utf16: Vec<u16> = s.encode_utf16().collect();
-    // SysAllocStringLen null terminator'u kendi ekler.
+    // SysAllocStringLen adds the null terminator itself.
     SysAllocStringLen(utf16.as_ptr(), utf16.len() as u32)
 }
 
-/// BSTR'yi serbest bırakır. Null safe (SysFreeString null'a tolere).
+/// Frees the BSTR. Null safe (SysFreeString tolerates null).
 pub(crate) unsafe fn bstr_free(b: BSTR) {
     if !b.is_null() {
         SysFreeString(b);
     }
 }
 
-/// COM MTA apartment init. Worker thread başlangıcında çağrılır.
-/// `RPC_E_CHANGED_MODE` → aynı thread STA ile init edilmiş; bizim için OK
-/// değil, error döner. `S_FALSE` → zaten init edilmiş (OK).
+/// COM MTA apartment init. Called at worker thread startup.
+/// `RPC_E_CHANGED_MODE` → the same thread was initialized as STA; not OK
+/// for us, returns an error. `S_FALSE` → already initialized (OK).
 pub(crate) unsafe fn init_com_mta() -> Result<()> {
     let hr = CoInitializeEx(ptr::null_mut(), COINIT_MULTITHREADED);
     if hr != S_OK && hr != S_FALSE && hr != RPC_E_CHANGED_MODE {
@@ -104,31 +104,31 @@ pub(crate) unsafe fn init_com_mta() -> Result<()> {
         EOAC_NONE,
         ptr::null_mut(),
     );
-    // RPC_E_TOO_LATE → process'te zaten çağrılmış (Tauri ana thread'i yapmış olabilir).
+    // RPC_E_TOO_LATE → already called in this process (perhaps by the Tauri main thread).
     if sec_hr != S_OK && sec_hr != RPC_E_TOO_LATE {
         return Err(hresult_to_error(sec_hr, "CoInitializeSecurity"));
     }
     Ok(())
 }
 
-/// CoUninitialize — worker thread sonunda. Idempotent.
+/// CoUninitialize — at worker thread end. Idempotent.
 pub(crate) unsafe fn uninit_com() {
     CoUninitialize();
 }
 
-/// `IVssAsync` operasyonunu tamamlanana kadar bekler. Async pointer her
-/// durumda (hata olsa bile) Release edilir.
+/// Waits for an `IVssAsync` operation to complete. The async pointer is
+/// Released in every case (even on error).
 ///
-/// Gemini review B9 — eskiden `Wait(u32::MAX)` (INFINITE) kullanılıyordu;
-/// VSS service'i kilitlenirse pool worker thread'i sonsuza kadar bloklanıp
-/// duplicate scan'i donduruyordu. Artık sınırlı timeout ile döngü:
-/// toplam 60 sn sonra `Error::Snapshot("timeout")` döner.
+/// Gemini review B9 — previously `Wait(u32::MAX)` (INFINITE) was used; if
+/// the VSS service hung, the pool worker thread blocked forever and froze
+/// the duplicate scan. Now a loop with a bounded timeout: after 60 s total
+/// it returns `Error::Snapshot("timeout")`.
 pub(crate) unsafe fn wait_async(p_async: *mut IVssAsync, ctx: &str) -> Result<()> {
     if p_async.is_null() {
         return Err(Error::Snapshot(format!("VSS {ctx}: async pointer null")));
     }
 
-    // 60 × 1 sn bekleyiş — toplam 60 sn tavan. DoSnapshotSet normalde 1-3 sn.
+    // 60 × 1 s waits — 60 s total ceiling. DoSnapshotSet normally takes 1-3 s.
     const WAIT_SLICE_MS: u32 = 1_000;
     const MAX_SLICES: u32 = 60;
 
@@ -137,7 +137,7 @@ pub(crate) unsafe fn wait_async(p_async: *mut IVssAsync, ctx: &str) -> Result<()
         wait_hr = (*p_async).Wait(WAIT_SLICE_MS);
         if wait_hr != S_OK {
             // WAIT_TIMEOUT = HRESULT_FROM_WIN32(ERROR_TIMEOUT) 0x800705B4 —
-            // dilim tükendi, tekrar dene. Diğer hatalar kalıcı.
+            // the slice ran out, try again. Other errors are permanent.
             if wait_hr as u32 == 0x8007_05B4 {
                 continue;
             }
@@ -153,8 +153,8 @@ pub(crate) unsafe fn wait_async(p_async: *mut IVssAsync, ctx: &str) -> Result<()
     let mut status: i32 = 0;
     let mut qs_hr = (*p_async).QueryStatus(&mut status, ptr::null_mut());
 
-    // Hâlă tamamlanmadıysa (futur durumlar) kalan süreyi harca — toplam
-    // 60 sn dilim bütçesi içinde status VSS_S_ASYNC_FINISHED olmalı.
+    // If still not complete (future cases), spend the remaining time —
+    // within the total 60 s slice budget the status must be VSS_S_ASYNC_FINISHED.
     for _ in 0..MAX_SLICES {
         if qs_hr != S_OK {
             break;
@@ -163,11 +163,11 @@ pub(crate) unsafe fn wait_async(p_async: *mut IVssAsync, ctx: &str) -> Result<()
             break;
         }
         if status == 0x0004_2306 {
-            // VSS_S_ASYNC_CANCELLED — iptal, bekleme anlamsız.
+            // VSS_S_ASYNC_CANCELLED — cancelled, waiting is pointless.
             break;
         }
         if status == 0x0004_2305 {
-            // VSS_S_ASYNC_PENDING — bir dilim daha bekle.
+            // VSS_S_ASYNC_PENDING — wait one more slice.
             std::thread::sleep(std::time::Duration::from_millis(WAIT_SLICE_MS as u64));
             qs_hr = (*p_async).QueryStatus(&mut status, ptr::null_mut());
             continue;
@@ -194,8 +194,8 @@ pub(crate) unsafe fn wait_async(p_async: *mut IVssAsync, ctx: &str) -> Result<()
     Ok(())
 }
 
-/// Çekirdek raw snapshot — sadece `vss_pool::Worker` thread'inde yaşar.
-/// Drop manuel `destroy_snapshot` ile zorunlu (otomatik drop panic'ler).
+/// Core raw snapshot — lives only on the `vss_pool::Worker` thread.
+/// Manual teardown via `destroy_snapshot` is mandatory (automatic drop panics).
 pub(crate) struct RawSnapshot {
     pub backup: *mut IVssBackupComponents,
     #[allow(dead_code)]
@@ -204,23 +204,23 @@ pub(crate) struct RawSnapshot {
     pub device_object: Vec<u16>,
 }
 
-// Worker thread sahibi → Send. Pointer yalnızca o thread'de dereference edilir.
+// Worker thread owns it → Send. The pointer is dereferenced only on that thread.
 unsafe impl Send for RawSnapshot {}
 
 impl Drop for RawSnapshot {
     fn drop(&mut self) {
-        // Üretimde panik istemiyoruz (worker thread düşmesin) ama
-        // unwind sırasında düşerse tracing ile uyaralım. `destroy_snapshot`
-        // çağrılmadan drop'a düşmek = service-side leak + olası crash.
+        // We do not want a panic in production (the worker thread should not
+        // die), but if we drop during unwind, warn via tracing. Reaching
+        // drop without a `destroy_snapshot` call = service-side leak + possible crash.
         if !self.backup.is_null() {
             if std::thread::panicking() {
-                // Panic unwind içindeyiz; abort yerine sessiz Release.
+                // We are inside a panic unwind; silently Release instead of aborting.
                 unsafe {
                     (*self.backup).Release();
                 }
             } else {
-                // Bilinçli leak değil — log + tek bir Release deneyebiliriz
-                // ama BackupComplete olmadan service-side state kirlenir.
+                // Not a deliberate leak — we can log + attempt a single
+                // Release, but without BackupComplete the service-side state gets dirty.
                 tracing::error!(
                     "RawSnapshot Drop manuel destroy_snapshot olmadan tetiklendi — \
                      VSS service-side leak riski (BackupComplete çağrılmadı)"
@@ -233,13 +233,13 @@ impl Drop for RawSnapshot {
     }
 }
 
-/// `\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN` device path +
-/// orijinal yolun volume root sonrası kısmını birleştirir.
+/// Combines the `\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN` device
+/// path + the part of the original path after the volume root.
 ///
-/// Örnek: device="\\?\GLOBALROOT\Device\HSC42", original="C:\Users\engin\busy.docx"
+/// Example: device="\\?\GLOBALROOT\Device\HSC42", original="C:\Users\engin\busy.docx"
 ///   → "\\?\GLOBALROOT\Device\HSC42\Users\engin\busy.docx"
 pub(crate) fn snapshot_path(device_object: &[u16], original: &Path) -> PathBuf {
-    // device_object null-terminated wide string olabilir; null'a kadar al.
+    // device_object may be a null-terminated wide string; take up to the null.
     let dev_len = device_object
         .iter()
         .position(|&c| c == 0)
@@ -247,18 +247,18 @@ pub(crate) fn snapshot_path(device_object: &[u16], original: &Path) -> PathBuf {
     let device = String::from_utf16_lossy(&device_object[..dev_len]);
 
     let orig = original.to_string_lossy();
-    // Volume root'unu (C:\, D:\, vs.) at, kalan path-after-root kısmını al.
+    // Drop the volume root (C:\, D:\, etc.) and take the remaining path-after-root.
     let after = if orig.len() >= 3
         && orig.as_bytes()[1] == b':'
         && (orig.as_bytes()[2] == b'\\' || orig.as_bytes()[2] == b'/')
     {
-        &orig[2..] // "\Users\engin\busy.docx" (volume harfi atıldı)
+        &orig[2..] // "\Users\engin\busy.docx" (volume letter dropped)
     } else {
-        // UNC veya beklenmedik format — olduğu gibi kullan.
+        // UNC or unexpected format — use as-is.
         orig.as_ref()
     };
 
-    // Trailing slash kontrol — device path zaten "...HSC42" şeklinde, slash YOK.
+    // Trailing slash check — the device path already ends like "...HSC42", NO slash.
     let mut combined = device;
     if !after.starts_with('\\') {
         combined.push('\\');
@@ -267,10 +267,10 @@ pub(crate) fn snapshot_path(device_object: &[u16], original: &Path) -> PathBuf {
     PathBuf::from(combined)
 }
 
-/// Volume snapshot'a uygun mu (NTFS + VSS destekli) hızlı sorgu.
-/// Heavy işlem yapmaz — sadece `IsVolumeSupported` çağırır.
-/// Sonraki sprint'te `vss_available_for` deep probe için kullanılacak;
-/// şu an yalnızca debug yardımcısı.
+/// Quick query for whether the volume is snapshot-suitable (NTFS + VSS
+/// supported). Does no heavy work — only calls `IsVolumeSupported`.
+/// Will be used by the `vss_available_for` deep probe in a later sprint;
+/// for now it is only a debugging aid.
 #[allow(dead_code)]
 pub(crate) unsafe fn is_volume_supported(volume_root: &str) -> Result<bool> {
     let mut p_backup: *mut IVssBackupComponents = ptr::null_mut();
@@ -306,13 +306,13 @@ pub(crate) unsafe fn is_volume_supported(volume_root: &str) -> Result<bool> {
     result
 }
 
-/// Volume için snapshot oluşturur. Tam zincir:
+/// Creates a snapshot for the volume. Full chain:
 ///   CreateVssBackupComponents → InitializeForBackup → SetBackupState
 ///   → SetContext(FILE_SHARE_BACKUP) → GatherWriterMetadata
 ///   → IsVolumeSupported → StartSnapshotSet → AddToSnapshotSet
 ///   → PrepareForBackup → DoSnapshotSet → GetSnapshotProperties
 ///
-/// Hata yolunda `cleanup_failed_backup` ile geri sarım.
+/// On the error path, rollback via `cleanup_failed_backup`.
 pub(crate) unsafe fn create_snapshot(volume_root: &str) -> Result<RawSnapshot> {
     let mut p_backup: *mut IVssBackupComponents = ptr::null_mut();
     let hr = CreateVssBackupComponents(&mut p_backup);
@@ -320,10 +320,10 @@ pub(crate) unsafe fn create_snapshot(volume_root: &str) -> Result<RawSnapshot> {
         return Err(hresult_to_error(hr, "CreateVssBackupComponents"));
     }
 
-    // Hata path'inde p_backup'u toplayan helper.
+    // Helper that cleans up p_backup on the error path.
     let cleanup = |past_do_snapshot: bool| {
         if past_do_snapshot {
-            // DoSnapshotSet sonrası hata → BackupComplete + Release.
+            // Error after DoSnapshotSet → BackupComplete + Release.
             let mut p_async: *mut IVssAsync = ptr::null_mut();
             let bc_hr = (*p_backup).BackupComplete(&mut p_async);
             if bc_hr == S_OK && !p_async.is_null() {
@@ -331,7 +331,7 @@ pub(crate) unsafe fn create_snapshot(volume_root: &str) -> Result<RawSnapshot> {
                 (*p_async).Release();
             }
         } else {
-            // DoSnapshotSet öncesi → AbortBackup.
+            // Before DoSnapshotSet → AbortBackup.
             (*p_backup).AbortBackup();
         }
         (*p_backup).Release();
@@ -432,7 +432,7 @@ pub(crate) unsafe fn create_snapshot(volume_root: &str) -> Result<RawSnapshot> {
     }
     if let Err(e) = wait_async(p_async, "DoSnapshotSet") {
         bstr_free(vol_bstr);
-        cleanup(true); // DoSnapshotSet sonrası — BackupComplete gerekli
+        cleanup(true); // after DoSnapshotSet — BackupComplete is required
         return Err(e);
     }
 
@@ -445,7 +445,7 @@ pub(crate) unsafe fn create_snapshot(volume_root: &str) -> Result<RawSnapshot> {
         return Err(hresult_to_error(gsp_hr, "GetSnapshotProperties"));
     }
 
-    // device_object kopyala (null-terminated wide).
+    // Copy device_object (null-terminated wide).
     let device_object: Vec<u16> = if props.m_pwszSnapshotDeviceObject.is_null() {
         Vec::new()
     } else {
@@ -477,8 +477,8 @@ pub(crate) unsafe fn create_snapshot(volume_root: &str) -> Result<RawSnapshot> {
     })
 }
 
-/// RawSnapshot'u sağlıklı şekilde temizler — `BackupComplete` + `Release`.
-/// Sahiplik move alınır, drop panic tetiklenmez.
+/// Cleans up a RawSnapshot the healthy way — `BackupComplete` + `Release`.
+/// Ownership is moved in, so the drop panic is not triggered.
 pub(crate) unsafe fn destroy_snapshot(mut snap: RawSnapshot) -> Result<()> {
     if snap.backup.is_null() {
         return Ok(());
@@ -489,11 +489,11 @@ pub(crate) unsafe fn destroy_snapshot(mut snap: RawSnapshot) -> Result<()> {
     let async_res = if hr == S_OK {
         wait_async(p_async, "BackupComplete")
     } else {
-        Ok(()) // BackupComplete fail olsa bile Release et + raporla
+        Ok(()) // even if BackupComplete fails: Release + report
     };
 
     (*snap.backup).Release();
-    snap.backup = ptr::null_mut(); // Drop'u no-op et
+    snap.backup = ptr::null_mut(); // make Drop a no-op
 
     if hr != S_OK {
         return Err(hresult_to_error(hr, "BackupComplete"));
@@ -502,24 +502,24 @@ pub(crate) unsafe fn destroy_snapshot(mut snap: RawSnapshot) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Test ve mock destek
+// Test and mock support
 // ---------------------------------------------------------------------------
 
-/// `SnapshotProvider` trait — test enjeksiyonu için. Production = `WinapiVssProvider`,
-/// test = `MockProvider`. Pool generic değil; `Arc<dyn SnapshotProvider>` tutar.
+/// `SnapshotProvider` trait — for test injection. Production = `WinapiVssProvider`,
+/// test = `MockProvider`. The pool is not generic; it holds `Arc<dyn SnapshotProvider>`.
 pub(crate) trait SnapshotProvider: Send + Sync + 'static {
-    /// Verilen volume root için snapshot oluşturur.
+    /// Creates a snapshot for the given volume root.
     /// # Safety
-    /// COM apartment init edilmiş bir thread'de çağrılmalı.
+    /// Must be called on a thread with an initialized COM apartment.
     unsafe fn create(&self, volume: &str) -> Result<RawSnapshot>;
 
-    /// Snapshot'u temizler.
+    /// Cleans up the snapshot.
     /// # Safety
-    /// `snap.backup` aynı thread'de oluşturulmuş olmalı.
+    /// `snap.backup` must have been created on the same thread.
     unsafe fn destroy(&self, snap: RawSnapshot) -> Result<()>;
 }
 
-/// Production provider — winapi VSS çağrılarına delegasyon.
+/// Production provider — delegation to the winapi VSS calls.
 pub(crate) struct WinapiVssProvider;
 
 impl SnapshotProvider for WinapiVssProvider {
@@ -551,7 +551,7 @@ mod tests {
         let e = hresult_to_error(VSS_E_INSUFFICIENT_STORAGE, "test");
         assert!(format!("{e}").contains("INSUFFICIENT_STORAGE"));
 
-        // Bilinmeyen kod → "bilinmeyen HRESULT"
+        // Unknown code → "bilinmeyen HRESULT"
         let e = hresult_to_error(0x12345678, "test");
         assert!(format!("{e}").contains("bilinmeyen HRESULT"));
         assert!(format!("{e}").contains("12345678"));
@@ -566,7 +566,7 @@ mod tests {
             let len = SysStringLen(b);
             assert_eq!(len as usize, s.encode_utf16().count());
 
-            // İlk birkaç code point doğrula
+            // Verify the first few code points
             let slice = std::slice::from_raw_parts(b, len as usize);
             assert_eq!(slice[0], b'C' as u16);
             assert_eq!(slice[1], b':' as u16);

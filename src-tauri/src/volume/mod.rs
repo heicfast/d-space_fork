@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Volume Pre-Flight Status Check — Master mimari Bölüm 33.2 (v1.4 fix).
+// Volume Pre-Flight Status Check — Master architecture Chapter 33.2 (v1.4 fix).
 //
-// Tarama DENEMESİ yapılmadan ÖNCE volume statüsü sorgulanır. BitLocker
-// kilitli sürücüde Katman A/B/C sonsuz recursive deneme yapmasın diye
-// Katman 0 olarak eklendi (v1.4 race condition kapatma).
+// The volume status is queried BEFORE any scan ATTEMPT is made. Added as
+// Layer 0 so that Layers A/B/C do not retry endlessly on a BitLocker-locked
+// drive (v1.4 race condition fix).
 
 pub mod enumerate;
 pub mod hardware;
@@ -16,19 +16,19 @@ pub use preflight::pre_flight_check;
 
 use serde::Serialize;
 
-/// Katı sürücü harfi ayrıştırıcı — "C", "c:", "C:\\" (ve "C:\\alt\\path")
-/// kabul eder; UNC (`\\\\server\\share`), rootlu (`\\foo`), boş veya harf-
-/// dışı girdileri reddeder. Gemini review: eski `chars().find(alphabetic)`
-/// deseni `\\\\fileserver\\public` girdisini sessizce `F:` olarak yorumluyordu
-/// (yanlış volume MFT taraması riski). Tüm komut sınırlarında bu katı
-/// doğrulama kullanılır.
+/// Strict drive-letter parser — accepts "C", "c:", "C:\\" (and "C:\\alt\\path")
+/// but rejects UNC (`\\\\server\\share`), rooted (`\\foo`), empty, or non-letter
+/// inputs. Gemini review: the old `chars().find(alphabetic)` pattern silently
+/// interpreted `\\\\fileserver\\public` input as `F:` (risk of scanning the
+/// wrong volume's MFT). This strict validation is used at every command
+/// boundary.
 pub fn parse_drive_letter(input: &str) -> Option<char> {
     let trimmed = input.trim();
     let b = trimmed.as_bytes();
     if b.is_empty() {
         return None;
     }
-    // UNC veya rootlu path — asla drive harfi değil.
+    // UNC or rooted path — never a drive letter.
     if b[0] == b'\\' || b[0] == b'/' {
         return None;
     }
@@ -67,7 +67,7 @@ pub enum DriveKind {
 }
 
 impl DriveKind {
-    /// Win32 GetDriveTypeW dönüş değerini eşler.
+    /// Maps the Win32 GetDriveTypeW return value.
     pub fn from_win32(code: u32) -> Self {
         match code {
             0 => Self::Unknown,

@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Pre-flight volume check — Bölüm 33.2 Katman 0.
+// Pre-flight volume check — Chapter 33.2 Layer 0.
 //
-// Tarama denemesinden ÖNCE çağrılır. Hiçbir zaman raw volume açmaz
-// (`\\.\X:` admin gerektirir), bunun yerine kullanıcı-uzayı Win32
-// API'leriyle volume metadata'sını sorgular.
+// Called BEFORE a scan is attempted. It never opens the raw volume
+// (`\\.\X:` requires admin); instead it queries volume metadata via
+// user-space Win32 APIs.
 //
-// BitLocker detection v0.1'de TODO — WMI Win32_EncryptableVolume veya
-// manage-bde parse'ı sonraki sprint'te eklenir. Şu an: kilitli BitLocker
-// volume `GetVolumeInformationW` çağrısında hata döner ve `AccessDenied`
-// olarak işaretlenir (kullanıcıya BitLocker olabilir uyarısı UI'da).
+// BitLocker detection is a TODO in v0.1 — WMI Win32_EncryptableVolume or
+// manage-bde parsing arrives in a later sprint. For now: a locked
+// BitLocker volume makes `GetVolumeInformationW` fail and gets flagged
+// `AccessDenied` (the UI warns the user it may be BitLocker).
 
 use crate::error::{Error, Result};
 use crate::volume::{DriveKind, VolumeInfo, VolumeStatus};
@@ -108,7 +108,7 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
         }
         Err(e) => {
             // BitLocker locked volumes typically return access denied here.
-            // v0.1'de tek tip işliyoruz; v0.2'de WMI ile BitLocker ayırt edilecek.
+            // In v0.1 we treat them uniformly; v0.2 will distinguish BitLocker via WMI.
             debug!(?e, "GetVolumeInformationW failed");
             (String::new(), String::new(), 0, VolumeStatus::AccessDenied)
         }
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn unc_input_rejected() {
-        // Gemini review B2 — UNC girdisi sessizce sürücü harfine dönüşmemeli.
+        // Gemini review B2 — UNC input must not silently become a drive letter.
         assert!(normalize_drive_letter(r"\\fileserver\public").is_err());
         assert!(normalize_drive_letter("//server/share").is_err());
         assert!(normalize_drive_letter(r"\rooted").is_err());

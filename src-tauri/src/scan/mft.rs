@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// MFT probe — Bölüm 5.1–5.3.
+// MFT probe — Chapter 5.1–5.3.
 //
-// Bu sprint: volume handle açma + NTFS boot sector parse + temel metadata.
-// Hedef: ntfs crate'iyle entegrasyonun çalıştığını ve raw volume read
-// pipeline'ının ayakta olduğunu kanıtlamak.
+// This sprint: open the volume handle + NTFS boot sector parse + basic metadata.
+// Goal: prove the ntfs crate integration works and the raw volume read
+// pipeline is up and running.
 //
-// Sonraki sprint: MFT entry iteration + FileNode listesi + rayon paralel
-// aggregation (Bölüm 4.3, 9.6).
+// Next sprint: MFT entry iteration + FileNode list + rayon parallel
+// aggregation (Chapter 4.3, 9.6).
 
 use crate::error::{Error, Result};
 use ntfs::Ntfs;
@@ -16,7 +16,7 @@ use std::fs::File;
 use std::time::Instant;
 use tracing::{debug, info};
 
-/// NTFS boot sector'ünden okunan temel metadata.
+/// Basic metadata read from the NTFS boot sector.
 #[derive(Debug, Clone, Serialize)]
 pub struct MftProbe {
     pub drive: String,
@@ -28,8 +28,8 @@ pub struct MftProbe {
     pub elapsed_ms: u64,
 }
 
-/// "C", "c:", "C:\", "C:/Users" → r"\\.\C:" — katı doğrulama (UNC reddedilir,
-/// Gemini review B2).
+/// "C", "c:", "C:\", "C:/Users" → r"\\.\C:" — strict validation (UNC is
+/// rejected, Gemini review B2).
 fn normalize_volume_path(drive: &str) -> Result<String> {
     let letter = crate::volume::parse_drive_letter(drive)
         .map(|c| c.to_ascii_uppercase())
@@ -42,12 +42,12 @@ fn normalize_volume_path(drive: &str) -> Result<String> {
     Ok(format!(r"\\.\{}:", letter))
 }
 
-/// Volume handle açar, NTFS boot sector'ünü parse eder, temel metadata döner.
+/// Opens the volume handle, parses the NTFS boot sector, returns basic metadata.
 ///
-/// Yönetici yetkisi gerekir (`\\.\X:` raw volume access). Eğer
-/// [`crate::scan::is_elevated`] false dönerse bu fonksiyon büyük olasılıkla
-/// `Error::Scan` (ERROR_ACCESS_DENIED) verir — Bölüm 5.2A Katman 2 fallback'i
-/// devreye girer.
+/// Requires administrator privileges (`\\.\X:` raw volume access). If
+/// [`crate::scan::is_elevated`] returns false, this function most likely
+/// yields `Error::Scan` (ERROR_ACCESS_DENIED) — the Chapter 5.2A Layer 2
+/// fallback kicks in.
 pub fn probe_ntfs(drive: &str) -> Result<MftProbe> {
     let start = Instant::now();
     let volume_path = normalize_volume_path(drive)?;
@@ -60,7 +60,7 @@ pub fn probe_ntfs(drive: &str) -> Result<MftProbe> {
         ))
     })?;
 
-    debug!("NTFS boot sector parse ediliyor");
+    debug!("parsing NTFS boot sector");
     let ntfs =
         Ntfs::new(&mut handle).map_err(|e| Error::Scan(format!("NTFS parse error: {:?}", e)))?;
 

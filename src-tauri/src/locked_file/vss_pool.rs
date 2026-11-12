@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // VSS Snapshot Pool — safe high-level API.
-// Master mimari Bölüm 34.5.4 + 34.5.6 (v1.4 fix).
+// Master architecture Chapter 34.5.4 + 34.5.6 (v1.4 fix).
 //
-// İlkeler:
-//   * Tek worker thread COM apartment'ı tutar; tüm `IVssBackupComponents`
-//     çağrıları bu thread'de. UI thread asla VSS pointer'a dokunmaz.
-//   * Volume başına tek snapshot (`HashMap<char, Arc<VssContext>>`).
-//     Aynı volume için ikinci `reader_for` cache hit'tir.
-//   * Reference counting (Bölüm 34.5.6): aktif `VssLease`'i olan snapshot
-//     reaper tarafından EVICT EDİLMEZ. Lease drop'ta last_used_at güncellenir,
-//     5 dk idle sonra reaper temizler.
-//   * RAII: `VssReader` Drop'unda lease decrement otomatik.
+// Principles:
+//   * A single worker thread owns the COM apartment; all `IVssBackupComponents`
+//     calls happen on this thread. The UI thread never touches the VSS pointer.
+//   * One snapshot per volume (`HashMap<char, Arc<VssContext>>`).
+//     A second `reader_for` for the same volume is a cache hit.
+//   * Reference counting (Chapter 34.5.6): a snapshot with an active
+//     `VssLease` is NOT EVICTED by the reaper. On lease drop last_used_at is
+//     updated; after 5 min idle the reaper cleans it up.
+//   * RAII: the lease decrement is automatic in `VssReader`'s Drop.
 
 #![cfg(all(windows, feature = "vss"))]
 
@@ -30,26 +30,26 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
-/// Reaper tick periyodu — testten override edilebilir.
-/// Production: 30 sn. Test: 100 ms.
+/// Reaper tick period — can be overridden from tests.
+/// Production: 30 s. Test: 100 ms.
 pub(crate) static REAPER_TICK_MS: AtomicU64 = AtomicU64::new(30_000);
-/// Idle eviction eşiği — last_used_at'tan beri X sürede sıfır lease ise destroy.
-/// Production: 5 dk. Test: çok kısa (testlerde override).
+/// Idle eviction threshold — destroy if zero leases for X time since last_used_at.
+/// Production: 5 min. Test: very short (overridden in tests).
 pub(crate) static IDLE_EVICT_MS: AtomicU64 = AtomicU64::new(5 * 60 * 1000);
 
-/// Worker tarafı bir snapshot için durum — Send + Sync.
+/// Worker-side state for a snapshot — Send + Sync.
 pub(crate) struct VssContext {
-    /// Volume harfi — log + diagnostic için.
+    /// Volume letter — for logging + diagnostics.
     #[allow(dead_code)]
     pub volume: char,
-    /// Aktif lease sayısı. >0 iken reaper evict etmez.
+    /// Active lease count. While >0 the reaper does not evict.
     pub active_leases: AtomicU64,
-    /// Son kullanım zamanı — lease drop'ta güncellenir.
+    /// Last-used time — updated on lease drop.
     pub last_used_at: Mutex<Instant>,
     /// Snapshot device object — `\\?\GLOBALROOT\Device\HSCx` (null-terminated).
-    /// Pool worker bunu set eder; reader path concat için kullanır.
+    /// The pool worker sets it; the reader uses it for path concat.
     pub device_object: Vec<u16>,
-    /// Yardımcı: ne zaman oluşturuldu (log için).
+    /// Helper: when it was created (for logging).
     #[allow(dead_code)]
     pub created_at: Instant,
 }
@@ -62,7 +62,7 @@ impl VssContext {
     }
 }
 
-/// `VssReader` open olduğu sürece tutulan lease. Drop'ta active_leases--.
+/// Lease held while a `VssReader` is open. On drop, active_leases--.
 pub struct VssLease {
     ctx: Arc<VssContext>,
 }
@@ -74,10 +74,10 @@ impl Drop for VssLease {
     }
 }
 
-/// Snapshot dosyası üzerinden okuyucu. `Read + Seek` delegasyonu.
+/// Reader over the snapshot file. `Read + Seek` delegation.
 pub struct VssReader {
     inner: BufReader<fs::File>,
-    /// Reader yaşadığı sürece snapshot'ı koruyan lease.
+    /// Lease that keeps the snapshot alive as long as the reader lives.
     _lease: VssLease,
 }
 
@@ -94,39 +94,39 @@ impl Seek for VssReader {
 }
 
 // ---------------------------------------------------------------------------
-// Worker komutları
+// Worker commands
 // ---------------------------------------------------------------------------
 
 enum PoolCmd {
-    /// Belirli yol için snapshot reader iste. `reply` `Result<VssReader>` yollar.
+    /// Request a snapshot reader for the given path. `reply` sends a `Result<VssReader>`.
     AcquireReader {
         path: PathBuf,
         reply: SyncSender<Result<VssReader>>,
     },
-    /// Manuel reaper tick — testlerde idle eviction'ı tetiklemek için.
+    /// Manual reaper tick — to trigger idle eviction in tests.
     #[cfg(test)]
     TickReaper {
-        reply: SyncSender<usize>, // kaç context evict edildi
+        reply: SyncSender<usize>, // how many contexts were evicted
     },
-    /// Worker thread'i kapat — testlerde RAII cleanup için. Production'da
-    /// `VssPool::global()` process ömrü kadar yaşar; bu yol kullanılmaz.
+    /// Shut the worker thread down — for RAII cleanup in tests. In production
+    /// `VssPool::global()` lives for the whole process; this path is unused.
     #[cfg(test)]
     Shutdown,
 }
 
-/// Pool sahibi — `VssPool::global()` singleton.
+/// Pool owner — the `VssPool::global()` singleton.
 pub struct VssPool {
     tx: Sender<PoolCmd>,
 }
 
 impl VssPool {
-    /// Global pool — process boyunca tek instance.
+    /// Global pool — a single instance for the whole process.
     pub fn global() -> &'static VssPool {
         static POOL: OnceLock<VssPool> = OnceLock::new();
         POOL.get_or_init(|| VssPool::new(Arc::new(WinapiVssProvider)))
     }
 
-    /// Test ve internal — özel provider ile yeni pool.
+    /// Test and internal — a new pool with a custom provider.
     pub(crate) fn new(provider: Arc<dyn SnapshotProvider>) -> Self {
         let (tx, rx) = mpsc::channel::<PoolCmd>();
         let p = provider.clone();
@@ -137,8 +137,8 @@ impl VssPool {
         Self { tx }
     }
 
-    /// Verilen yol için snapshot tabanlı okuyucu döner. İlk çağrıda volume
-    /// için snapshot oluşturulur, ardından gelenler cache'ten gelir.
+    /// Returns a snapshot-based reader for the given path. On the first call
+    /// a snapshot is created for the volume; the rest come from the cache.
     pub fn reader_for(&self, path: &Path) -> Result<VssReader> {
         let (rtx, rrx) = mpsc::sync_channel::<Result<VssReader>>(1);
         self.tx
@@ -151,14 +151,14 @@ impl VssPool {
             .map_err(|e| Error::Snapshot(format!("vss pool reply unavailable: {e}")))?
     }
 
-    /// Test/cleanup için worker thread'i durdur. Production'da çağrılmaz
-    /// (singleton process ömrü kadar yaşar).
+    /// Stops the worker thread for test/cleanup. Not called in production
+    /// (the singleton lives for the whole process).
     #[cfg(test)]
     pub(crate) fn shutdown(&self) {
         let _ = self.tx.send(PoolCmd::Shutdown);
     }
 
-    /// Test yardımcısı — reaper manuel tetikle, kaç context evict edildiğini al.
+    /// Test helper — trigger the reaper manually, get how many contexts were evicted.
     #[cfg(test)]
     pub(crate) fn force_reaper_tick(&self) -> usize {
         let (rtx, rrx) = mpsc::sync_channel(1);
@@ -174,15 +174,15 @@ impl VssPool {
 // ---------------------------------------------------------------------------
 
 struct WorkerState {
-    /// Volume harfi → context. Aynı volume için cache hit.
+    /// Volume letter → context. Cache hit for the same volume.
     contexts: HashMap<char, Arc<VssContext>>,
-    /// Volume harfi → raw snapshot (worker-side, Send değil dış dünyaya).
+    /// Volume letter → raw snapshot (worker-side, not Send to the outside).
     raw: HashMap<char, RawSnapshot>,
     provider: Arc<dyn SnapshotProvider>,
 }
 
 fn worker_main(rx: Receiver<PoolCmd>, provider: Arc<dyn SnapshotProvider>) {
-    // COM MTA init — bu thread VSS çağrılarının sahibi.
+    // COM MTA init — this thread owns the VSS calls.
     unsafe {
         if let Err(e) = init_com_mta() {
             error!(error = ?e, "vss pool worker COM init failed");
@@ -223,7 +223,7 @@ fn worker_main(rx: Receiver<PoolCmd>, provider: Arc<dyn SnapshotProvider>) {
         }
     }
 
-    // Shutdown — tüm snapshotları topla.
+    // Shutdown — collect all the snapshots.
     state.cleanup_all();
 
     unsafe {
@@ -234,7 +234,7 @@ fn worker_main(rx: Receiver<PoolCmd>, provider: Arc<dyn SnapshotProvider>) {
 
 impl WorkerState {
     fn handle_acquire(&mut self, path: &Path) -> Result<VssReader> {
-        // Volume harfini ayıkla.
+        // Extract the volume letter.
         let volume = parse_volume_letter(path).ok_or_else(|| {
             Error::Snapshot(format!(
                 "path does not contain a volume letter: {}",
@@ -242,15 +242,15 @@ impl WorkerState {
             ))
         })?;
 
-        // Cache hit? Gemini review B10 — snapshot externally silinmişse /
-        // VSS service restart etmişse File::open NotFound ile düşer; ölü
-        // context'i evict edip bir kez yeniden dene (sonsuz döngü yok).
+        // Cache hit? Gemini review B10 — if the snapshot was deleted externally
+        // or the VSS service restarted, File::open fails with NotFound; evict
+        // the dead context and retry once (no infinite loop).
         if let Some(ctx) = self.contexts.get(&volume).cloned() {
             match self.make_reader(ctx, path) {
                 Ok(reader) => return Ok(reader),
                 Err(e) => {
-                    // make_reader open hatasını Error::Io olarak taşır — kind()
-                    // güvenilir ayrım sağlar (string parse yok).
+                    // make_reader carries the open error as Error::Io — kind()
+                    // provides a reliable distinction (no string parsing).
                     let stale = matches!(
                         &e,
                         Error::Io(io_err) if io_err.kind() == std::io::ErrorKind::NotFound
@@ -262,15 +262,15 @@ impl WorkerState {
                     self.contexts.remove(&volume);
                     if let Some(raw) = self.raw.remove(&volume) {
                         if let Err(de) = unsafe { self.provider.destroy(raw) } {
-                            warn!(error = ?de, %volume, "vss destroy hata (stale evict)");
+                            warn!(error = ?de, %volume, "vss destroy error (stale evict)");
                         }
                     }
-                    // fall-through: yeniden oluştur.
+                    // fall-through: recreate.
                 }
             }
         }
 
-        // Cache miss → snapshot oluştur.
+        // Cache miss → create a snapshot.
         let volume_root = format!("{}:\\", volume.to_ascii_uppercase());
         debug!(volume = %volume_root, "vss: creating snapshot");
 
@@ -295,9 +295,9 @@ impl WorkerState {
         let file = match fs::File::open(&snap_path) {
             Ok(f) => f,
             Err(e) => {
-                // Gemini review B10 — Error::Io olarak taşı: kind() ayrımı
-                // handle_acquire'de güvenilir stale detection sağlar. Path
-                // context'i log'da korunur.
+                // Gemini review B10 — carry it as Error::Io: the kind()
+                // distinction enables reliable stale detection in
+                // handle_acquire. The path context is preserved in the log.
                 debug!(path = %snap_path.display(), error = %e, "vss snapshot open failed");
                 return Err(Error::Io(e));
             }
@@ -311,7 +311,7 @@ impl WorkerState {
         })
     }
 
-    /// Idle context'leri eler. Aktif lease'i olanlar dokunulmaz.
+    /// Evicts idle contexts. Those with an active lease are untouched.
     fn reap_idle(&mut self) -> usize {
         let idle_ms = IDLE_EVICT_MS.load(Ordering::Relaxed);
         let threshold = Duration::from_millis(idle_ms);
@@ -334,7 +334,7 @@ impl WorkerState {
             if let Some(raw) = self.raw.remove(&vol) {
                 debug!(volume = %vol, "vss: idle snapshot evict");
                 if let Err(e) = unsafe { self.provider.destroy(raw) } {
-                    warn!(error = ?e, volume = %vol, "vss destroy hata");
+                    warn!(error = ?e, volume = %vol, "vss destroy error");
                 }
             }
         }
@@ -346,14 +346,14 @@ impl WorkerState {
         let raws: Vec<(char, RawSnapshot)> = self.raw.drain().collect();
         for (vol, raw) in raws {
             if let Err(e) = unsafe { self.provider.destroy(raw) } {
-                warn!(error = ?e, volume = %vol, "vss shutdown destroy hata");
+                warn!(error = ?e, volume = %vol, "vss shutdown destroy error");
             }
         }
     }
 }
 
-/// Volume harfini Path'ten çıkarır. `C:\foo` → `'c'`. UNC veya volume-less
-/// path'ler için None.
+/// Extracts the volume letter from a Path. `C:\foo` → `'c'`. Returns None
+/// for UNC or volume-less paths.
 fn parse_volume_letter(path: &Path) -> Option<char> {
     let s = path.to_string_lossy();
     let b = s.as_bytes();
@@ -365,7 +365,7 @@ fn parse_volume_letter(path: &Path) -> Option<char> {
 }
 
 // ---------------------------------------------------------------------------
-// Testler — mock provider ile pool davranışı
+// Tests — pool behavior with a mock provider
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -374,9 +374,9 @@ mod tests {
     use crate::locked_file::vss::RawSnapshot;
     use std::sync::atomic::{AtomicUsize, Ordering as Ord};
 
-    /// In-memory mock: gerçek COM çağrısı YOK. RawSnapshot fake device_object
-    /// ile temp dir path'i taklit eder; reader fake path'i `tempdir`/...
-    /// üzerinden açar.
+    /// In-memory mock: NO real COM calls. RawSnapshot mimics a temp dir
+    /// path with a fake device_object; the reader opens the fake path
+    /// through `tempdir`/...
     struct MockProvider {
         create_calls: AtomicUsize,
         destroy_calls: AtomicUsize,
@@ -397,8 +397,8 @@ mod tests {
         unsafe fn create(&self, volume: &str) -> Result<RawSnapshot> {
             self.create_calls.fetch_add(1, Ord::SeqCst);
 
-            // Volume root için temp altında bir alt dizin oluştur, "device_object"
-            // gibi davransın. Volume harfi → ./vol_C/ vs.
+            // Create a subdirectory under temp for the volume root, so it
+            // acts like a "device_object". Volume letter → ./vol_C/ etc.
             let letter = volume.chars().next().unwrap_or('X');
             let dev_dir = self.tempdir.path().join(format!("vol_{}", letter));
             std::fs::create_dir_all(&dev_dir).unwrap();
@@ -407,7 +407,7 @@ mod tests {
             let mut device: Vec<u16> = device_str.encode_utf16().collect();
             device.push(0);
 
-            // backup pointer null — destroy çağırırsak NPE değil, biz kontrol ederiz
+            // backup pointer null — not an NPE if destroy is called; we control it
             Ok(RawSnapshot {
                 backup: std::ptr::null_mut(),
                 snapshot_id: unsafe { std::mem::zeroed() },
@@ -417,7 +417,7 @@ mod tests {
 
         unsafe fn destroy(&self, mut snap: RawSnapshot) -> Result<()> {
             self.destroy_calls.fetch_add(1, Ord::SeqCst);
-            // Drop panik etmesin diye backup null'a set zaten
+            // backup is already set to null so Drop does not panic
             snap.backup = std::ptr::null_mut();
             Ok(())
         }
@@ -447,9 +447,9 @@ mod tests {
         let mock = MockProvider::new();
         let pool = VssPool::new(mock.clone());
 
-        // Mock'ta volume_root "C:\\" gelir; mock dev_dir = tempdir/vol_C.
-        // snapshot_path bu device + "\Users\engin\busy.docx" birleştirir.
-        // Test dosyasını tempdir/vol_C/Users/engin/busy.docx altında oluştur.
+        // In the mock, volume_root arrives as "C:\\"; mock dev_dir = tempdir/vol_C.
+        // snapshot_path combines this device + "\Users\engin\busy.docx".
+        // Create the test file under tempdir/vol_C/Users/engin/busy.docx.
         ensure_file(
             &mock.tempdir.path().join("vol_C"),
             "Users\\engin\\busy.docx",
@@ -462,13 +462,13 @@ mod tests {
             .reader_for(Path::new("C:\\Users\\engin\\busy.docx"))
             .expect("reader 2");
 
-        // Aynı volume → tek create.
+        // Same volume → a single create.
         assert_eq!(mock.create_calls.load(Ord::SeqCst), 1);
 
-        // İki aktif lease.
+        // Two active leases.
         let ctx_count = {
-            // Pool worker thread'inden okuyamayız, ama mock üzerinden doğrulayalım
-            // create_calls == 1 ise zaten dedupe çalışıyor.
+            // We cannot read from the pool worker thread, but let's verify via
+            // the mock: if create_calls == 1, dedupe is already working.
             1
         };
         assert_eq!(ctx_count, 1);
@@ -476,7 +476,7 @@ mod tests {
         drop(r1);
         drop(r2);
 
-        // Shutdown — cleanup_all tüm raw'ları toplar.
+        // Shutdown — cleanup_all collects all the raws.
         pool.shutdown();
         thread::sleep(Duration::from_millis(100));
         assert!(mock.destroy_calls.load(Ord::SeqCst) >= 1);
@@ -505,7 +505,7 @@ mod tests {
 
     #[test]
     fn reaper_evicts_after_idle() {
-        // Reaper tick hızlı + idle threshold çok kısa override.
+        // Override: fast reaper tick + very short idle threshold.
         REAPER_TICK_MS.store(50, Ordering::Relaxed);
         IDLE_EVICT_MS.store(100, Ordering::Relaxed);
 
@@ -517,15 +517,15 @@ mod tests {
         let r = pool
             .reader_for(Path::new("D:\\data\\report.pst"))
             .expect("reader");
-        drop(r); // lease bitti, last_used_at şimdi
+        drop(r); // lease ended, last_used_at is now
         assert_eq!(mock.create_calls.load(Ord::SeqCst), 1);
 
-        // Idle eşiğini geç.
+        // Cross the idle threshold.
         thread::sleep(Duration::from_millis(250));
 
-        // Reaper'a zaman ver, sonra manuel tetikle (testte deterministik olsun).
+        // Give the reaper time, then trigger it manually (deterministic in the test).
         let evicted = pool.force_reaper_tick();
-        // Eğer otomatik reaper zaten temizlediyse evicted=0 olabilir; total destroy'a bak.
+        // If the automatic reaper already cleaned up, evicted may be 0; check total destroys.
         let _ = evicted;
         thread::sleep(Duration::from_millis(50));
 
@@ -537,7 +537,7 @@ mod tests {
 
         pool.shutdown();
 
-        // Default değerleri geri yükle (diğer testleri etkilemesin).
+        // Restore the default values (so other tests are unaffected).
         REAPER_TICK_MS.store(30_000, Ordering::Relaxed);
         IDLE_EVICT_MS.store(5 * 60 * 1000, Ordering::Relaxed);
     }

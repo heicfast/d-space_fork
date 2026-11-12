@@ -1,25 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// USN Journal Index — Sprint 3.8 / Discovery Log #005 (Bölüm 5.6).
+// USN Journal Index — Sprint 3.8 / Discovery Log #005 (Chapter 5.6).
 //
-// NTFS USN Journal (Update Sequence Number) üzerinden persistent dosya
-// indeksi. "Everything" tipi anlık substring arama; açılışta < 200 ms
-// load + arka planda 5 sn poll ile incremental delta sync. Tüm index
-// mevcut `dspace.sqlite` içindeki `usn_index` tablosunda yaşar.
+// Persistent file index on top of the NTFS USN Journal (Update Sequence
+// Number). "Everything"-style instant substring search; < 200 ms load at
+// startup + incremental delta sync with a 5 s background poll. The whole
+// index lives in the `usn_index` table inside the existing `dspace.sqlite`.
 //
-// Veri akışı:
-//   1) `IndexBuilder::baseline_enumerate` → FSCTL_ENUM_USN_DATA ile tüm
-//      MFT girdilerini gezer, `apply_baseline` ile DB'ye yazar +
-//      ilk watermark (next_usn + journal_id) `usn_watermark`'a kaydeder.
-//   2) `IndexBuilder::poll_delta` → FSCTL_READ_USN_JOURNAL ile son
-//      watermark sonrası USN kayıtlarını okur, `delta::apply_delta`
-//      upsert/delete uygular, watermark günceller.
-//   3) Wraparound: journal_id değiştiyse caller `Error::Index` alır,
-//      `baseline_enumerate` tekrar tetiklenir (eski USN penceresi geçersiz).
+// Data flow:
+//   1) `IndexBuilder::baseline_enumerate` → walks all MFT entries via
+//      FSCTL_ENUM_USN_DATA, writes them to the DB with `apply_baseline` +
+//      records the first watermark (next_usn + journal_id) in `usn_watermark`.
+//   2) `IndexBuilder::poll_delta` → reads the USN records after the last
+//      watermark via FSCTL_READ_USN_JOURNAL, `delta::apply_delta`
+//      applies upsert/delete, updates the watermark.
+//   3) Wraparound: if journal_id changed, the caller gets `Error::Index`,
+//      `baseline_enumerate` is triggered again (the old USN window is invalid).
 //
-// Hızlı arama: `index_search(query, limit)` SQLite `LIKE '%query%'`
-// üzerinden top-N. v0.1 sadece isim eşleşmesi, full_path opsiyonel —
-// `WITH RECURSIVE` ile parent zinciri çözülür (top-50 için yeterli).
+// Fast search: `index_search(query, limit)` does top-N over SQLite
+// `LIKE '%query%'`. v0.1 matches names only, full_path is optional —
+// the parent chain is resolved with `WITH RECURSIVE` (enough for top-50).
 
 pub mod baseline;
 pub mod delta;
@@ -45,9 +45,9 @@ pub use usn::{
 };
 pub use watcher::{spawn_watcher, WatcherHandle};
 
-/// Tek bir USN index girişi. `volume_id` örn. `\\.\C:`, `file_ref`/`parent_ref`
-/// MFT segment numarası (alt 48 bit) — sequence number'sız (NTFS USN tipik
-/// kullanımı: yalnız segment kısmı persistent).
+/// A single USN index entry. `volume_id` e.g. `\\.\C:`, `file_ref`/`parent_ref`
+/// is the MFT segment number (low 48 bits) — without the sequence number
+/// (typical NTFS USN usage: only the segment part is persistent).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IndexEntry {
     pub volume_id: String,
@@ -56,12 +56,12 @@ pub struct IndexEntry {
     pub name: String,
     pub usn_id: i64,
     pub last_seen_unix: i64,
-    /// NTFS file attribute bayrakları (FILE_ATTRIBUTE_DIRECTORY vb.).
+    /// NTFS file attribute flags (FILE_ATTRIBUTE_DIRECTORY etc.).
     pub attrs: i64,
 }
 
-/// `index_search` sonucu. `full_path` opsiyonel — v0.1 yalnız ilk top-50
-/// için recursive path zinciri (SQLite `WITH RECURSIVE`) çözülebilir.
+/// `index_search` result. `full_path` is optional — in v0.1 the recursive
+/// path chain (SQLite `WITH RECURSIVE`) is resolved only for the first top-50.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IndexSearchResult {
     pub volume_id: String,
@@ -72,7 +72,7 @@ pub struct IndexSearchResult {
     pub attrs: i64,
 }
 
-/// `index_status` sonucu. UI status badge'i için.
+/// `index_status` result. For the UI status badge.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IndexStatus {
     pub volume_id: Option<String>,
@@ -82,8 +82,8 @@ pub struct IndexStatus {
     pub mode: String,
 }
 
-/// Yüksek seviye index oluşturucu — baseline + delta operasyonlarını
-/// kapsüller. Watcher thread bu yapıyı kullanır.
+/// High-level index builder — encapsulates the baseline + delta
+/// operations. The watcher thread uses this structure.
 pub struct IndexBuilder {
     pub volume_id: String,
 }
@@ -95,15 +95,15 @@ impl IndexBuilder {
         }
     }
 
-    /// Mevcut watermark'ı (varsa) okur.
+    /// Reads the current watermark, if any.
     pub fn watermark(&self, conn: &Connection) -> Result<Option<Watermark>> {
         load_watermark(conn, &self.volume_id)
     }
 }
 
-/// Gemini review B9 / v0.3.1 prod wire — `usn_watermark` tablosunda kayıtlı
-/// volume'lerin ID listesi (`\\.\C:` biçiminde). Açılışta watcher spawn
-/// etmek için kullanılır.
+/// Gemini review B9 / v0.3.1 prod wire — the list of IDs of the volumes
+/// registered in the `usn_watermark` table (in `\\.\C:` form). Used to
+/// spawn the watchers at startup.
 pub fn list_indexed_volumes(conn: &Connection) -> Result<Vec<String>> {
     let mut stmt = conn
         .prepare("SELECT volume_id FROM usn_watermark ORDER BY volume_id")
@@ -118,13 +118,13 @@ pub fn list_indexed_volumes(conn: &Connection) -> Result<Vec<String>> {
     Ok(out)
 }
 
-/// `sync_volume` sonucu — incremental delta mı full baseline mı koşuldu.
+/// `sync_volume` result — whether an incremental delta or a full baseline was run.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum SyncOutcome {
-    /// Watermark yoktu / wraparound — full `FSCTL_ENUM_USN_DATA` rebuild.
+    /// There was no watermark / wraparound — full `FSCTL_ENUM_USN_DATA` rebuild.
     Baseline(Box<BaselineSummary>),
-    /// Watermark geçerliydi — yalnız `FSCTL_READ_USN_JOURNAL` delta uygulandı.
+    /// The watermark was valid — only a `FSCTL_READ_USN_JOURNAL` delta was applied.
     Delta {
         volume_id: String,
         #[serde(flatten)]
@@ -133,10 +133,10 @@ pub enum SyncOutcome {
     },
 }
 
-/// Bir volume'ün USN index'ini güncelle — watermark varsa incremental delta,
-/// yoksa (veya wraparound'ta) full baseline. `index_build` komutu ve watcher
-/// tick'inin ortak çekirdeği (Gemini review: her açılışta full rebuild
-/// yerine watermark kısa devresi).
+/// Update the volume's USN index — incremental delta if a watermark exists,
+/// otherwise (or on wraparound) a full baseline. The shared core of the
+/// `index_build` command and the watcher tick (Gemini review: watermark
+/// short-circuit instead of a full rebuild on every startup).
 pub fn sync_volume(
     volume_id: &str,
     conn: &mut Connection,
@@ -147,18 +147,18 @@ pub fn sync_volume(
 
     match stored {
         Some(wm) => {
-            // Wraparound kontrolü — journal_id değiştiyse full rebuild.
+            // Wraparound check — if journal_id changed, full rebuild.
             if let Err(e) = detect_wraparound(wm.journal_id, fresh.journal_id) {
                 info!(volume = volume_id, ?e, "wraparound — full rebuild");
                 let summary = enumerate_volume_baseline(volume_id, conn, buffer_size)?;
                 return Ok(SyncOutcome::Baseline(Box::new(summary)));
             }
-            // Incremental delta: watermark'dan itibaren beklemesiz oku.
+            // Incremental delta: read without waiting, starting at the watermark.
             let read = usn::read_journal_blocking(
                 volume_id,
                 wm.next_usn,
                 fresh.journal_id,
-                0, // no-wait: birikmiş kayıtları topla, bekleme yok
+                0, // no-wait: collect accumulated records, no waiting
                 buffer_size,
             )?;
             let summary = apply_delta(conn, volume_id, &read.records)?;
@@ -182,14 +182,14 @@ pub fn sync_volume(
             })
         }
         None => {
-            // Henüz baseline yok — full enumerate.
+            // No baseline yet — full enumerate.
             let summary = enumerate_volume_baseline(volume_id, conn, buffer_size)?;
             Ok(SyncOutcome::Baseline(Box::new(summary)))
         }
     }
 }
 
-/// `usn_index` toplam satır sayısı. UI badge için.
+/// Total row count of `usn_index`. For the UI badge.
 pub fn count_entries(conn: &Connection, volume_id: &str) -> Result<i64> {
     conn.query_row(
         "SELECT COUNT(*) FROM usn_index WHERE volume_id = ?1",
@@ -199,9 +199,9 @@ pub fn count_entries(conn: &Connection, volume_id: &str) -> Result<i64> {
     .map_err(|e| Error::Index(format!("count_entries: {}", e)))
 }
 
-/// Son sync zamanı. `volume_id` verilirse yalnız o cilt; yoksa global
-/// MAX. Boş indeks için 0 döner. (Gemini review B24 — per-volume sorgu
-/// başka bir cildin tazeliğini raporlamasın.)
+/// Last sync time. If `volume_id` is given, only that volume; otherwise
+/// the global MAX. Returns 0 for an empty index. (Gemini review B24 — a
+/// per-volume query must not report another volume's freshness.)
 pub fn last_sync_unix(conn: &Connection, volume_id: Option<&str>) -> Result<i64> {
     let ts: Option<i64> = match volume_id {
         Some(v) => conn
@@ -220,8 +220,8 @@ pub fn last_sync_unix(conn: &Connection, volume_id: Option<&str>) -> Result<i64>
     Ok(ts.unwrap_or(0))
 }
 
-/// Tauri command'leri için durum sorgusu. Volume parametresi opsiyonel:
-/// verilmezse "global" sayım dönülür (volume_id = None).
+/// Status query for Tauri commands. The volume parameter is optional:
+/// if not given, the "global" count is returned (volume_id = None).
 pub fn index_status(conn: &Connection, volume_id: Option<&str>) -> Result<IndexStatus> {
     let total = match volume_id {
         Some(v) => count_entries(conn, v)?,
@@ -239,9 +239,9 @@ pub fn index_status(conn: &Connection, volume_id: Option<&str>) -> Result<IndexS
     })
 }
 
-/// Substring arama. `query` boş ise `Ok(vec![])`. `limit` üst sınır.
-/// Discovery Log #005 — Bölüm 5.6: v0.1 yalnız name LIKE eşleşmesi,
-/// full_path opsiyonel olarak çözülür (yalnız döndürülen sonuçlar için).
+/// Substring search. If `query` is empty, `Ok(vec![])`. `limit` is the
+/// upper bound. Discovery Log #005 — Chapter 5.6: v0.1 matches only via
+/// name LIKE, full_path is resolved optionally (only for returned results).
 pub fn index_search(
     conn: &Connection,
     query: &str,
@@ -254,8 +254,8 @@ pub fn index_search(
     let cap = limit.clamp(1, 500);
     debug!(query = trimmed, limit = cap, "index_search called");
     let mut results = persist_search(conn, trimmed, cap)?;
-    // Top-N için recursive path zinciri. Hata olursa silent — full_path
-    // yalnızca konfor alanı, eksikliği sorun değil.
+    // Recursive path chain for the top-N. On error, stay silent —
+    // full_path is only a convenience; its absence is not a problem.
     for r in results.iter_mut() {
         if let Ok(p) = persist::resolve_full_path(conn, &r.volume_id, r.file_ref) {
             r.full_path = Some(p);
@@ -264,7 +264,7 @@ pub fn index_search(
     Ok(results)
 }
 
-/// Şu anki unix epoch (saniye). Test edilebilirlik için ayrı fonksiyon.
+/// The current unix epoch (seconds). A separate function for testability.
 pub(crate) fn now_unix() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(st1.last_sync_unix, 42);
     }
 
-    // db modülüne erişim sentinel — migration zincirinde alias.
+    // Sentinel for db module access — alias in the migration chain.
     #[allow(dead_code)]
     fn _db_alias() {
         let _ = db::SCHEMA_VERSION;

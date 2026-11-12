@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Kullanıcı Tanımlı Kurallar — Master mimari Bölüm 6.4.
+// User-Defined Rules — Master architecture Chapter 6.4.
 //
-// İlke: Built-in `RULES` sabit dizisi (Bölüm 6.2, 63 kural) durağan ve
-// derleme zamanında belirli. User rules **runtime**'da DB'den okunur,
-// build_tree çağrısı öncesi snapshot alınır ve Node'lar yerleştirilirken
-// önce user rules denenir; eşleşme yoksa built-in motoruna düşer.
+// Principle: the built-in `RULES` const array (Chapter 6.2, 63 rules) is
+// static and fixed at compile time. User rules are read from the DB at
+// **runtime**; a snapshot is taken before the build_tree call, and user
+// rules are tried first while placing Nodes; no match falls to the built-in engine.
 //
-// Pattern tipi: 'name' (tam isim, case-insensitive) veya 'extension'.
-// Glob/regex v0.2 sprint'inde (Bölüm 6.4 "kullanıcı tanımlı" detay).
+// Pattern type: 'name' (full name, case-insensitive) or 'extension'.
+// Glob/regex in the v0.2 sprint (Chapter 6.4 "user-defined" detail).
 
 use crate::error::{Error, Result};
 use rusqlite::{params, Connection};
@@ -51,8 +51,8 @@ pub struct UserRule {
     pub updated_at_unix: i64,
 }
 
-/// Build-time uyumluluk için cloneable snapshot. `match_user_rule` build_tree
-/// içinde döngüye girer; her iterasyonda DB sorgulamak yerine snapshot tutarız.
+/// Cloneable snapshot for build-time compatibility. `match_user_rule` runs
+/// in a loop inside build_tree; we keep a snapshot instead of querying the DB on every iteration.
 #[derive(Debug, Clone)]
 pub struct UserRuleSnapshot {
     pub pattern_lower: String,
@@ -207,8 +207,8 @@ pub fn toggle_rule(conn: &Connection, id: i64, enabled: bool) -> Result<()> {
     Ok(())
 }
 
-/// build_tree döngüsünde her düğüm için çağrılır. User rules built-in
-/// motorundan ÖNCE değerlendirilir — kullanıcı override edebilir.
+/// Called for every node in the build_tree loop. User rules are evaluated
+/// BEFORE the built-in engine — the user can override.
 pub fn match_user_rule<'a>(
     snapshots: &'a [UserRuleSnapshot],
     name: &str,

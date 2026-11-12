@@ -2,29 +2,31 @@
 //
 // USN baseline walker — Sprint 3.8.1.
 //
-// Discovery Log #005 — Bölüm 5.6: `FSCTL_ENUM_USN_DATA` ile NTFS MFT'nin
-// tamamını gez, USN_RECORD_V2 sırasında dosya isim/parent/attr kayıtlarını
-// `usn_index` tablosuna 1 MB blokları halinde upsert et. Tek bir cilt için
-// tipik 1M dosyada ~5 sn — sonraki açılışlarda watcher (`watcher.rs`) yalnız
-// delta'yı uygular.
+// Discovery Log #005 — Chapter 5.6: walk the entire NTFS MFT with
+// `FSCTL_ENUM_USN_DATA`, upserting the file name/parent/attr records from
+// USN_RECORD_V2 into the `usn_index` table in 1 MB blocks. For a single
+// volume, typically ~5 s for 1M files — on subsequent startups the watcher
+// (`watcher.rs`) only applies the delta.
 //
-// Akış (Windows):
-//   1) Volume handle aç: `CreateFileW(\\.\X:, GENERIC_READ, FILE_SHARE_*,
-//      OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS)` — admin gerekli.
+// Flow (Windows):
+//   1) Open a volume handle: `CreateFileW(\\.\X:, GENERIC_READ, FILE_SHARE_*,
+//      OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS)` — admin required.
 //   2) `FSCTL_QUERY_USN_JOURNAL` → `JournalData` (journal_id + next_usn).
-//      Watermark snapshot'ı baseline öncesi alınır (race olsa bile baseline
-//      sırasında düşen kayıtlar watcher delta'sı ile yakalanır).
-//   3) `FSCTL_ENUM_USN_DATA` döngüsü, 1 MB output buffer. Her yanıt:
+//      The watermark snapshot is taken before the baseline (even if there
+//      is a race, records that land during the baseline are caught by the
+//      watcher delta).
+//   3) `FSCTL_ENUM_USN_DATA` loop with a 1 MB output buffer. Each response:
 //      `[u64 next_start_file_ref][USN_RECORD_V2 ... ]`. EOF: GetLastError
 //      → ERROR_HANDLE_EOF.
-//   4) Her batch → `apply_baseline_batch` (in-place transaction) → SQLite
-//      upsert. Race: aynı file_ref watcher delta'da gelirse `save_entries`
-//      ON CONFLICT idempotent (son yazan kazanır, kullanıcıdan gizli).
-//   5) Bitince `save_watermark` — sonraki açılışta watcher yalnız delta okur.
+//   4) Each batch → `apply_baseline_batch` (in-place transaction) → SQLite
+//      upsert. Race: if the same file_ref arrives in the watcher delta,
+//      `save_entries` ON CONFLICT is idempotent (last writer wins, hidden
+//      from the user).
+//   5) When done, `save_watermark` — on the next startup the watcher reads only the delta.
 //
-// Modül iki katmana ayrılmıştır:
-//   * Saf parser/encoder helper'lar — `cfg`-bağımsız, test edilebilir.
-//   * `enumerate_volume_baseline` — yalnız `cfg(windows)` IO katmanı.
+// The module is split into two layers:
+//   * Pure parser/encoder helpers — `cfg`-independent, testable.
+//   * `enumerate_volume_baseline` — the `cfg(windows)`-only IO layer.
 
 use super::persist::{save_entries, save_watermark, Watermark};
 use super::usn::{parse_records, read_le_i64, read_le_u64, UsnRecord};
@@ -34,23 +36,23 @@ use rusqlite::Connection;
 use serde::Serialize;
 use tracing::{debug, info};
 
-/// `FSCTL_ENUM_USN_DATA` çıktısının ilk 8 baytı sonraki çağrıda
-/// `StartFileReferenceNumber` olarak kullanılacak `u64`'tür.
+/// The first 8 bytes of the `FSCTL_ENUM_USN_DATA` output are the `u64`
+/// used as `StartFileReferenceNumber` in the next call.
 pub const ENUM_BUFFER_HEADER: usize = 8;
 
-/// Varsayılan baseline tampon boyutu — 1 MB. Tipik kayıt ~80 bayt → ~12k
-/// kayıt/batch. Daha büyük tampon syscall sayısını düşürür ama bellek tepe
-/// kullanımını artırır.
+/// Default baseline buffer size — 1 MB. Typical record ~80 bytes → ~12k
+/// records/batch. A larger buffer lowers the syscall count but increases
+/// peak memory usage.
 pub const DEFAULT_BASELINE_BUFFER: usize = 1 << 20;
 
-/// `USN_JOURNAL_DATA_V0` sabit boyutu (`winioctl.h`): 7 × `DWORDLONG/USN` = 56 bayt.
+/// Fixed size of `USN_JOURNAL_DATA_V0` (`winioctl.h`): 7 × `DWORDLONG/USN` = 56 bytes.
 pub const JOURNAL_DATA_V0_SIZE: usize = 56;
 
-/// `MFT_ENUM_DATA_V0` istek bloğu boyutu (3 × `DWORDLONG/USN` = 24 bayt).
+/// `MFT_ENUM_DATA_V0` request block size (3 × `DWORDLONG/USN` = 24 bytes).
 pub const ENUM_REQUEST_V0_SIZE: usize = 24;
 
-/// `FSCTL_QUERY_USN_JOURNAL` çıktısının parse edilmiş hali. Yalnız bizi
-/// ilgilendiren alanlar tutuluyor.
+/// Parsed form of the `FSCTL_QUERY_USN_JOURNAL` output. Only the fields
+/// that concern us are kept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct JournalData {
     pub journal_id: i64,
@@ -62,7 +64,7 @@ pub struct JournalData {
     pub allocation_delta: i64,
 }
 
-/// Baseline koşusu özet. UI'a dönen `IndexStatus`'tan ayrı — gözlem amaçlı.
+/// Baseline run summary. Separate from the `IndexStatus` returned to the UI — for observability.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct BaselineSummary {
     pub volume_id: String,
@@ -73,7 +75,7 @@ pub struct BaselineSummary {
     pub next_usn: i64,
 }
 
-/// `USN_JOURNAL_DATA_V0` binary buffer parse. Hata: kısa buffer.
+/// Parse of the `USN_JOURNAL_DATA_V0` binary buffer. Error: short buffer.
 pub fn parse_journal_data(buf: &[u8]) -> Result<JournalData> {
     if buf.len() < JOURNAL_DATA_V0_SIZE {
         return Err(Error::Index(format!(
@@ -100,7 +102,7 @@ pub fn parse_journal_data(buf: &[u8]) -> Result<JournalData> {
     })
 }
 
-/// `MFT_ENUM_DATA_V0` istek bloğu — 24 bayt little-endian.
+/// `MFT_ENUM_DATA_V0` request block — 24 bytes little-endian.
 pub fn build_enum_request(
     start_file_ref: u64,
     low_usn: i64,
@@ -113,8 +115,8 @@ pub fn build_enum_request(
     buf
 }
 
-/// `FSCTL_ENUM_USN_DATA` çıktısını parse et: ilk 8 bayt sonraki
-/// `StartFileReferenceNumber`, geri kalan `USN_RECORD_V2` zinciri.
+/// Parse the `FSCTL_ENUM_USN_DATA` output: the first 8 bytes are the next
+/// `StartFileReferenceNumber`, the rest is the `USN_RECORD_V2` chain.
 pub fn parse_enum_buffer(buf: &[u8]) -> Result<(u64, Vec<UsnRecord>)> {
     if buf.len() < ENUM_BUFFER_HEADER {
         return Err(Error::Index(format!(
@@ -128,7 +130,7 @@ pub fn parse_enum_buffer(buf: &[u8]) -> Result<(u64, Vec<UsnRecord>)> {
     Ok((next_ref, records))
 }
 
-/// USN kayıtlarını `IndexEntry`'ye dönüştür. Volume_id + timestamp çağrıcıdan.
+/// Convert USN records into `IndexEntry`. Volume_id + timestamp come from the caller.
 pub fn records_to_entries(records: &[UsnRecord], volume_id: &str, ts: i64) -> Vec<IndexEntry> {
     records
         .iter()
@@ -144,8 +146,9 @@ pub fn records_to_entries(records: &[UsnRecord], volume_id: &str, ts: i64) -> Ve
         .collect()
 }
 
-/// Tek bir batch USN kaydını DB'ye yaz. `save_entries` zaten tek
-/// transaction'da upsert eder; baseline + watcher delta race idempotent.
+/// Write one batch of USN records to the DB. `save_entries` already
+/// upserts in a single transaction; the baseline + watcher delta race is
+/// idempotent.
 pub fn apply_baseline_batch(
     conn: &mut Connection,
     volume_id: &str,
@@ -161,9 +164,9 @@ pub fn apply_baseline_batch(
 
 // ----------------------- Windows IO -----------------------
 
-/// `FSCTL_QUERY_USN_JOURNAL` — yalnız journal metadata (journal_id +
-/// next_usn). Watcher/incremental sync wraparound kontrolü için kullanır;
-/// tam baseline walker'ı çalıştırmaz.
+/// `FSCTL_QUERY_USN_JOURNAL` — journal metadata only (journal_id +
+/// next_usn). Used by the watcher/incremental sync for the wraparound
+/// check; does not run the full baseline walker.
 #[cfg(windows)]
 pub fn query_journal(volume_id: &str) -> Result<JournalData> {
     use std::ffi::OsStr;
@@ -178,7 +181,7 @@ pub fn query_journal(volume_id: &str) -> Result<JournalData> {
 
     use super::usn::FSCTL_QUERY_USN_JOURNAL;
 
-    /// GENERIC_READ ham değer — windows-rs sürüm farklarından bağımsız.
+    /// GENERIC_READ raw value — independent of windows-rs version differences.
     const GENERIC_READ: u32 = 0x8000_0000;
     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
 
@@ -265,9 +268,9 @@ pub fn enumerate_volume_baseline(
 
     use super::usn::{FSCTL_ENUM_USN_DATA, FSCTL_QUERY_USN_JOURNAL};
 
-    /// GENERIC_READ ham değer — windows-rs sürüm farklarından bağımsız.
+    /// GENERIC_READ raw value — independent of windows-rs version differences.
     const GENERIC_READ: u32 = 0x8000_0000;
-    /// FILE_FLAG_BACKUP_SEMANTICS — klasör/volume handle için gerekli.
+    /// FILE_FLAG_BACKUP_SEMANTICS — required for folder/volume handles.
     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
 
     struct HandleGuard(HANDLE);
@@ -300,7 +303,7 @@ pub fn enumerate_volume_baseline(
     .map_err(|e| Error::Index(format!("volume open ({}): {:?}", volume_id, e)))?;
     let _guard = HandleGuard(handle);
 
-    // Journal verilerini al — watermark için journal_id + next_usn snapshot.
+    // Get the journal data — a journal_id + next_usn snapshot for the watermark.
     let mut query_buf = [0u8; JOURNAL_DATA_V0_SIZE];
     let mut bytes_returned: u32 = 0;
     unsafe {
@@ -330,11 +333,11 @@ pub fn enumerate_volume_baseline(
         "USN baseline starting"
     );
 
-    // Gemini review B6 — full rebuild öncesi eski satırları temizle.
-    // Upsert-only walk, wraparound sonrası silinen dosyaların kayıtlarını
-    // sonsuza dek bırakıyordu (hayalet arama sonuçları). purge_volume
-    // watermark'ı da siler — aşağıda yeniden yazılır. Yarıda kalan walk
-    // watermark yazmaz → sonraki açılış yine full rebuild ile toparlanır.
+    // Gemini review B6 — clear old rows before a full rebuild. An
+    // upsert-only walk was leaving the records of files deleted after
+    // wraparound forever (ghost search results). purge_volume also deletes
+    // the watermark — it is rewritten below. An interrupted walk writes no
+    // watermark → the next startup recovers with a full rebuild again.
     let purged = super::persist::purge_volume(conn, volume_id)?;
     debug!(
         volume = volume_id,
@@ -440,7 +443,7 @@ mod tests {
         conn
     }
 
-    /// Test fixture'ı için tam bir FSCTL_ENUM_USN_DATA çıktı buffer'ı kur.
+    /// Build a complete FSCTL_ENUM_USN_DATA output buffer for the test fixture.
     fn build_enum_buffer(next_ref: u64, records_raw: &[Vec<u8>]) -> Vec<u8> {
         let mut buf = Vec::new();
         buf.extend_from_slice(&next_ref.to_le_bytes());
@@ -587,9 +590,9 @@ mod tests {
 
     #[test]
     fn baseline_then_delta_idempotent_same_file_ref() {
-        // Race senaryosu: baseline bir kaydı yazdı, watcher delta'da aynı
-        // file_ref için bir güncelleme geldi → save_entries ON CONFLICT
-        // upsert ile son yazan kazanır; ne çoğaltma ne hata.
+        // Race scenario: the baseline wrote a record, then an update for
+        // the same file_ref arrived in the watcher delta → with the
+        // save_entries ON CONFLICT upsert the last writer wins; no duplication, no error.
         let mut conn = open_test_db();
         let v = r"\\.\C:";
         let raws = vec![build_v2_record(
@@ -604,7 +607,7 @@ mod tests {
         let (_, recs) = parse_enum_buffer(&buf).unwrap();
         apply_baseline_batch(&mut conn, v, &recs).unwrap();
 
-        // Watcher delta yolu: aynı file_ref, isim güncellendi.
+        // Watcher delta path: same file_ref, name updated.
         let delta_rec = crate::index::usn::UsnRecord {
             file_ref: 30,
             parent_ref: 5,
@@ -615,7 +618,7 @@ mod tests {
         };
         crate::index::apply_delta(&mut conn, v, &[delta_rec]).unwrap();
 
-        // Tek satır, son isim ile.
+        // A single row, with the latest name.
         let row = load_entry(&conn, v, 30).unwrap().unwrap();
         assert_eq!(row.name, "renamed.txt");
         assert_eq!(row.usn_id, 305);
@@ -647,8 +650,9 @@ mod tests {
 
     #[test]
     fn baseline_after_existing_entries_upserts() {
-        // Önceden DB'de kayıt var → baseline çalışınca aynı file_ref'i
-        // ON CONFLICT upsert ile tazeler, satır sayısı sabit kalır.
+        // A record already exists in the DB → when the baseline runs it
+        // refreshes the same file_ref via the ON CONFLICT upsert; the row
+        // count stays fixed.
         let mut conn = open_test_db();
         let v = r"\\.\C:";
         save_entries(

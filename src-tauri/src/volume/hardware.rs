@@ -1,56 +1,56 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Sürücü donanım profili — Bölüm 33 ek. Kullanıcının sidebar'da görmek
-// istediği özet: medya tipi (SSD/HDD), bus (NVMe/SATA/USB), üretici,
-// model, seri, tipik okuma hızı.
+// Drive hardware profile — Chapter 33 appendix. The summary the user wants
+// to see in the sidebar: media type (SSD/HDD), bus (NVMe/SATA/USB), vendor,
+// model, serial, typical read speed.
 //
-// Akış (Windows):
-//   1) `\\.\X:` volume handle aç (no-access yeterli — metadata sorgu).
+// Flow (Windows):
+//   1) Open a `\\.\X:` volume handle (no-access is enough — metadata query).
 //   2) `IOCTL_STORAGE_QUERY_PROPERTY` (StorageDeviceProperty) →
 //      `STORAGE_DEVICE_DESCRIPTOR` → bus_type + vendor/product/serial
-//      offset'leri + Removable bayrağı.
+//      offsets + the Removable flag.
 //   3) `IOCTL_STORAGE_QUERY_PROPERTY` (StorageDeviceSeekPenaltyProperty)
 //      → `DEVICE_SEEK_PENALTY_DESCRIPTOR.IncursSeekPenalty` (TRUE=HDD,
-//      FALSE=SSD). Sorgu desteklenmiyorsa bus_type'tan tahmin (NVMe →
-//      SSD, ATA without info → HDD varsayım yok, "Unknown").
-//   4) Tipik okuma hızı bus + SSD/HDD'ye göre map'lenir. Bu BENCHMARK
-//      değil — sadece spec'ten tahmin. Gerçek hız S.M.A.R.T. veya
-//      ayrı benchmark gerektirir (v0.3+).
+//      FALSE=SSD). If the query is unsupported, guess from bus_type (NVMe →
+//      SSD, ATA without info → no HDD assumption, "Unknown").
+//   4) The typical read speed is mapped from bus + SSD/HDD. This is NOT a
+//      BENCHMARK — only an estimate from the spec. Real speed requires
+//      S.M.A.R.T. or a separate benchmark (v0.3+).
 //
-// Form faktörü (M.2 vs mSATA vs 2.5"): Windows API bunu ayrı bir alan
-// olarak vermez. NVMe sürücülerin pratikte hepsi M.2 PCIe; SATA SSD'ler
-// 2.5" / M.2 SATA / mSATA olabilir, Windows aynı görür. UI'da "NVMe SSD"
-// (M.2 ima eder) ve "SATA SSD" (form belirsiz) etiketleri yeterli.
+// Form factor (M.2 vs mSATA vs 2.5"): the Windows API does not expose it
+// as a separate field. In practice almost all NVMe drives are M.2 PCIe; SATA
+// SSDs can be 2.5" / M.2 SATA / mSATA, Windows sees them alike. In the UI,
+// "NVMe SSD" (implies M.2) and "SATA SSD" (form ambiguous) labels suffice.
 
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 
-/// Sürücü donanım özeti — UI tarafından sidebar'da gösterilir.
+/// Drive hardware summary — shown in the sidebar by the UI.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DriveHardware {
     pub drive_letter: String,
-    /// IDENTIFY/SCSI Vendor Identification — boşluklar trim'lenmiş; örn. "Samsung".
+    /// IDENTIFY/SCSI Vendor Identification — whitespace trimmed; e.g. "Samsung".
     pub vendor: Option<String>,
-    /// Product/Model dizesi — örn. "SSD 970 EVO Plus 1TB".
+    /// Product/Model string — e.g. "SSD 970 EVO Plus 1TB".
     pub product: Option<String>,
-    /// Seri numarası (hex veya ASCII; trim'li). Bazı sürücülerde boş.
+    /// Serial number (hex or ASCII; trimmed). Empty on some drives.
     pub serial: Option<String>,
-    /// `STORAGE_BUS_TYPE` insan-okur etiketi: "NVMe" | "SATA" | "USB" |
+    /// `STORAGE_BUS_TYPE` human-readable label: "NVMe" | "SATA" | "USB" |
     /// "SAS" | "SCSI" | "SCM" | "Unknown".
     pub bus_label: String,
-    /// Medya tipi: "SSD" | "HDD" | "Unknown" (seek penalty sorgu başarısız
-    /// + bus_type ipucu vermediyse).
+    /// Media type: "SSD" | "HDD" | "Unknown" (when the seek penalty query
+    /// fails + bus_type gave no hint).
     pub media_label: String,
     pub is_ssd: bool,
     pub removable: bool,
-    /// Tipik okuma hızı (MB/s) — bus+medya'dan türetilir, **benchmark değil**.
-    /// 0 = bilinmiyor.
+    /// Typical read speed (MB/s) — derived from bus+media, **not a benchmark**.
+    /// 0 = unknown.
     pub typical_read_mbps: u32,
-    /// Kısa özet: "Samsung NVMe SSD ~3500 MB/s" gibi.
+    /// Short summary: e.g. "Samsung NVMe SSD ~3500 MB/s".
     pub summary: String,
 }
 
-/// `STORAGE_BUS_TYPE` raw değerinden insan okur etiket + tipik MB/s.
+/// Human-readable label + typical MB/s from the raw `STORAGE_BUS_TYPE` value.
 fn bus_label_and_speed(bus_raw: i32, is_ssd: bool) -> (&'static str, u32) {
     // Windows DDK winioctl.h STORAGE_BUS_TYPE enum:
     //  1=SCSI, 2=ATAPI, 3=ATA, 4=1394, 5=SSA, 6=Fibre, 7=USB, 8=RAID,
@@ -65,8 +65,8 @@ fn bus_label_and_speed(bus_raw: i32, is_ssd: bool) -> (&'static str, u32) {
         18 => ("SCM", 7000),
         16 => ("Storage Spaces", if is_ssd { 800 } else { 200 }),
         8 => ("RAID", if is_ssd { 1500 } else { 250 }),
-        14 | 15 => ("Sanal", 400),
-        _ => ("Bilinmeyen", 0),
+        14 | 15 => ("Virtual", 400),
+        _ => ("Unknown", 0),
     }
 }
 
@@ -76,7 +76,7 @@ fn build_summary(
     media_label: &str,
     typical_read_mbps: u32,
 ) -> String {
-    let kind = if bus_label == "Bilinmeyen" {
+    let kind = if bus_label == "Unknown" {
         media_label.to_string()
     } else {
         format!("{} {}", bus_label, media_label)
@@ -86,7 +86,7 @@ fn build_summary(
         _ => kind,
     };
     if typical_read_mbps > 0 {
-        format!("{} · ~{} MB/sn", head, typical_read_mbps)
+        format!("{} · ~{} MB/s", head, typical_read_mbps)
     } else {
         head
     }
@@ -117,7 +117,7 @@ pub fn probe_drive_hardware(drive_letter: char) -> Result<DriveHardware> {
         .collect();
     let pcwstr = PCWSTR(wide.as_ptr());
 
-    // No-access open — metadata sorgusu için yeterli, admin gerektirmez.
+    // No-access open — enough for the metadata query, does not require admin.
     let handle = unsafe {
         CreateFileW(
             pcwstr,
@@ -171,7 +171,7 @@ pub fn probe_drive_hardware(drive_letter: char) -> Result<DriveHardware> {
     let (vendor, product, serial, removable, bus_raw) =
         if device_ok && (returned as usize) >= std::mem::size_of::<STORAGE_DEVICE_DESCRIPTOR>() {
             // SAFETY: layout is repr(C), buf is 1024 bytes which fits the
-            // base struct + offset'lerle erişilen string'ler.
+            // base struct + the strings accessed via offsets.
             let desc: &STORAGE_DEVICE_DESCRIPTOR =
                 unsafe { &*(buf.as_ptr() as *const STORAGE_DEVICE_DESCRIPTOR) };
 
@@ -205,7 +205,7 @@ pub fn probe_drive_hardware(drive_letter: char) -> Result<DriveHardware> {
             (None, None, None, false, 0)
         };
 
-    // 2) SeekPenalty — SSD/HDD ayrımı.
+    // 2) SeekPenalty — the SSD/HDD distinction.
     query.PropertyId = StorageDeviceSeekPenaltyProperty;
     let mut sp_buf = [0u8; 32];
     let mut sp_returned: u32 = 0;
@@ -230,23 +230,23 @@ pub fn probe_drive_hardware(drive_letter: char) -> Result<DriveHardware> {
             unsafe { &*(sp_buf.as_ptr() as *const DEVICE_SEEK_PENALTY_DESCRIPTOR) };
         (!sp.IncursSeekPenalty, true)
     } else {
-        // Sorgu desteklenmiyor → bus_type'tan tahmin yürüt.
-        // NVMe / SCM → SSD, USB / SATA → bilinmiyor (HDD'ye yakın varsayım).
+        // Query unsupported → infer from bus_type.
+        // NVMe / SCM → SSD, USB / SATA → unknown (an assumption close to HDD).
         match bus_raw {
-            17 | 18 => (true, true), // NVMe/SCM kesin SSD
-            _ => (false, false),     // Bilinmiyor — false döneriz ama media_known=false
+            17 | 18 => (true, true), // NVMe/SCM definitely SSD
+            _ => (false, false),     // Unknown — we return false but media_known=false
         }
     };
 
     let (bus_label_str, bus_speed) = bus_label_and_speed(bus_raw, is_ssd);
-    // Gemini review B14 — medya tipi bilinmiyorken hız iddiasında bulunma
-    // ("SATA Bilinmeyen · ~150 MB/sn" yanıltıcı); build_summary 0'ı atlar.
+    // Gemini review B14 — make no speed claim while the media type is unknown
+    // ("SATA Unknown · ~150 MB/s" would be misleading); build_summary skips 0.
     let typical_read_mbps = if media_known { bus_speed } else { 0 };
     let bus_label = bus_label_str.to_string();
     let media_label = if media_known {
         if is_ssd { "SSD" } else { "HDD" }.to_string()
     } else {
-        "Bilinmeyen".to_string()
+        "Unknown".to_string()
     };
     let summary = build_summary(&vendor, &bus_label, &media_label, typical_read_mbps);
 
@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn bus_label_unknown() {
         let (label, _) = bus_label_and_speed(0, false);
-        assert_eq!(label, "Bilinmeyen");
+        assert_eq!(label, "Unknown");
     }
 
     #[test]
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn summary_no_vendor_falls_back() {
         let s = build_summary(&None, "SATA", "SSD", 550);
-        assert_eq!(s, "SATA SSD · ~550 MB/sn");
+        assert_eq!(s, "SATA SSD · ~550 MB/s");
     }
 
     #[test]

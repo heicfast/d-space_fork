@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Permanent Delete — Master mimari Bölüm 12.4.
+// Permanent Delete — Master architecture Chapter 12.4.
 //
-// Spec: "Şimdi kalıcı sil ayrı buton, çift onay. Hassas dosyalar için
-// DoD 5220.22-M uyumlu overwrite (faz 2)."
+// Spec: "Permanent delete is a separate button now, double confirmation. For
+// sensitive files, DoD 5220.22-M compliant overwrite (Phase 2)."
 //
-// v0.1 kapsamı:
-//   * Confirm phrase doğrulaması — kullanıcı staging item'ın **tam dosya
-//     adını** yazmak zorunda. Tek tık değil, klavye onayı.
-//   * Forensic ledger (Bölüm 12.5): `permanent_deletes_forensic` tablosuna
-//     orijinal_path + size + deleted_at + blake3_first4kb + double_confirm
-//     flag. İleride forensic audit (kim ne sildi) için.
-//   * Standart `fs::remove_file` / `fs::remove_dir_all`. DoD wipe v0.2.
+// v0.1 scope:
+//   * Confirm phrase verification — the user must type the staging item's
+//     **exact file name**. Not a single click, a keyboard confirmation.
+//   * Forensic ledger (Chapter 12.5): into the `permanent_deletes_forensic`
+//     table go original_path + size + deleted_at + blake3_first4kb +
+//     double_confirm flag. For a future forensic audit (who deleted what).
+//   * Standard `fs::remove_file` / `fs::remove_dir_all`. DoD wipe in v0.2.
 //
-// İlke (Bölüm 22.6): kullanıcı her zaman görür ve onaylar — dark pattern
-// yok. Confirm phrase typed kullanıcı seçimini somutlaştırır.
+// Principle (Chapter 22.6): the user always sees and confirms — no dark
+// patterns. Typing the confirm phrase makes the user's choice concrete.
 
 use crate::error::{Error, Result};
 use crate::staging::ops::now_unix;
@@ -39,8 +39,8 @@ pub struct PermanentDeleteResult {
     pub is_dir: bool,
 }
 
-/// İlk 4 KB'lik Blake3 hash — forensic kanıt için yeterli (tam dosya hash
-/// 100 GB'lik dosyalarda kabul edilemez maliyet). Klasör için None döner.
+/// Blake3 hash of the first 4 KB — sufficient as forensic evidence (hashing
+/// the whole file is an unacceptable cost on 100 GB files). Returns None for folders.
 fn hash_first_4kb(path: &Path) -> Result<Option<[u8; 32]>> {
     if path.is_dir() {
         return Ok(None);
@@ -72,18 +72,18 @@ fn hex32(bytes: &[u8; 32]) -> String {
     s
 }
 
-/// Bölüm 12.4 — staging item'ı disk'ten kalıcı silsin + forensic ledger'a
-/// kayıt düşsün. `confirm_phrase` staging item'ın orijinal dosya adına
-/// (case-insensitive) eşit olmalı — bu çift onayın ikinci adımı (ilk adım
-/// UI'daki "Sil" butonu, ikinci adım dosya adı yazımı).
+/// Chapter 12.4 — permanently deletes the staging item from disk + writes
+/// a record into the forensic ledger. `confirm_phrase` must equal the staging
+/// item's original file name (case-insensitive) — the second step of the double
+/// confirmation (first step: the "Sil" (delete) button, second: typing the file name).
 ///
-/// Klasör için `remove_dir_all` (recursive). Hash sadece tek dosyada
-/// (ilk 4 KB).
+/// For folders, `remove_dir_all` (recursive). Hash only on single files
+/// (first 4 KB).
 ///
-/// `secure_wipe` true ise tek dosyalar (klasör değil) için
-/// `staging::wipe::dod_wipe_file` çağrılır: 3-pass overwrite (0x00, 0xFF,
-/// random) + sync + delete. Forensic recovery araçları veriyi geri
-/// getiremez. SSD'lerde wear leveling sınırı vardır (UI uyarısı).
+/// If `secure_wipe` is true, single files (not folders) go through
+/// `staging::wipe::dod_wipe_file`: 3-pass overwrite (0x00, 0xFF,
+/// random) + sync + delete. Forensic recovery tools cannot bring the
+/// data back. SSDs have the wear-leveling limitation (UI warning).
 pub fn permanent_delete(
     id: i64,
     confirm_phrase: &str,
@@ -131,8 +131,8 @@ pub fn permanent_delete(
         )));
     }
 
-    // Gemini review B16 — hash hatası sessiz None olmasın; forensic satırı
-    // NULL hash ile yazılır ama log'da görünür.
+    // Gemini review B16 — a hash error must not silently become None; the
+    // forensic row is written with a NULL hash but it shows up in the log.
     let hash = match hash_first_4kb(&staged_pb) {
         Ok(h) => h,
         Err(e) => {
@@ -142,7 +142,7 @@ pub fn permanent_delete(
     };
     let hash_hex = hash.as_ref().map(hex32);
 
-    // Önce DB'ye forensic kayıt — silme başarısızsa bile orijinal niyet kalır.
+    // Forensic record goes to the DB first — even if deletion fails, the original intent remains.
     let deleted_at = now_unix();
     let tx = conn
         .transaction()
@@ -167,11 +167,11 @@ pub fn permanent_delete(
     tx.commit()
         .map_err(|e| Error::Staging(format!("tx commit: {}", e)))?;
 
-    // Sonra dosyayı sil. DB transaction commit edilmiş olsa bile FS hatası
-    // ledger'ı bozmaz — manuel temizlik için iz kalır.
-    // secure_wipe yalnız tek dosyaya uygulanır; klasör recursive remove ile
-    // (DoD wipe klasör için anlamsız — her dosyayı tek tek wipe etmek çok
-    // pahalı, kullanıcı UI'da onayladı zaten).
+    // Then delete the file. Even though the DB transaction is committed, an FS
+    // error does not corrupt the ledger — a trace remains for manual cleanup.
+    // secure_wipe is applied only to single files; folders go via recursive remove
+    // (DoD wipe is pointless for folders — wiping every file one by one is too
+    // expensive, and the user already confirmed in the UI).
     let fs_result = if is_dir {
         fs::remove_dir_all(&staged_pb)
             .map_err(|e| std::io::Error::other(format!("folder recursive remove: {}", e)))
@@ -188,14 +188,14 @@ pub fn permanent_delete(
             "permanent delete filesystem error — forensic ledger already written"
         );
         return Err(Error::Staging(format!(
-            "Dosya silme başarısız ('{}'): {} — \
-             forensic ledger kaydı yazıldı, manuel temizleyebilirsin",
+            "File deletion failed ('{}'): {} — \
+             the forensic ledger entry was written; you can clean up manually",
             staged_pb.display(),
             e
         )));
     }
 
-    // Gemini review B32 — boş kalan staging bucket dizinini temizle.
+    // Gemini review B32 — clean up the staging bucket directory left empty.
     if let Some(bucket) = staged_pb.parent() {
         if let Err(e) = fs::remove_dir(bucket) {
             debug!(bucket = %bucket.display(), error = %e, "bucket cleanup skipped");
@@ -276,9 +276,9 @@ mod tests {
 
         let err = permanent_delete(id, "wrong-name.bin", false, &mut conn);
         assert!(err.is_err());
-        // Dosya hâlâ orada
+        // The file is still there
         assert!(staged.exists());
-        // staging_items satırı korunmuş
+        // The staging_items row is preserved
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM staging_items WHERE id = ?1",
@@ -306,9 +306,9 @@ mod tests {
         assert!(result.blake3_first4kb_hex.is_some());
         assert!(!result.is_dir);
 
-        // Disk'te dosya yok
+        // No file on disk
         assert!(!staged.exists());
-        // staging_items'tan silindi
+        // Deleted from staging_items
         let staging_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM staging_items WHERE id = ?1",
@@ -317,7 +317,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(staging_count, 0);
-        // Forensic kayıt var
+        // The forensic record exists
         let forensic_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM permanent_deletes_forensic \
@@ -340,7 +340,7 @@ mod tests {
         fs::write(&staged, b"pdf bytes").unwrap();
         let id = seed_staging(&conn, r"C:\Users\test\Report.PDF", &staged, 9);
 
-        // Küçük harfli phrase, dosya adı büyük harfli — eşleşmeli
+        // Lowercase phrase, uppercase file name — must still match
         let result = permanent_delete(id, "report.pdf", false, &mut conn);
         assert!(result.is_ok());
         assert!(!staged.exists());
@@ -366,7 +366,7 @@ mod tests {
         let result = permanent_delete(id, "secret.bin", true, &mut conn)
             .expect("secure wipe should succeed");
         assert!(!staged.exists(), "file should be gone");
-        // Forensic kayıt yine yazıldı (hash + path)
+        // The forensic record was still written (hash + path)
         let forensic_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM permanent_deletes_forensic \

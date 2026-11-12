@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// MFT full walker — Bölüm 5.1, Bölüm 4.3 (Adım 2: Rust MFT'yi sıralı okur).
+// MFT full walker — Chapter 5.1, Chapter 4.3 (Step 2: Rust reads the MFT sequentially).
 //
-// Bu sprint hedefi: tüm MFT record'larını sırayla gezip in-use / dir / file
-// sayımı ve örnek dosya adları çıkarma. Hiyerarşi kurma ve `Arc<ScanTree>`
-// build sonraki sprint (Bölüm 4.3 Adım 3 + rayon paralel aggregation).
+// This sprint's goal: walk all MFT records in order, producing in-use /
+// dir / file counts and sample file names. Hierarchy building and the
+// `Arc<ScanTree>` build come in the next sprint (Chapter 4.3 Step 3 +
+// rayon parallel aggregation).
 //
-// Performans notu (Bölüm 5.4): 1TB SSD < 5sn hedefine ulaşmak için
-// gerçek production'da bulk MFT read (raw IOCTL) ve rayon paralel parse
-// gerekecek. Bu v0.1 walker tek thread ve `ntfs::Ntfs::file()` per-record
-// çağırır — yeterli, sonraki turda optimize.
+// Performance note (Chapter 5.4): hitting the 1TB SSD < 5s target in real
+// production will require bulk MFT reads (raw IOCTL) and rayon parallel
+// parsing. This v0.1 walker is single-threaded and calls
+// `ntfs::Ntfs::file()` per record — good enough, optimize next round.
 
 use crate::error::{Error, Result};
 use ntfs::structured_values::NtfsFileNamespace;
@@ -20,11 +21,11 @@ use std::time::Instant;
 use tracing::{debug, info};
 
 const SAMPLE_NAME_LIMIT: usize = 25;
-const MAX_RECORD_HARD_LIMIT: u64 = 50_000_000; // güvenlik tavanı
+const MAX_RECORD_HARD_LIMIT: u64 = 50_000_000; // safety ceiling
 
-/// NTFS FILETIME (1601-01-01 epoch, 100-ns intervals) → Unix saniye.
-/// ntfs crate `NtfsTime::nt_timestamp()` u64 değerini bu fonksiyona besler.
-/// 0 girdisi 0 döner (epoch placeholder).
+/// NTFS FILETIME (1601-01-01 epoch, 100-ns intervals) → Unix seconds.
+/// The ntfs crate feeds the u64 value from `NtfsTime::nt_timestamp()`
+/// into this function. A 0 input returns 0 (epoch placeholder).
 pub(crate) fn nt_to_unix(nt_ts: u64) -> i64 {
     if nt_ts == 0 {
         return 0;
@@ -32,8 +33,8 @@ pub(crate) fn nt_to_unix(nt_ts: u64) -> i64 {
     ((nt_ts / 10_000_000) as i64) - 11_644_473_600i64
 }
 
-/// Tek bir MFT kaydının özet metadata'sı — hiyerarşi + Timeline (Bölüm 9.1
-/// mod 4/4) için yeterli.
+/// Summary metadata for a single MFT record — sufficient for hierarchy +
+/// Timeline (Chapter 9.1 module 4/4).
 #[derive(Debug, Clone, Serialize)]
 pub struct RawMftEntry {
     pub record_no: u64,
@@ -41,8 +42,8 @@ pub struct RawMftEntry {
     pub name: String,
     pub data_size: u64,
     pub is_dir: bool,
-    /// `$STANDARD_INFORMATION.modification_time` (Windows yazıda güncelliyor).
-    /// Fallback `$FILE_NAME` lag yapabilir — StandardInformation canonical.
+    /// `$STANDARD_INFORMATION.modification_time` (updated on Windows writes).
+    /// The `$FILE_NAME` fallback may lag — StandardInformation is canonical.
     pub modified_unix: i64,
 }
 
@@ -55,9 +56,10 @@ pub struct MftEntries {
     pub elapsed_ms: u64,
 }
 
-/// Bölüm 9.6.5 — tarama ilerlemesi event'i. Backend her N entry'de bir emit eder.
-/// `partial_tree`: Sprint 3.7 — her 10k entry'de canlı sunburst için root +
-/// 2 seviye + top-200 düğüm snapshot. Diğer event'lerde `None` (payload küçük).
+/// Chapter 9.6.5 — scan progress event. The backend emits it every N entries.
+/// `partial_tree`: Sprint 3.7 — every 10k entries, a root + 2 levels +
+/// top-200 node snapshot for the live sunburst. `None` on other events
+/// (small payload).
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanProgress {
     pub phase: &'static str,
@@ -70,26 +72,26 @@ pub struct ScanProgress {
     pub partial_tree: Option<Vec<crate::scan::tree::PartialNode>>,
 }
 
-/// `Fn(&ScanProgress)` callback alias — heap-allocated closure'lardan kaçınmak için.
+/// `Fn(&ScanProgress)` callback alias — to avoid heap-allocated closures.
 pub type ProgressCb<'a> = &'a (dyn Fn(&ScanProgress) + Send + Sync);
 
 const MFT_PROGRESS_INTERVAL: u64 = 5000;
-/// Sprint 3.7 — canlı sunburst snapshot başlangıç aralığı. Gemini review
-/// (partial-tree O(N²)): sabit 10k aralıkla full-rebuild, büyük volumelerde
-/// karesel maliyet üretiyordu. Artık geometrik büyüme (×4) kullanılır —
-/// 10k, 40k, 160k, 640k, 2.5M, sonra her 2.5M'de bir. Toplam rebuild
-/// sayısı ~O(log N), her biri O(N) → maliyet ~O(N log N) sınırlı kalır.
+/// Sprint 3.7 — initial interval for live sunburst snapshots. Gemini review
+/// (partial-tree O(N²)): a fixed 10k interval with a full rebuild produced
+/// quadratic cost on large volumes. Geometric growth (×4) is used now —
+/// 10k, 40k, 160k, 640k, 2.5M, then every 2.5M. The total rebuild count
+/// is ~O(log N), each O(N) → cost stays bounded at ~O(N log N).
 pub(crate) const PARTIAL_TREE_INTERVAL: u64 = 10_000;
-/// Geometrik büyüme katsayısı (aralık × 4).
+/// Geometric growth factor (interval × 4).
 const PARTIAL_TREE_GROWTH: u64 = 4;
-/// Geometrik aralığın tavanı — çok büyük taramalarda bile makul sıklık.
+/// Cap on the geometric interval — a sane frequency even for huge scans.
 const PARTIAL_TREE_MAX_INTERVAL: u64 = 2_500_000;
-/// Sprint 3.7 — canlı sunburst max derinlik (root + 2 seviye).
+/// Sprint 3.7 — live sunburst max depth (root + 2 levels).
 pub(crate) const PARTIAL_TREE_MAX_DEPTH: usize = 2;
-/// Sprint 3.7 — canlı sunburst top-N düğüm (root + 199).
+/// Sprint 3.7 — live sunburst top-N nodes (root + 199).
 pub(crate) const PARTIAL_TREE_TOP_N: usize = 200;
 
-/// Bir sonraki partial-tree snapshot eşiğini geometrik olarak ilerletir.
+/// Advances the next partial-tree snapshot threshold geometrically.
 #[inline]
 pub(crate) fn advance_partial_threshold(current: u64) -> u64 {
     (current.saturating_mul(PARTIAL_TREE_GROWTH)).min(PARTIAL_TREE_MAX_INTERVAL)
@@ -110,7 +112,7 @@ pub struct MftWalkStats {
     pub elapsed_ms: u64,
 }
 
-/// "C", "c:", "C:\Users" → r"\\.\C:" — katı doğrulama (UNC reddedilir).
+/// "C", "c:", "C:\Users" → r"\\.\C:" — strict validation (UNC is rejected).
 pub(crate) fn normalize_volume_path(drive: &str) -> Result<String> {
     let letter = crate::volume::parse_drive_letter(drive)
         .map(|c| c.to_ascii_uppercase())
@@ -123,7 +125,7 @@ pub(crate) fn normalize_volume_path(drive: &str) -> Result<String> {
     Ok(format!(r"\\.\{}:", letter))
 }
 
-/// MFT'nin kendi `$DATA` boyutundan toplam record sayısını tahmin eder.
+/// Estimates the total record count from the MFT's own `$DATA` size.
 pub(crate) fn estimate_record_count<T: std::io::Read + std::io::Seek>(
     ntfs: &Ntfs,
     handle: &mut T,
@@ -149,19 +151,19 @@ pub(crate) fn estimate_record_count<T: std::io::Read + std::io::Seek>(
     Ok(total_bytes / record_size)
 }
 
-/// Tek bir `NtfsFile` için isim çıkarmaya çalışır. Win32 namespace tercih
-/// edilir (DOS 8.3'ün ikincil görünümlerini atlamak için).
+/// Tries to extract a name for a single `NtfsFile`. The Win32 namespace is
+/// preferred (to skip the secondary DOS 8.3 views).
 fn extract_name<T: std::io::Read + std::io::Seek>(
     file: &NtfsFile,
     handle: &mut T,
 ) -> Option<String> {
-    // Önce Win32 namespace
+    // Win32 namespace first
     if let Some(Ok(name)) = file.name(handle, Some(NtfsFileNamespace::Win32), None) {
         return Some(name.name().to_string_lossy());
     }
-    // Fallback: Win32AndDos (3) — birleşik isim
+    // Fallback: Win32AndDos (3) — combined name
     if let Some(Ok(name)) = file.name(handle, None, None) {
-        // DOS'u atla
+        // Skip DOS
         if !matches!(name.namespace(), NtfsFileNamespace::Dos) {
             return Some(name.name().to_string_lossy());
         }
@@ -169,9 +171,9 @@ fn extract_name<T: std::io::Read + std::io::Seek>(
     None
 }
 
-/// İsim + parent_ref + data_size + is_dir + mtime tek seferde çıkarır.
-/// Win32 namespace tercih edilir. mtime için `$STANDARD_INFORMATION`
-/// (Windows yazıda update eder — canonical), başarısızsa `$FILE_NAME` fallback.
+/// Extracts name + parent_ref + data_size + is_dir + mtime in one pass.
+/// The Win32 namespace is preferred. For mtime, `$STANDARD_INFORMATION`
+/// (updated on Windows writes — canonical), falling back to `$FILE_NAME`.
 pub(crate) fn extract_full<T: std::io::Read + std::io::Seek>(
     file: &NtfsFile,
     handle: &mut T,
@@ -208,19 +210,19 @@ pub(crate) fn extract_full<T: std::io::Read + std::io::Seek>(
     None
 }
 
-/// Geriye uyumlu — progress callback ve cancel flag olmadan.
+/// Backwards compatible — without a progress callback or cancel flag.
 pub fn collect_mft_entries(drive: &str) -> Result<MftEntries> {
     collect_mft_entries_with_progress(drive, None, None)
 }
 
-/// Sprint 3.7 — canlı sunburst için raw entries'den hafif partial view inşa
-/// eder. Gemini review (partial-tree perf): eskiden `entries.to_vec()` + tam
-/// `build_tree` (kural eşleştirme dahil) her snapshot'ta O(N) ekstra kopya +
-/// 63 kural × N düğüm maliyeti üretiyordu. Artık:
-///   * klon YOK — `build_tree_light` borrow ile çalışır,
-///   * kural skorlaması YOK — partial view yalnız boyut/isim taşır.
+/// Sprint 3.7 — builds a lightweight partial view from the raw entries for
+/// the live sunburst. Gemini review (partial-tree perf): previously
+/// `entries.to_vec()` + a full `build_tree` (rule matching included) cost
+/// an extra O(N) copy + 63 rules × N nodes per snapshot. Now:
+///   * NO clones — `build_tree_light` works on borrows,
+///   * NO rule scoring — the partial view carries only size/name.
 ///
-/// Geometrik aralık (yukarıda) ile birlikte toplam maliyet ~O(N log N).
+/// Together with the geometric interval (above), total cost is ~O(N log N).
 pub(crate) fn build_partial_from_raw(
     entries: &[RawMftEntry],
     max_depth: usize,
@@ -230,9 +232,9 @@ pub(crate) fn build_partial_from_raw(
     crate::scan::tree::build_partial_view(&tree, max_depth, top_n)
 }
 
-/// Tam MFT entry koleksiyonu — `build_tree` için besin kaynağı.
-/// System records (0-15) atlanır. Volume root NTFS'te record 5'tir.
-/// `progress_cb` her `MFT_PROGRESS_INTERVAL` entry'de bir çağrılır (Bölüm 9.6.5).
+/// Full MFT entry collection — the feed source for `build_tree`.
+/// System records (0-15) are skipped. The volume root is record 5 in NTFS.
+/// `progress_cb` is called once every `MFT_PROGRESS_INTERVAL` entries (Chapter 9.6.5).
 pub fn collect_mft_entries_with_progress(
     drive: &str,
     progress_cb: Option<ProgressCb<'_>>,
@@ -263,22 +265,22 @@ pub fn collect_mft_entries_with_progress(
     }
     info!(estimated, cap, "MFT entry koleksiyonu kapasitesi");
 
-    // Gemini review B12 — dev upfront rezervasyon (~GB'lar) yerine makul
-    // başlangıç kapasitesi; Vec zaten ihtiyaç oldukça büyür.
+    // Gemini review B12 — a sane initial capacity instead of a huge upfront
+    // reservation (~GBs); the Vec already grows as needed.
     let mut entries: Vec<RawMftEntry> =
         Vec::with_capacity(((cap as usize) / 2).clamp(1024, 1_000_000));
     let mut skipped = 0u64;
     let mut last_name = String::new();
-    // Sprint 3.7 — her PARTIAL_TREE_INTERVAL entry'de bir partial tree
-    // snapshot üret. Sayım entries'in mutlak boyutu üzerinden — record
-    // sayısı değil. Yeni eşik aşıldığında bir kez tetiklenir.
+    // Sprint 3.7 — produce a partial tree snapshot every
+    // PARTIAL_TREE_INTERVAL entries. The count is over the absolute size
+    // of entries — not the record count. Fires once per threshold crossed.
     let mut next_partial_at: u64 = PARTIAL_TREE_INTERVAL;
 
-    // Root directory (record 5) sentetik düğüm olarak eklenmez —
-    // collect aşamasında kullanıcı entries'i temiz görür; build_tree
-    // gerekirse root sentetik düğüm üretir.
+    // The root directory (record 5) is not added as a synthetic node —
+    // during collection the user entries stay clean; build_tree produces
+    // a synthetic root node if needed.
     for record_no in 16..cap {
-        // Cancellation check — her MFT_PROGRESS_INTERVAL'da bir yeterli.
+        // Cancellation check — once every MFT_PROGRESS_INTERVAL is enough.
         if (record_no - 16) % MFT_PROGRESS_INTERVAL == 0 {
             if let Some(c) = cancel {
                 if c.load(std::sync::atomic::Ordering::Acquire) {
@@ -343,9 +345,9 @@ pub fn collect_mft_entries_with_progress(
     })
 }
 
-/// Tüm MFT record'larını sırayla gezer. İlk 16 system file (record 0-15)
-/// hariç tutulur — onlar `$MFT`, `$LogFile`, `$Volume`, `$AttrDef`, `$.`,
-/// `$Bitmap`, `$Boot`, `$BadClus`, `$Secure`, `$UpCase`, `$Extend`, vb.
+/// Walks all MFT records in order. The first 16 system files (records 0-15)
+/// are excluded — those are `$MFT`, `$LogFile`, `$Volume`, `$AttrDef`, `$.`,
+/// `$Bitmap`, `$Boot`, `$BadClus`, `$Secure`, `$UpCase`, `$Extend`, etc.
 pub fn walk_mft(drive: &str) -> Result<MftWalkStats> {
     let start = Instant::now();
     let volume_path = normalize_volume_path(drive)?;
@@ -373,7 +375,7 @@ pub fn walk_mft(drive: &str) -> Result<MftWalkStats> {
     let mut total_bytes = 0u64;
     let mut samples: Vec<String> = Vec::with_capacity(SAMPLE_NAME_LIMIT);
 
-    // System records (0-15) atlanır — gerçek kullanıcı içeriği 16'dan başlar.
+    // System records (0-15) are skipped — real user content starts at 16.
     for record_no in 16..cap {
         visited += 1;
 
@@ -396,9 +398,9 @@ pub fn walk_mft(drive: &str) -> Result<MftWalkStats> {
             dirs += 1;
         } else {
             files += 1;
-            // Resident veya non-resident $DATA boyutu (Bölüm 7 uyumlu boyut).
-            // `data_size()` u32 — büyük dosyalar için NtfsFileName.data_size()
-            // 64-bit verir; ileride per-file metadata'da o kullanılır.
+            // Resident or non-resident $DATA size (Chapter 7 compliant size).
+            // `data_size()` is u32 — for large files NtfsFileName.data_size()
+            // gives 64 bits; that one is used in per-file metadata later.
             total_bytes = total_bytes.saturating_add(file.data_size() as u64);
         }
 

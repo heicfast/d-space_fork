@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Volume Enumeration — sistemdeki tüm mount edilmiş sürücüleri listeler.
-// Win32 `GetLogicalDrives` bitmask döner (bit 0 = A:, bit 25 = Z:). Her bit
-// için `pre_flight_check` çağrılır; sonuç bir araya getirilir. Master spec
-// Bölüm 33.2 Katman 0 — admin gerektirmez.
+// Volume Enumeration — lists every mounted drive in the system.
+// Win32 `GetLogicalDrives` returns a bitmask (bit 0 = A:, bit 25 = Z:). For
+// each bit `pre_flight_check` is called; the results are combined. Master
+// spec Chapter 33.2 Layer 0 — does not require admin.
 
 use crate::error::Result;
 use crate::volume::{pre_flight_check, VolumeInfo};
 use tracing::{debug, info};
 
-/// Win32 `GetLogicalDrives` ile mount edilmiş sürücü harflerini döner.
-/// Sonuç sıralı: A, B, ..., Z. Hiç sürücü yoksa boş Vec.
+/// Returns the mounted drive letters via Win32 `GetLogicalDrives`.
+/// The result is sorted: A, B, ..., Z. Empty Vec if there are no drives.
 #[cfg(windows)]
 pub fn enumerate_drive_letters() -> Vec<char> {
     use windows::Win32::Storage::FileSystem::GetLogicalDrives;
@@ -31,9 +31,9 @@ pub fn enumerate_drive_letters() -> Vec<char> {
     Vec::new()
 }
 
-/// Sistemdeki tüm sürücülerin pre-flight bilgisini döner. Tek bir sürücüde
-/// pre_flight_check hata verirse o sürücü atlanır (genel listeyi bozmamak
-/// için). Hata satırı tracing'e düşer.
+/// Returns pre-flight info for all drives in the system. If pre_flight_check
+/// fails for one drive, that drive is skipped (so the overall list is not
+/// broken). The error line goes to tracing.
 pub fn list_drives() -> Result<Vec<VolumeInfo>> {
     let letters = enumerate_drive_letters();
     info!(count = letters.len(), "list_drives: enumeration started");
@@ -58,14 +58,14 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn enumerate_returns_at_least_one_letter() {
-        // Test makinesinde en az bir mount edilmiş sürücü olmalı (C:).
+        // The test machine must have at least one mounted drive (C:).
         let letters = enumerate_drive_letters();
         assert!(!letters.is_empty(), "at least one mounted drive expected");
-        // Tümü ASCII büyük harf.
+        // All are ASCII uppercase.
         for c in &letters {
             assert!(c.is_ascii_uppercase());
         }
-        // Sıralı (artarak) ve tekrarsız.
+        // Sorted (ascending) and duplicate-free.
         let mut sorted = letters.clone();
         sorted.sort_unstable();
         sorted.dedup();
@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn list_drives_returns_valid_info() {
         let drives = list_drives().expect("list_drives should succeed");
-        // En az bir VolumeInfo olmalı (C:).
+        // There must be at least one VolumeInfo (C:).
         assert!(!drives.is_empty(), "at least one drive entry expected");
         for info in &drives {
             assert!(!info.drive_letter.is_empty());

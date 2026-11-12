@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// 26.4 Plugin Sistemi — v2 stub (kapalı kutu).
+// 26.4 Plugin System — v2 stub (closed box).
 //
-// Faz 2'de kullanıcı tanımlı kural setleri + view mode + safe-delete
-// scorer eklentileri. Sandbox: WASM (wasmtime) veya restricted Rust
-// dynamic library — kararı v2 başında ver.
+// Phase 2 adds user-defined rule sets + view mode + safe-delete scorer
+// plugins. Sandbox: WASM (wasmtime) or a restricted Rust dynamic
+// library — decide at the start of v2.
 //
-// Plugin yetenekleri kısıtlı: dosya sistemine doğrudan erişim YOK,
-// yalnızca read-only metadata + UI extension point'ler.
+// Plugin capabilities are limited: NO direct file system access,
+// only read-only metadata + UI extension points.
 
 use crate::error::Result;
 use serde::Serialize;
@@ -27,13 +27,13 @@ pub struct PluginContext {
     pub capabilities: PluginCapabilities,
 }
 
-/// Bölüm 26.4 — plugin trait. v2'de gerçek implementation; v1.x stub.
+/// Chapter 26.4 — plugin trait. Real implementation in v2; v1.x stub.
 pub trait Plugin: Send + Sync {
     fn context(&self) -> &PluginContext;
 
-    /// İlk yükleme. Manifest doğrulama, capability kabul.
+    /// Initial load. Manifest validation, capability acceptance.
     fn on_load(&mut self) -> Result<()>;
 
-    /// Boşaltma. Cleanup yapsın.
+    /// Unload. Should perform cleanup.
     fn on_unload(&mut self) -> Result<()>;
 }

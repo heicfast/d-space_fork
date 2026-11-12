@@ -2,18 +2,18 @@
 //
 // 26.3 Cross-Platform Volume Reader — v2 stub.
 //
-// Faz 1: yalnızca Windows. MFT direkt okuma (ntfs crate) + FindFirstFile
-// fallback. Bölüm 5'in tamamı Win32 bağımlı.
+// Phase 1: Windows only. Direct MFT reads (ntfs crate) + FindFirstFile
+// fallback. All of Chapter 5 is Win32 dependent.
 //
-// Faz 2: Linux ext4/btrfs/zfs ve macOS APFS desteği. Her platform için
-// VolumeBackend impl. Aynı `ScanTree` veri yapısı dönmeli.
+// Phase 2: Linux ext4/btrfs/zfs and macOS APFS support. A VolumeBackend
+// impl per platform. Must return the same `ScanTree` data structure.
 
 use crate::error::Result;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub enum VolumeBackend {
-    /// Bölüm 5 Windows MFT.
+    /// Chapter 5 Windows MFT.
     WindowsNtfs,
     /// FindFirstFile / readdir generic.
     GenericReadDir,
@@ -23,12 +23,12 @@ pub enum VolumeBackend {
     AppleApfs,
 }
 
-/// Bölüm 26.3 — cross-platform reader. Her impl `RawMftEntry` benzeri
-/// bir akış üretmeli ki `build_tree` doğrudan tüketsin.
+/// Chapter 26.3 — cross-platform reader. Each impl must produce a stream
+/// of `RawMftEntry`-like items so `build_tree` can consume it directly.
 pub trait CrossPlatformVolumeReader: Send + Sync {
     fn backend(&self) -> VolumeBackend;
 
-    /// Volume root path'i (Windows `C:\`, Linux `/mnt/...`, macOS `/Volumes/...`).
-    /// Stream-tipli — büyük volume'larda memory patlamasını engeller.
+    /// Volume root path (Windows `C:\`, Linux `/mnt/...`, macOS `/Volumes/...`).
+    /// Stream-typed — prevents memory blowup on large volumes.
     fn enumerate_entries(&self, root: &str) -> Result<Box<dyn Iterator<Item = String>>>;
 }

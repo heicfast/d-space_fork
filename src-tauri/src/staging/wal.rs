@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Write-Ahead Log (WAL) — Bölüm 12.3 cross-volume two-phase commit.
+// Write-Ahead Log (WAL) — Chapter 12.3 cross-volume two-phase commit.
 //
-// `staging_wal` tablosu durumlar:
-//   BEGIN     — copy başladı, henüz commit edilmedi
-//   COMMITTED — final rename + source delete tamamlandı
-//   ABORTED   — hash mismatch / crash / kullanıcı iptal
+// `staging_wal` table states:
+//   BEGIN     — copy started, not yet committed
+//   COMMITTED — final rename + source delete completed
+//   ABORTED   — hash mismatch / crash / user cancellation
 //
-// Recovery (uygulama açılışında çalışır):
-//   * BEGIN, .dspace_tmp var      → tmp sil, source intact, ABORTED yap
-//   * BEGIN, dosya yok            → copy kesildi, source intact, ABORTED
-//   * BEGIN, hash mismatch        → tmp sil, ABORTED, kullanıcıya bildir
-//   * COMMITTED, source eksik     → tutarsız, forensic log (v0.2)
+// Recovery (runs at application startup):
+//   * BEGIN, .dspace_tmp exists   → delete tmp, source intact, mark ABORTED
+//   * BEGIN, file missing         → copy interrupted, source intact, ABORTED
+//   * BEGIN, hash mismatch        → delete tmp, ABORTED, notify the user
+//   * COMMITTED, source missing   → inconsistent, forensic log (v0.2)
 
 use crate::error::{Error, Result};
 use rusqlite::{params, Connection};
@@ -27,7 +27,7 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-/// WAL: BEGIN — copy operasyonu başladı. ID dön (sonraki adımlar için).
+/// WAL: BEGIN — copy operation started. Returns the ID (for the next steps).
 pub fn wal_begin(
     conn: &Connection,
     source_path: &str,
@@ -44,7 +44,7 @@ pub fn wal_begin(
     Ok(conn.last_insert_rowid())
 }
 
-/// WAL: COMMITTED — final rename + source delete tamamlandı.
+/// WAL: COMMITTED — final rename + source delete completed.
 pub fn wal_commit(conn: &Connection, wal_id: i64) -> Result<()> {
     conn.execute(
         "UPDATE staging_wal SET state = 'COMMITTED', completed_at = ?1 \
@@ -55,7 +55,7 @@ pub fn wal_commit(conn: &Connection, wal_id: i64) -> Result<()> {
     Ok(())
 }
 
-/// WAL: ABORTED — hash mismatch / hata / iptal.
+/// WAL: ABORTED — hash mismatch / error / cancellation.
 pub fn wal_abort(conn: &Connection, wal_id: i64, error_message: &str) -> Result<()> {
     conn.execute(
         "UPDATE staging_wal SET state = 'ABORTED', completed_at = ?1, \
@@ -74,9 +74,9 @@ pub struct WalRecoveryReport {
     pub inconsistent_committed: u32,
 }
 
-/// Uygulama açılışında çağrılır. BEGIN durumundaki entry'leri ABORTED'a
-/// çevirir, ortalıkta kalan `.dspace_tmp` dosyalarını siler. Bölüm 12.3
-/// "Recovery Path — Crash Sonrası" bloğunun implementasyonu.
+/// Called at application startup. Moves entries in the BEGIN state to
+/// ABORTED, deletes leftover `.dspace_tmp` files. Implementation of the
+/// Chapter 12.3 "Recovery Path — After a Crash" block.
 pub fn recover_wal(conn: &Connection) -> Result<WalRecoveryReport> {
     let mut stmt = conn
         .prepare(
@@ -108,7 +108,7 @@ pub fn recover_wal(conn: &Connection) -> Result<WalRecoveryReport> {
 
     for (id, source, tmp_opt) in rows {
         report.scanned += 1;
-        // Ortalıkta kalan tmp dosyası varsa sil
+        // Delete the leftover tmp file if present
         if let Some(tmp) = &tmp_opt {
             let tmp_path = Path::new(tmp);
             if tmp_path.exists() {
@@ -123,16 +123,16 @@ pub fn recover_wal(conn: &Connection) -> Result<WalRecoveryReport> {
                 }
             }
         }
-        // Source intact mı? two-phase commit'te source en son silinir, yani
-        // BEGIN'de source hâlâ orada olmalı. Eğer yoksa veri kaybı olabilir,
-        // ama recovery yapmıyoruz — sadece WAL'ı abort'a çek.
+        // Is the source intact? In two-phase commit the source is deleted last,
+        // so in BEGIN the source should still be there. If it is missing, data
+        // loss is possible, but we do not recover — just move the WAL to abort.
         let _ = source;
         wal_abort(conn, id, "crash recovery: BEGIN without commit")?;
         report.aborted_begin += 1;
     }
 
-    // COMMITTED ama dosyası eksik kayıtlar — forensic log (v0.2)
-    // Şimdilik sadece say.
+    // COMMITTED records whose file is missing — forensic log (v0.2)
+    // For now, just count them.
     let mut committed_stmt = conn
         .prepare("SELECT id, tmp_path FROM staging_wal WHERE state = 'COMMITTED'")
         .map_err(|e| Error::Staging(format!("committed prepare: {}", e)))?;
@@ -146,8 +146,8 @@ pub fn recover_wal(conn: &Connection) -> Result<WalRecoveryReport> {
     drop(committed_stmt);
 
     for (_id, _tmp) in committed_rows {
-        // v0.2: COMMITTED entry'lerin gerçekten staged_path'leri var mı kontrol
-        // edilir, yoksa forensic alarm. Şimdilik no-op.
+        // v0.2: check whether COMMITTED entries actually have their staged_paths;
+        // raise a forensic alarm if not. No-op for now.
     }
 
     if report.scanned > 0 {
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn recovery_aborts_dangling_begin() {
         let conn = fresh_db();
-        // 3 entry: BEGIN, COMMITTED, ABORTED
+        // 3 entries: BEGIN, COMMITTED, ABORTED
         wal_begin(&conn, "/src/x", "/tmp/x", "E:").unwrap();
         let id2 = wal_begin(&conn, "/src/y", "/tmp/y", "E:").unwrap();
         wal_commit(&conn, id2).unwrap();
@@ -219,10 +219,10 @@ mod tests {
         let report = recover_wal(&conn).unwrap();
         assert_eq!(report.scanned, 1);
         assert_eq!(report.aborted_begin, 1);
-        // tmp dosyaları yok, cleaned == 0
+        // no tmp files, cleaned == 0
         assert_eq!(report.tmp_cleaned, 0);
 
-        // Şimdi BEGIN yok
+        // Now no BEGIN remains
         let begin_count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM staging_wal WHERE state = 'BEGIN'",

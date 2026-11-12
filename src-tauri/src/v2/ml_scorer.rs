@@ -2,27 +2,27 @@
 //
 // 26.1 ML Safe-Delete Scorer — v2 stub.
 //
-// Faz 1 kural motoru (53 kural, `crate::safe_delete::rules`) deterministik.
-// Faz 2'de TFLite tier'lı ML scorer eklenir:
+// The Phase 1 rule engine (53 rules, `crate::safe_delete::rules`) is deterministic.
+// Phase 2 adds a TFLite-tiered ML scorer:
 //
-//   Tier 1: deterministik kural motoru (mevcut) — daima çalışır
-//   Tier 2: yerel ML inference (TFLite, küçük model ~5 MB) — async cache
-//   Tier 3: cloud inference (premium, opt-in) — büyük model
+//   Tier 1: deterministic rule engine (current) — always runs
+//   Tier 2: local ML inference (TFLite, small model ~5 MB) — async cache
+//   Tier 3: cloud inference (premium, opt-in) — large model
 //
-// İlke: ML scan critical path DIŞINDA (Bölüm 6.5.1). SQLite `ml_scores`
-// tablosu cache (Bölüm 6.5.2 — schema şimdiden mevcut). mtime değişmedikçe
-// yeniden hesaplama yok.
+// Principle: ML stays OUTSIDE the scan critical path (Chapter 6.5.1). The
+// SQLite `ml_scores` table is the cache (Chapter 6.5.2 — schema already
+// exists). No recomputation while mtime is unchanged.
 
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum InferenceTier {
-    /// Bölüm 6.5.1 — deterministik kural motoru.
+    /// Chapter 6.5.1 — deterministic rule engine.
     Rules,
-    /// Bölüm 6.5.1 — yerel TFLite inference.
+    /// Chapter 6.5.1 — local TFLite inference.
     LocalMl,
-    /// Bölüm 6.5.1 — cloud inference (premium).
+    /// Chapter 6.5.1 — cloud inference (premium).
     CloudMl,
 }
 
@@ -35,26 +35,26 @@ pub struct MlScoreRecord {
     pub computed_at_unix: i64,
 }
 
-/// Bölüm 6.5 — ML scorer trait.
+/// Chapter 6.5 — ML scorer trait.
 ///
-/// v1.x'te concrete impl `safe_delete::RulesScorer`; tract path opsiyonel
-/// `ml-tflite` feature ile. Caller: scan-time path'ten ASLA çağrılmaz; UI
-/// drilldown veya idle background job (Bölüm 6.5.3 throttle).
+/// In v1.x the concrete impl is `safe_delete::RulesScorer`; the tract path
+/// comes via the optional `ml-tflite` feature. Caller: NEVER invoked from
+/// the scan-time path; UI drilldown or idle background job (Chapter 6.5.3).
 ///
-/// `Send + Sync` constraint v0.2'de eklenecek — şu an `RulesScorer` SQLite
-/// `&Connection` ref tutar (Connection !Sync), Faz 1 tek-thread caller.
-/// Background indexing implementation eklendiğinde `Arc<Mutex<Connection>>`
-/// pattern'i ile thread-safe yapılır.
+/// The `Send + Sync` constraint will be added in v0.2 — for now `RulesScorer`
+/// holds a SQLite `&Connection` ref (Connection is !Sync), Phase 1 caller
+/// is single-threaded. When the background indexing implementation is
+/// added, it will be made thread-safe via the `Arc<Mutex<Connection>>` pattern.
 pub trait MlSafeDeleteScorer {
-    /// Tek dosya skoru. Cache hit ise hızlı, miss ise model inference.
+    /// Score for a single file. Fast on a cache hit, model inference on a miss.
     fn score_one(&self, path: &str, mtime_unix: i64) -> Result<MlScoreRecord>;
 
-    /// Batch — idle background indexing için (Bölüm 6.5.3).
+    /// Batch — for idle background indexing (Chapter 6.5.3).
     fn score_batch(&self, paths: &[(&str, i64)]) -> Result<Vec<MlScoreRecord>>;
 
-    /// Cache'ten bilinen skoru oku, miss ise None.
+    /// Read a known score from the cache, None on a miss.
     fn lookup_cache(&self, path_hash: &[u8; 32]) -> Result<Option<MlScoreRecord>>;
 
-    /// İnference tier'ı.
+    /// The inference tier.
     fn tier(&self) -> InferenceTier;
 }

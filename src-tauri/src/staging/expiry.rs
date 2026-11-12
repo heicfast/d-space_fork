@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Lazy Expiry — Master mimari Bölüm 12.2.1, 12.2.2, 12.2.3.
+// Lazy Expiry — Master architecture Chapter 12.2.1, 12.2.2, 12.2.3.
 //
-// İlke (Bölüm 22.6 dark pattern yok): kullanıcı onayı olmadan ASLA otomatik
-// kalıcı silme yapılmaz. Süresi geçmiş öğeler listelenir, kullanıcı
-// "Tümünü kalıcı sil" veya tekil seçimle onaylar.
+// Principle (Chapter 22.6, no dark patterns): NEVER delete permanently
+// without user consent. Expired items are listed; the user confirms via
+// "Delete all permanently" or an individual selection.
 //
-// Kapsam:
-//   * list_expired(): expires_at < now olan staging item'larını döner.
-//   * cleanup_expired(): kullanıcı onayı ile çağrılır, item'ları kalıcı
-//     siler. Rate limit (10 dosya/sn) — UI freeze engellenir.
+// Scope:
+//   * list_expired(): returns the staging items with expires_at < now.
+//   * cleanup_expired(): called with user consent, permanently deletes the
+//     items. Rate limit (10 files/sec) — prevents UI freeze.
 //
-// Wake-from-sleep grace period (Bölüm 12.2.2) tray polling içinde olur
-// — bu modül sadece DB tarafı, tray scheduling v0.2 sprint'inde
-// (Bölüm 13.2 İzleme aralıkları).
+// The wake-from-sleep grace period (Chapter 12.2.2) happens inside tray polling
+// — this module is only the DB side; tray scheduling lands in the v0.2 sprint
+// (Chapter 13.2 Monitoring intervals).
 
 use crate::error::{Error, Result};
 use crate::staging::ops::now_unix;
@@ -24,10 +24,10 @@ use std::thread::sleep;
 use std::time::Duration;
 use tracing::{info, warn};
 
-/// Bölüm 12.2.3 — rate limit: UI freeze + I/O patlaması engellenir.
+/// Chapter 12.2.3 — rate limit: prevents UI freeze + I/O bursts.
 pub const DEFAULT_CLEANUP_RATE_PER_SEC: u32 = 10;
-/// Bölüm 12.2.2 — `notify_user` threshold: bu sayının üzerinde olduğunda
-/// otomatik silme YOK, kullanıcı listeden tekil/toplu onay vermeli.
+/// Chapter 12.2.2 — `notify_user` threshold: above this count there is
+/// NO automatic deletion; the user must confirm individually/in bulk from the list.
 pub const AUTO_THRESHOLD: usize = 100;
 
 #[derive(Debug, Clone, Serialize)]
@@ -49,9 +49,9 @@ pub struct CleanupReport {
     pub aborted_threshold: bool,
 }
 
-/// Bölüm 12.2.1 — süresi geçmiş staging item listesi (expires_at < now).
-/// Gemini review B30 — LIMIT 2000: patolojik DB'de RAM şişmesin (cleanup
-/// zaten AUTO_THRESHOLD üzerinden parçalı çalışır).
+/// Chapter 12.2.1 — the list of expired staging items (expires_at < now).
+/// Gemini review B30 — LIMIT 2000: no RAM swelling on a pathological DB (cleanup
+/// already runs in batches via AUTO_THRESHOLD).
 pub fn list_expired(conn: &Connection) -> Result<Vec<ExpiredItem>> {
     let now = now_unix();
     let mut stmt = conn
@@ -85,13 +85,13 @@ pub fn list_expired(conn: &Connection) -> Result<Vec<ExpiredItem>> {
     Ok(items)
 }
 
-/// Bölüm 12.2.2 + 12.2.3 — onaylı toplu cleanup. Rate limit ile dosya başına
-/// sleep, AUTO_THRESHOLD aşımında abort. `force=true` UI kullanıcı tarafından
-/// "Tümünü sil" onayı verildiğini gösterir.
+/// Chapter 12.2.2 + 12.2.3 — confirmed bulk cleanup. Per-file sleep under the
+/// rate limit, abort when AUTO_THRESHOLD is exceeded. `force=true` signals that
+/// the UI user gave the "Delete all" consent.
 ///
-/// Confirm phrase: her item kendi tam dosya adıyla eşleşmeli (Bölüm 12.4 ile
-/// aynı çift onay güvencesi). UI bu listeyi gösterir, kullanıcı isterse
-/// item'ları tekil siler (per-file phrase) ya da `force` ile hepsini.
+/// Confirm phrase: each item must match its own full file name (the same
+/// double-confirmation guarantee as Chapter 12.4). The UI shows this list; the
+/// user may delete items individually (per-file phrase) or all of them via `force`.
 pub fn cleanup_expired(
     conn: &mut Connection,
     rate_per_sec: u32,
@@ -121,15 +121,15 @@ pub fn cleanup_expired(
     let mut failed: u64 = 0;
     let mut total_bytes: u64 = 0;
 
-    // Gemini review B31 — sleep yalnızca item'lar ARASINDA; son itemdan
-    // sonra gereksiz bekleme yok.
+    // Gemini review B31 — sleep only BETWEEN items; no needless
+    // waiting after the last item.
     let mut first = true;
     for item in items {
         if !first {
             sleep(interval);
         }
         first = false;
-        // Permanent delete'in confirm_phrase'si dosya adıdır.
+        // The permanent delete's confirm_phrase is the file name.
         let file_name = std::path::PathBuf::from(&item.original_path)
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
@@ -248,19 +248,19 @@ mod tests {
         seed_expired(&conn, r"C:\expired1.txt", &s1, 2, 100);
         seed_expired(&conn, r"C:\expired2.txt", &s2, 3, 50);
 
-        // rate yüksek tut testte (sleep küçük olsun)
+        // Keep the rate high in this test (so the sleep stays small)
         let report = cleanup_expired(&mut conn, 1000, false).unwrap();
         assert_eq!(report.deleted, 2);
         assert_eq!(report.failed, 0);
         assert!(!report.aborted_threshold);
         assert!(!s1.exists() && !s2.exists());
 
-        // staging_items boş
+        // staging_items is empty
         let remaining: i64 = conn
             .query_row("SELECT COUNT(*) FROM staging_items", [], |r| r.get(0))
             .unwrap();
         assert_eq!(remaining, 0);
-        // forensic ledger 2 kayıt
+        // forensic ledger has 2 records
         let forensic: i64 = conn
             .query_row("SELECT COUNT(*) FROM permanent_deletes_forensic", [], |r| {
                 r.get(0)

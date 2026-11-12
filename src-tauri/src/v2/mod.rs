@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// v2 Altyapı Rezervasyonları — Master mimari Bölüm 26.
+// v2 Infrastructure Reservations — Master architecture Chapter 26.
 //
-// Bu modül **henüz uygulanmamış** ama API kontratı v1.x boyunca stabil
-// kalacak trait'leri içerir. Amaç: v2'ye geçişte breaking change'i
-// minimize etmek, mevcut kodu bu trait'ler etrafında konumlandırmak.
+// This module is **not yet implemented**, but it contains traits whose API
+// contract stays stable throughout v1.x. Goal: minimize breaking changes
+// on the move to v2 and position existing code around these traits.
 //
-// Şu an hiçbir trait'in concrete implementation'ı yok — `unimplemented!()`
-// veya feature-gated. v2 sprint'lerinde gerçek implementasyon eklenecek.
+// Right now no trait has a concrete implementation — `unimplemented!()`
+// or feature-gated. Real implementations arrive in the v2 sprints.
 //
-// İçerik:
-//   * 26.1 MlSafeDeleteScorer — TFLite tier'lı ML scorer (mevcut kural
-//           motorunun üzerine eklenir)
-//   * 26.2 NetworkShareScanner — UNC path için scan stratejisi
-//   * 26.3 CrossPlatformVolumeReader — Linux/macOS desteği için trait
-//   * 26.4 Plugin — kapalı kutu eklenti sistemi
-//   * 26.5 CloudBackupIntegration — staging için bulut yedek
+// Contents:
+//   * 26.1 MlSafeDeleteScorer — TFLite-tiered ML scorer (layered on top of
+//           the existing rule engine)
+//   * 26.2 NetworkShareScanner — scan strategy for UNC paths
+//   * 26.3 CrossPlatformVolumeReader — trait for Linux/macOS support
+//   * 26.4 Plugin — closed-box plugin system
+//   * 26.5 CloudBackupIntegration — cloud backup for staging
 
 pub mod cloud_backup;
 pub mod ml_scorer;

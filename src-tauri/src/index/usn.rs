@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// USN_RECORD_V2 parser + FSCTL bağlantıları — Sprint 3.8.
+// USN_RECORD_V2 parser + FSCTL connections — Sprint 3.8.
 //
-// Discovery Log #005 — Bölüm 5.6: USN Journal modeli "Everything"in temel
-// mekanizmasıdır. NTFS USN_RECORD_V2 binary formatı:
+// Discovery Log #005 — Chapter 5.6: the USN Journal model is the core
+// mechanism of "Everything". NTFS USN_RECORD_V2 binary format:
 //
 //   DWORD  RecordLength;
 //   WORD   MajorVersion;       // 2
@@ -20,19 +20,19 @@
 //   WORD    FileNameOffset;
 //   WCHAR   FileName[1];       // UTF-16 LE, NOT null-terminated
 //
-// NTFS file reference number 64-bit, alt 48 bit segment numarası (MFT
-// record index), üst 16 bit sequence numarası. Persistent index için
-// yalnız segment numarasını saklıyoruz (rename sırasında sequence değişir
-// ama segment kalır — kayıt sürekliliği için tercih edilir).
+// The NTFS file reference number is 64-bit: the low 48 bits are the segment
+// number (MFT record index), the high 16 bits the sequence number. For the
+// persistent index we store only the segment number (on rename the sequence
+// changes but the segment stays — preferred for record continuity).
 //
-// FSCTL constants `windows-rs` 0.61'in `Win32::System::Ioctl`'ünde:
+// FSCTL constants in `windows-rs` 0.61's `Win32::System::Ioctl`:
 //   * FSCTL_ENUM_USN_DATA       = 0x000900B3 (baseline enumerate)
 //   * FSCTL_READ_USN_JOURNAL    = 0x000900BB (delta read)
-//   * FSCTL_QUERY_USN_JOURNAL   = 0x000900F4 (journal_id okumak için)
-// Windows 11'de bu sembolik isimler `windows` crate'inde değil; hand-roll
-// edilir (FSCTL kodları kararlı, Win2K'dan beri değişmedi).
+//   * FSCTL_QUERY_USN_JOURNAL   = 0x000900F4 (to read journal_id)
+// On Windows 11 these symbolic names are not in the `windows` crate; they
+// are hand-rolled (FSCTL codes are stable, unchanged since Win2K).
 //
-// USN reason bayrakları (`winioctl.h`):
+// USN reason flags (`winioctl.h`):
 //   USN_REASON_FILE_CREATE     = 0x00000100
 //   USN_REASON_FILE_DELETE     = 0x00000200
 //   USN_REASON_DATA_OVERWRITE  = 0x00000001
@@ -42,10 +42,10 @@
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 
-/// USN reason mask — delta uygularken yalnız bu olaylara tepki veriyoruz
-/// (data değişim, oluşturma, silme, ad değişimi). Discovery #005 — diğer
-/// reason'lar (REASON_SECURITY_CHANGE, REASON_BASIC_INFO_CHANGE vb.)
-/// dosya isim/varlık bilgisini değiştirmez, görmezden gelinir.
+/// USN reason mask — when applying deltas we react only to these events
+/// (data change, create, delete, rename). Discovery #005 — the other
+/// reasons (REASON_SECURITY_CHANGE, REASON_BASIC_INFO_CHANGE etc.) do
+/// not change file name/existence information and are ignored.
 pub const USN_REASON_MASK: u32 = USN_REASON_FILE_CREATE
     | USN_REASON_FILE_DELETE
     | USN_REASON_DATA_OVERWRITE
@@ -62,31 +62,31 @@ pub const USN_REASON_CLOSE: u32 = 0x8000_0000;
 
 /// FSCTL_ENUM_USN_DATA — baseline enumerate.
 pub const FSCTL_ENUM_USN_DATA: u32 = 0x0009_00B3;
-/// FSCTL_READ_USN_JOURNAL — delta okuma.
+/// FSCTL_READ_USN_JOURNAL — delta read.
 pub const FSCTL_READ_USN_JOURNAL: u32 = 0x0009_00BB;
-/// FSCTL_QUERY_USN_JOURNAL — journal_id sorgu.
+/// FSCTL_QUERY_USN_JOURNAL — journal_id query.
 pub const FSCTL_QUERY_USN_JOURNAL: u32 = 0x0009_00F4;
 
-/// USN_RECORD_V2 sabit alan boyutu (FileName hariç) = 60 bayt.
+/// USN_RECORD_V2 fixed field size (FileName excluded) = 60 bytes.
 pub const USN_RECORD_V2_HEADER_SIZE: usize = 60;
 
 /// FILE_ATTRIBUTE_DIRECTORY (winnt.h).
 pub const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0000_0010;
 
-/// Win32 ERROR_JOURNAL_NOT_ACTIVE — USN journal kapalı volume için
-/// `DeviceIoControl` bu hatayı verir. Caller wraparound veya re-create
-/// kararı verir (D-Space: watcher başlatılmaz).
+/// Win32 ERROR_JOURNAL_NOT_ACTIVE — `DeviceIoControl` returns this error
+/// for a volume with the USN journal disabled. The caller decides on
+/// wraparound or re-create (D-Space: the watcher is not started).
 pub const ERROR_JOURNAL_NOT_ACTIVE: u32 = 1_179;
 /// Win32 ERROR_JOURNAL_DELETE_IN_PROGRESS.
 pub const ERROR_JOURNAL_DELETE_IN_PROGRESS: u32 = 1_178;
-/// Win32 ERROR_JOURNAL_ENTRY_DELETED — istenen USN penceresi düşmüş
-/// (truncation), wraparound → full re-enumerate.
+/// Win32 ERROR_JOURNAL_ENTRY_DELETED — the requested USN window has been
+/// dropped (truncation), wraparound → full re-enumerate.
 pub const ERROR_JOURNAL_ENTRY_DELETED: u32 = 1_181;
 
-/// Slice'tan sabit boyutlu array'e güvenli kopya — `from_le_bytes`
-/// helper'ları. Caller bounds'ı kontrol eder; `copy_from_slice` length
-/// mismatch'inde panic eder ama yapı kanıtlanabilir şekilde güvenli.
-/// `.try_into().unwrap()` pattern'ine göre clippy ve okur için temiz.
+/// Safe copy from a slice to a fixed-size array — `from_le_bytes`
+/// helpers. The caller checks bounds; `copy_from_slice` panics on a
+/// length mismatch but the structure is provably safe.
+/// Cleaner for clippy and the reader than a `.try_into().unwrap()` pattern.
 #[inline]
 pub(super) fn read_le_i64(buf: &[u8], offset: usize) -> i64 {
     let mut arr = [0u8; 8];
@@ -115,24 +115,24 @@ pub(super) fn read_le_u16(buf: &[u8], offset: usize) -> u16 {
     u16::from_le_bytes(arr)
 }
 
-/// `READ_USN_JOURNAL_DATA_V0` input boyutu — 6 alan, 40 bayt:
+/// `READ_USN_JOURNAL_DATA_V0` input size — 6 fields, 40 bytes:
 ///   USN StartUsn (8) + DWORD ReasonMask (4) + DWORD ReturnOnlyOnClose (4)
 ///   + DWORDLONG Timeout (8) + DWORDLONG BytesToWaitFor (8)
 ///   + DWORDLONG UsnJournalID (8) = 40
 pub const READ_USN_JOURNAL_DATA_V0_SIZE: usize = 40;
 
-/// `READ_USN_JOURNAL_DATA_V0` input bloğunu inşa eder. Gemini review 2.4 —
-/// event-driven watcher için: `timeout_100ns > 0` + `bytes_to_wait > 0`
-/// ile kernel IOCTL'i yeni USN entry beklemek üzere bloklar; polling
-/// gerek yok, batarya dostu.
+/// Builds the `READ_USN_JOURNAL_DATA_V0` input block. Gemini review 2.4 —
+/// for the event-driven watcher: `timeout_100ns > 0` + `bytes_to_wait > 0`
+/// makes the kernel IOCTL block waiting for a new USN entry; no polling
+/// needed, battery friendly.
 ///
-/// `start_usn` = mevcut watermark next_usn.
-/// `reason_mask` = `USN_REASON_MASK` (filtre).
-/// `return_only_on_close` = 0 (her event'i yakala).
-/// `timeout_100ns` = 0 → no wait (eski polling); >0 → blocking.
-///   Birim 100 ns; 1 dk = 600_000_000.
-/// `bytes_to_wait_for` = 1 → herhangi bir kayıt gelince çık.
-/// `journal_id` = mevcut watermark journal_id.
+/// `start_usn` = the current watermark next_usn.
+/// `reason_mask` = `USN_REASON_MASK` (filter).
+/// `return_only_on_close` = 0 (catch every event).
+/// `timeout_100ns` = 0 → no wait (old polling); >0 → blocking.
+///   Unit is 100 ns; 1 min = 600_000_000.
+/// `bytes_to_wait_for` = 1 → return as soon as any record arrives.
+/// `journal_id` = the current watermark journal_id.
 pub fn build_read_journal_request(
     start_usn: i64,
     reason_mask: u32,
@@ -151,8 +151,8 @@ pub fn build_read_journal_request(
     buf
 }
 
-/// USN_RECORD_V2 binary kaydının parse edilmiş hali. Sadece bizi
-/// ilgilendiren alanlar tutuluyor — TimeStamp/SecurityId atılıyor.
+/// Parsed form of a USN_RECORD_V2 binary record. Only the fields that
+/// concern us are kept — TimeStamp/SecurityId are dropped.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UsnRecord {
     pub file_ref: i64,
@@ -169,16 +169,16 @@ impl UsnRecord {
     }
 }
 
-/// NTFS file reference number → persistent segment kısmı (alt 48 bit).
-/// Üst 16 bit sequence number; rename'de değişir, persist için tercih
-/// edilmez.
+/// NTFS file reference number → persistent segment part (low 48 bits).
+/// The high 16 bits are the sequence number; it changes on rename and is
+/// not preferred for persistence.
 #[inline]
 pub fn segment_of(file_ref: u64) -> i64 {
     (file_ref & 0x0000_FFFF_FFFF_FFFF) as i64
 }
 
-/// Tek bir USN_RECORD_V2'yi binary'den parse eder. `buf` kayıt başlangıcı.
-/// Dönen değer: (kayıt, kayıt boyutu — caller advance için).
+/// Parses a single USN_RECORD_V2 from binary. `buf` is the record start.
+/// Returns: (record, record size — for the caller to advance).
 pub fn parse_record_v2(buf: &[u8]) -> Result<(UsnRecord, usize)> {
     if buf.len() < USN_RECORD_V2_HEADER_SIZE {
         return Err(Error::Index(format!(
@@ -206,9 +206,9 @@ pub fn parse_record_v2(buf: &[u8]) -> Result<(UsnRecord, usize)> {
     let file_ref_raw = read_le_u64(buf, 8);
     let parent_ref_raw = read_le_u64(buf, 16);
     let usn_id = read_le_i64(buf, 24);
-    // 32..40 TimeStamp — atlanıyor.
+    // 32..40 TimeStamp — skipped.
     let reason = read_le_u32(buf, 40);
-    // 44..48 SourceInfo, 48..52 SecurityId — atlanıyor.
+    // 44..48 SourceInfo, 48..52 SecurityId — skipped.
     let attributes = read_le_u32(buf, 52);
     let name_length = read_le_u16(buf, 56) as usize;
     let name_offset = read_le_u16(buf, 58) as usize;
@@ -246,9 +246,9 @@ pub fn parse_record_v2(buf: &[u8]) -> Result<(UsnRecord, usize)> {
     ))
 }
 
-/// Bir buffer içindeki tüm USN_RECORD_V2 kayıtlarını dizi olarak çıkar.
-/// `offset`: ilk record başlangıcı (FSCTL output buffer'da ilk 8 bayt
-/// `NextUsn` üzerinden gelir; caller doğru offset'i geçer).
+/// Extracts all USN_RECORD_V2 records in a buffer into a vector.
+/// `offset`: start of the first record (in the FSCTL output buffer the
+/// first 8 bytes come as `NextUsn`; the caller passes the right offset).
 pub fn parse_records(buf: &[u8], mut offset: usize) -> Result<Vec<UsnRecord>> {
     let mut out = Vec::new();
     while offset + USN_RECORD_V2_HEADER_SIZE <= buf.len() {
@@ -262,7 +262,7 @@ pub fn parse_records(buf: &[u8], mut offset: usize) -> Result<Vec<UsnRecord>> {
     Ok(out)
 }
 
-/// USN journal okuma sonucu — caller watermark'ı bu `next_usn` ile günceller.
+/// USN journal read result — the caller updates the watermark with this `next_usn`.
 #[derive(Debug, Clone)]
 pub struct JournalReadResult {
     pub records: Vec<UsnRecord>,
@@ -270,21 +270,22 @@ pub struct JournalReadResult {
     pub elapsed_ms: u64,
 }
 
-/// Gemini review 2.4 — event-driven USN journal okuma. Pozitif
-/// `timeout_100ns` ve >= 1 `bytes_to_wait_for` ile kernel IOCTL
-/// bekleyiş'i yapar; yeni USN kaydı gelene kadar **CPU kullanmadan**
-/// bloklar. 5 sn polling tamamen gereksizleşir.
+/// Gemini review 2.4 — event-driven USN journal reading. With a positive
+/// `timeout_100ns` and >= 1 `bytes_to_wait_for` the kernel IOCTL does the
+/// waiting; it blocks **without using CPU** until a new USN record arrives.
+/// 5-second polling becomes entirely unnecessary.
 ///
-/// Kullanım: caller volume_id (`\\.\C:`), mevcut watermark (next_usn,
-/// journal_id), timeout (örn. 60 sn = 600_000_000) verir; fonksiyon
-/// blocking DeviceIoControl çağırır; dönen records `apply_delta` ile
-/// DB'ye yazılır, `next_usn` yeni watermark olur.
+/// Usage: the caller provides volume_id (`\\.\C:`), the current watermark
+/// (next_usn, journal_id), and a timeout (e.g. 60 s = 600_000_000); the
+/// function invokes the blocking DeviceIoControl; the returned records are
+/// written to the DB via `apply_delta`, and `next_usn` becomes the new
+/// watermark.
 ///
-/// Cancellation: timeout süresince blok eder. Hızlı iptal için
-/// `CancelIoEx` kullanılabilir (ayrı thread'den); minimum viable
-/// sürümünde timeout süresince dur.
+/// Cancellation: blocks for the duration of the timeout. For a fast cancel
+/// `CancelIoEx` can be used (from a separate thread); in the minimum
+/// viable version it waits out the timeout.
 ///
-/// Admin gerekir (`\\.\X:` raw volume open).
+/// Admin rights required (`\\.\X:` raw volume open).
 #[cfg(windows)]
 pub fn read_journal_blocking(
     volume_id: &str,
@@ -341,9 +342,9 @@ pub fn read_journal_blocking(
     let request = build_read_journal_request(
         next_usn,
         USN_REASON_MASK,
-        0,             // ReturnOnlyOnClose = 0 (her event)
+        0,             // ReturnOnlyOnClose = 0 (every event)
         timeout_100ns, // Timeout: 0 = no-wait, >0 = blocking
-        1,             // BytesToWaitFor: 1 → herhangi bir kayıt gelince çık
+        1,             // BytesToWaitFor: 1 → return as soon as any record arrives
         journal_id,
     );
 
@@ -394,7 +395,7 @@ pub fn read_journal_blocking(
     ))
 }
 
-/// Test fixture'larında V2 record bayt buffer'ı kurmak için yardımcı.
+/// Helper for building a V2 record byte buffer in test fixtures.
 #[cfg(test)]
 pub(crate) fn build_v2_record(
     file_ref: u64,
@@ -408,8 +409,8 @@ pub(crate) fn build_v2_record(
     let name_bytes: Vec<u8> = utf16.iter().flat_map(|c| c.to_le_bytes()).collect();
     let name_offset = USN_RECORD_V2_HEADER_SIZE;
     let name_len_bytes = name_bytes.len();
-    // 8-bayt hizalanmış kayıt — Windows USN dökümünden: kayıt uzunluğu
-    // 8-bayt katlarına yuvarlanır.
+    // 8-byte aligned record — from a Windows USN dump: the record length
+    // is rounded up to a multiple of 8 bytes.
     let unaligned = USN_RECORD_V2_HEADER_SIZE + name_len_bytes;
     let record_length = unaligned.div_ceil(8) * 8;
     let mut buf = vec![0u8; record_length];
@@ -435,7 +436,7 @@ mod tests {
 
     #[test]
     fn parse_record_v2_roundtrip() {
-        // Klasik bir dosya oluşturma kaydı: report.docx, parent 5
+        // A classic file-create record: report.docx, parent 5
         let buf = build_v2_record(
             0x0000_0000_0001_2345_u64, // file_ref segment 0x12345
             0x0000_0000_0000_0005_u64, // parent_ref segment 5
@@ -451,7 +452,7 @@ mod tests {
         assert_eq!(rec.name, "report.docx");
         assert_eq!(rec.reason & USN_REASON_FILE_CREATE, USN_REASON_FILE_CREATE);
         assert!(!rec.is_directory());
-        // Kayıt boyutu 8-bayt hizalanmış olmalı
+        // The record size must be 8-byte aligned
         assert!(sz % 8 == 0);
         assert!(sz >= USN_RECORD_V2_HEADER_SIZE + "report.docx".len() * 2);
     }
@@ -495,7 +496,7 @@ mod tests {
         let err = parse_record_v2(&buf).unwrap_err();
         match err {
             Error::Index(m) => assert!(m.contains("MajorVersion")),
-            _ => panic!("Index variant beklendi"),
+            _ => panic!("expected Index variant"),
         }
     }
 
@@ -535,7 +536,7 @@ mod tests {
 
     #[test]
     fn segment_strips_sequence_number() {
-        // Üst 16 bit sequence, alt 48 bit segment
+        // High 16 bits sequence, low 48 bits segment
         let raw: u64 = 0x0012_3456_789A_BCDE;
         let seg = segment_of(raw);
         assert_eq!(seg, 0x0000_3456_789A_BCDE_i64);
@@ -547,13 +548,13 @@ mod tests {
             12_345_i64,      // StartUsn
             USN_REASON_MASK, // ReasonMask
             0,               // ReturnOnlyOnClose
-            600_000_000_u64, // Timeout (60 sn, 100ns birim)
+            600_000_000_u64, // Timeout (60 s, 100ns unit)
             1_u64,           // BytesToWaitFor
             0x42_i64,        // UsnJournalID
         );
         assert_eq!(req.len(), READ_USN_JOURNAL_DATA_V0_SIZE);
         assert_eq!(req.len(), 40);
-        // Field offset doğrulamaları
+        // Field offset verifications
         let start_usn = read_le_i64(&req, 0);
         assert_eq!(start_usn, 12_345);
         let mask = read_le_u32(&req, 8);
@@ -566,8 +567,8 @@ mod tests {
 
     #[test]
     fn reason_mask_includes_expected_events() {
-        // Compile-time'da bit'lerin maskeye dahil olduğunu doğrula —
-        // constant-fold edilen assertion'ları clippy const block ister.
+        // Verify at compile time that the bits are included in the mask —
+        // clippy wants a const block for constant-folded assertions.
         const _CHECK_CREATE: () = assert!(USN_REASON_MASK & USN_REASON_FILE_CREATE != 0);
         const _CHECK_DELETE: () = assert!(USN_REASON_MASK & USN_REASON_FILE_DELETE != 0);
         const _CHECK_RENAME_NEW: () = assert!(USN_REASON_MASK & USN_REASON_RENAME_NEW_NAME != 0);

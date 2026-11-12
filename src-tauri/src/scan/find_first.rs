@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// FindFirstFile fallback — Master mimari Bölüm 5.2A Katman 2 +
-// Bölüm 33.2 Katman B (streaming fallback).
+// FindFirstFile fallback — Master architecture Chapter 5.2A Layer 2 +
+// Chapter 33.2 Layer B (streaming fallback).
 //
-// Standart Windows API ile recursive scan. Yavaş ama HER ZAMAN çalışır
-// (admin gerektirmez, raw volume erişimi yoktur).
+// Recursive scan with the standard Windows API. Slow but ALWAYS works
+// (requires no admin, no raw volume access).
 //
-// İlkeler:
-//   * Symlink/junction takip edilmez (Bölüm 33.2'deki follow_links=false).
-//   * MAX_DEPTH=50 — pathological derinlik koruması.
-//   * BFS sırası: parent her zaman child'dan önce yerleşir, böylece
-//     path_to_id sözlüğü tutarlı kalır.
-//   * Çıktı `RawMftEntry` ile aynı şemada — `tree::build_tree` doğrudan
-//     besleyebilir. Synthetic NodeId'ler 16'dan başlar (sistem rezervi).
+// Principles:
+//   * Symlinks/junctions are not followed (follow_links=false in Chapter 33.2).
+//   * MAX_DEPTH=50 — pathological depth protection.
+//   * BFS order: the parent is always placed before its children, so the
+//     path_to_id dictionary stays consistent.
+//   * The output has the same schema as `RawMftEntry` — `tree::build_tree`
+//     can be fed directly. Synthetic NodeIds start at 16 (system reserve).
 //
-// Performans (Bölüm 5.4 vs Bölüm 17.2): hedef 1TB için < 45sn (WizTree free
-// seviyesi). Bu v0.1 tek-thread. v0.2'de rayon paralel par-dir + lock-free
-// id counter.
+// Performance (Chapter 5.4 vs Chapter 17.2): target < 45 s for 1 TB (WizTree
+// free level). This v0.1 is single-threaded. v0.2 will add rayon parallel
+// per-dir + lock-free id counter.
 
 use crate::error::{Error, Result};
 use crate::scan::tree::ROOT_RECORD;
@@ -33,26 +33,26 @@ use std::path::{Path, PathBuf};
 use std::time::{Instant, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 
-/// Hard link dedup için NTFS file_index sorgu eşiği. Bu boyutun altındaki
-/// dosyalar için `CreateFileW + GetFileInformationByHandle` çağırmıyoruz —
-/// tipik hard link'ler (WinSxS DLL'leri, sistem ikilileri) genelde >= 64
-/// KB; daha küçükleri toplam içinde önemsiz.
+/// NTFS file_index query threshold for hard link dedup. We do not call
+/// `CreateFileW + GetFileInformationByHandle` for files below this size —
+/// typical hard links (WinSxS DLLs, system binaries) are generally >= 64
+/// KB; smaller ones are negligible in the total.
 const HARDLINK_DEDUP_THRESHOLD: u64 = 64 * 1024;
 
-/// `FILE_ATTRIBUTE_COMPRESSED` — NTFS sıkıştırma bayrağı. winnt.h: 0x800.
+/// `FILE_ATTRIBUTE_COMPRESSED` — NTFS compression flag. winnt.h: 0x800.
 const FILE_ATTRIBUTE_COMPRESSED: u32 = 0x0000_0800;
-/// `FILE_ATTRIBUTE_SPARSE_FILE` — sparse dosya bayrağı. winnt.h: 0x200.
+/// `FILE_ATTRIBUTE_SPARSE_FILE` — sparse file flag. winnt.h: 0x200.
 const FILE_ATTRIBUTE_SPARSE_FILE: u32 = 0x0000_0200;
 
-/// Compressed/sparse dosyalar için `metadata.len()` MANTIKSAL boyutu döner
-/// (uncompressed, sparse'in nominal boyutu). `GetCompressedFileSizeW`
-/// **fiziksel** boyutu döner — gerçek disk doluluğu. Windows kurulumunda
-/// WinSxS + System32 yoğun sıkıştırılmıştır, bu fark %20-30 farkla
-/// "1 TB diskte 1.2 TB" gibi raporlara yol açar.
+/// For compressed/sparse files `metadata.len()` returns the LOGICAL size
+/// (uncompressed; the nominal size for sparse). `GetCompressedFileSizeW`
+/// returns the **physical** size — the real disk usage. In a Windows
+/// installation WinSxS + System32 are heavily compressed, and this 20-30%
+/// difference leads to reports like "1.2 TB on a 1 TB disk".
 ///
-/// Yalnız `FILE_ATTRIBUTE_COMPRESSED | SPARSE` bayraklı dosyalar için
-/// ekstra Win32 çağrısı yapılır (per-file ~5µs); rastgele dosyalar için
-/// no-op.
+/// The extra Win32 call is made only for files flagged
+/// `FILE_ATTRIBUTE_COMPRESSED | SPARSE` (~5µs per file); for other files
+/// it is a no-op.
 #[cfg(windows)]
 fn physical_file_size(path: &Path, metadata: &Metadata) -> u64 {
     let attrs = metadata.file_attributes();
@@ -60,7 +60,7 @@ fn physical_file_size(path: &Path, metadata: &Metadata) -> u64 {
     if attrs & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE) == 0 {
         return logical;
     }
-    // Yalnız sıkıştırılmış / sparse dosyalar için Win32 sorgu.
+    // Win32 query only for compressed / sparse files.
     use std::os::windows::ffi::OsStrExt;
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::GetCompressedFileSizeW;
@@ -72,9 +72,9 @@ fn physical_file_size(path: &Path, metadata: &Metadata) -> u64 {
         .collect();
     let mut high: u32 = 0;
     let low = unsafe { GetCompressedFileSizeW(PCWSTR(wide.as_ptr()), Some(&mut high)) };
-    // INVALID_FILE_SIZE = 0xFFFFFFFF — başarı durumunda da meşru değer
-    // (4 GiB-1 fiziksel boyut). Gemini review B8: GetLastError ile gerçek
-    // hata ayırt edilir; hata ise mantıksal boyuta düşeriz.
+    // INVALID_FILE_SIZE = 0xFFFFFFFF — a legitimate value even on success
+    // (a physical size of 4 GiB-1). Gemini review B8: the real error is
+    // distinguished via GetLastError; on error we fall back to the logical size.
     if low == 0xFFFF_FFFF {
         let err = unsafe { windows::Win32::Foundation::GetLastError() };
         if err.0 != 0 {
@@ -89,27 +89,29 @@ fn physical_file_size(_path: &Path, metadata: &Metadata) -> u64 {
     metadata.len()
 }
 
-/// `fs::metadata().modified()` → Unix saniye. Hata veya pre-epoch ise 0.
+/// `fs::metadata().modified()` → Unix seconds. 0 on error or pre-epoch.
 fn metadata_mtime_unix(metadata: &Metadata) -> i64 {
     match metadata.modified() {
         Ok(t) => match t.duration_since(UNIX_EPOCH) {
             Ok(d) => d.as_secs() as i64,
-            Err(_) => 0, // pre-1970 (NTFS'te mümkün), edge case
+            Err(_) => 0, // pre-1970 (possible on NTFS), edge case
         },
         Err(_) => 0,
     }
 }
 
-/// NTFS file_index'i `GetFileInformationByHandle` ile alır — hard link
-/// dedupe için. Aynı fiziksel dosya birden çok path üzerinden gezilirse
-/// boyutu **bir kez** sayalım (örn. `WinSxS` binlerce hard link içerir;
-/// 1 TB diskte 1.2 TB rapor edilmesinin baş sebebi budur).
+/// Gets the NTFS file_index via `GetFileInformationByHandle` — for hard
+/// link dedupe. If the same physical file is walked through multiple
+/// paths, its size should be counted **once** (e.g. `WinSxS` contains
+/// thousands of hard links; this is the main reason a 1 TB disk gets
+/// reported as 1.2 TB).
 ///
-/// nNumberOfLinks <= 1 → dedupe gerekmiyor (None döner; tek link).
-/// nNumberOfLinks > 1 → 64-bit composite index döner.
+/// nNumberOfLinks <= 1 → no dedupe needed (returns None; single link).
+/// nNumberOfLinks > 1 → returns the 64-bit composite index.
 ///
-/// `MetadataExt::file_index()` Rust stable'da hâlâ `windows_by_handle`
-/// nightly feature'ı altında; bu yüzden Win32 API'sini direkt çağırıyoruz.
+/// `MetadataExt::file_index()` on Rust stable is still behind the
+/// `windows_by_handle` nightly feature; that is why we call the Win32 API
+/// directly.
 #[cfg(windows)]
 fn file_index_for_dedupe(path: &Path) -> Option<u64> {
     use std::os::windows::ffi::OsStrExt;
@@ -134,7 +136,7 @@ fn file_index_for_dedupe(path: &Path) -> Option<u64> {
     let handle = unsafe {
         CreateFileW(
             pcwstr,
-            0, // No access — yalnız metadata sorgusu için yeterli
+            0, // No access — enough for a metadata-only query
             share,
             None,
             OPEN_EXISTING,
@@ -163,29 +165,29 @@ fn file_index_for_dedupe(_path: &Path) -> Option<u64> {
 pub const MAX_DEPTH: u32 = 50;
 const SYNTHETIC_ID_START: u64 = 16;
 
-/// Bölüm 26.2 — `drive` parametresinden taranabilir kök path. İki form:
-///   * "C" / "c:" / "C:\\" / "C:/Users" → `C:\` (lokal harf)
-///   * `\\server\share` ya da `\\server\share\subpath` → tam UNC kökü
-///     (network sürücü)
+/// Chapter 26.2 — scannable root path from the `drive` parameter. Two forms:
+///   * "C" / "c:" / "C:\\" / "C:/Users" → `C:\` (local letter)
+///   * `\\server\share` or `\\server\share\subpath` → the full UNC root
+///     (network drive)
 ///
-/// UNC path detection: ilk iki karakter `\\` (veya `//`) ise UNC kabul
-/// edilir. Sürücü harfi yerine path doğrudan kullanılır. Network sürücü
-/// uyarısı pre_flight ile zaten basılır.
+/// UNC path detection: if the first two characters are `\\` (or `//`) it is
+/// accepted as UNC. The path is used directly instead of a drive letter.
+/// The network drive warning is already printed by pre_flight.
 fn drive_to_root(drive: &str) -> Result<PathBuf> {
     let trimmed = drive.trim();
     if trimmed.is_empty() {
         return Err(Error::Scan("empty drive parameter".into()));
     }
-    // UNC path: `\\server\share[\sub]` veya forward slash varyantı.
+    // UNC path: `\\server\share[\sub]` or a forward-slash variant.
     let bytes = trimmed.as_bytes();
     if bytes.len() >= 2
         && (bytes[0] == b'\\' || bytes[0] == b'/')
         && (bytes[1] == b'\\' || bytes[1] == b'/')
     {
-        // UNC kökü — normalize: backslash'lara çevir.
+        // UNC root — normalize: convert to backslashes.
         let normalized = trimmed.replace('/', "\\");
-        // En az `\\server\share` olmalı (split sonrası ≥3 boş-olmayan parça:
-        // ["", "", "server", "share"] split('\\').count() >= 4).
+        // Must be at least `\\server\share` (after split, ≥3 non-empty
+        // parts: ["", "", "server", "share"] split('\\').count() >= 4).
         let parts: Vec<&str> = normalized.split('\\').collect();
         let non_empty = parts.iter().filter(|p| !p.is_empty()).count();
         if non_empty < 2 {
@@ -196,22 +198,22 @@ fn drive_to_root(drive: &str) -> Result<PathBuf> {
         }
         return Ok(PathBuf::from(normalized));
     }
-    // Lokal sürücü harfi — katı doğrulama (Gemini review B2: "abc" gibi
-    // girdiler sessizce 'A:' olmasın).
+    // Local drive letter — strict validation (Gemini review B2: inputs like
+    // "abc" must not silently become 'A:').
     let letter = crate::volume::parse_drive_letter(trimmed)
         .ok_or_else(|| Error::Scan(format!("invalid drive: '{}'", drive)))?
         .to_ascii_uppercase();
     Ok(PathBuf::from(format!(r"{}:\", letter)))
 }
 
-/// Geriye uyumlu — progress callback olmadan.
+/// Backwards compatible — without a progress callback.
 pub fn scan_find_first(drive: &str) -> Result<MftEntries> {
     scan_find_first_with_progress(drive, None, None)
 }
 
-/// BFS yürüyüş. Her dizin için `read_dir` çağırır, child'ları sıraya alır.
-/// Symlink ve reparse point'ler atlanır. `progress_cb` her N entry'de bir
-/// çağrılır (Bölüm 9.6.5 streaming feedback).
+/// BFS walk. Calls `read_dir` for each directory, enqueues the children.
+/// Symlinks and reparse points are skipped. `progress_cb` is called once
+/// every N entries (Chapter 9.6.5 streaming feedback).
 pub fn scan_find_first_with_progress(
     drive: &str,
     progress_cb: Option<ProgressCb<'_>>,
@@ -231,20 +233,22 @@ pub fn scan_find_first_with_progress(
     let mut skipped_symlinks: u64 = 0;
     let mut max_depth_hits: u64 = 0;
     let mut visited_dirs: u64 = 0;
-    // Hard link dedupe (Windows): aynı file_index iki kez görülürse ikinci
-    // gelen path'in boyutunu 0 sayarız. Toplam boyut fiziksel diske yakın
-    // kalır. WinSxS / Program Files bazlı senaryolarda ~%10-20 fark.
+    // Hard link dedupe (Windows): if the same file_index is seen twice, we
+    // count the size of the path seen second as 0. The total size stays
+    // close to the physical disk. In WinSxS / Program Files based scenarios
+    // a ~10-20% difference.
     let mut seen_file_indices: HashSet<u64> = HashSet::with_capacity(8192);
     let mut hardlink_duplicates: u64 = 0;
-    // Sprint 3.7 — canlı sunburst snapshot eşiği (entries büyüklüğüne göre).
+    // Sprint 3.7 — live sunburst snapshot threshold (based on the number of entries).
     let mut next_partial_at: u64 = PARTIAL_TREE_INTERVAL;
 
     while let Some((dir, parent_id, depth)) = queue.pop_front() {
         visited_dirs += 1;
-        // Gemini review B1 — iptal/progress kapısı eskiden `entries.len() %
-        // 500 == 0` üzerine kuruluydu; entries her dizinde değişken arttığı
-        // için kontrol atlanabiliyordu (tek büyük dizin = hiç kontrol yok).
-        // Deterministik sayaç: her 32 dizinde bir kesin kontrol.
+        // Gemini review B1 — the cancel/progress gate used to be based on
+        // `entries.len() % 500 == 0`; since entries grows by a variable
+        // amount per directory, the check could be skipped (one big
+        // directory = no check at all). Deterministic counter: a guaranteed
+        // check every 32 directories.
         if visited_dirs % 32 == 0 {
             if let Some(c) = cancel {
                 if c.load(std::sync::atomic::Ordering::Acquire) {
@@ -265,7 +269,7 @@ pub fn scan_find_first_with_progress(
                 cb(&ScanProgress {
                     phase: "fallback_walk",
                     visited: entries.len() as u64,
-                    total_estimate: 0, // bilinmiyor, BFS
+                    total_estimate: 0, // unknown, BFS
                     in_use: visited_dirs,
                     last_name: dir.display().to_string(),
                     elapsed_ms: start.elapsed().as_millis() as u64,
@@ -304,7 +308,7 @@ pub fn scan_find_first_with_progress(
                 }
             };
 
-            // Symlink ve reparse point atlanır (Bölüm 33.2 follow_links=false)
+            // Symlinks and reparse points are skipped (Chapter 33.2 follow_links=false)
             if file_type.is_symlink() {
                 skipped_symlinks += 1;
                 continue;
@@ -315,23 +319,24 @@ pub fn scan_find_first_with_progress(
             let id = next_id;
             next_id += 1;
 
-            // Gemini review B16 — `entry.metadata()` Windows'ta FindNextFileW
-            // verisinden servis edilir (ek syscall yok); `symlink_metadata`
-            // ekstra GetFileAttributesExW açardı. `metadata()` symlink
-            // takip etmez, yine de reparse point kontrolü file_type ile yapılır.
+            // Gemini review B16 — on Windows `entry.metadata()` is served
+            // from FindNextFileW data (no extra syscall); `symlink_metadata`
+            // would open an extra GetFileAttributesExW. `metadata()` does
+            // not follow symlinks, and the reparse point check is still done via file_type.
             let metadata = entry.metadata().ok();
             let is_dir = file_type.is_dir();
-            // raw_size: compressed/sparse için fiziksel boyut
-            // (GetCompressedFileSizeW), diğerleri için metadata.len().
+            // raw_size: physical size for compressed/sparse files
+            // (GetCompressedFileSizeW), metadata.len() for the others.
             let raw_size = metadata
                 .as_ref()
                 .map(|m| physical_file_size(&path, m))
                 .unwrap_or(0);
-            // Hard link dedupe: yalnız >=64 KB dosyalar için Win32
-            // GetFileInformationByHandle ile dosya kimliğini sor. Çoklu
-            // link varsa ikinci-vd görüldüğünde boyut = 0 (toplam disk
-            // doluluğunu aşmasın). Tree'de dosya yine görünür; sadece
-            // aggregate'e katkı vermez.
+            // Hard link dedupe: query the file identity via Win32
+            // GetFileInformationByHandle only for files >= 64 KB. If there
+            // are multiple links, the size = 0 when the second one is seen
+            // (so the total does not exceed the physical disk usage). The
+            // file still shows up in the tree; it just contributes nothing
+            // to the aggregate.
             let data_size = if is_dir {
                 0
             } else if raw_size >= HARDLINK_DEDUP_THRESHOLD {
@@ -344,7 +349,7 @@ pub fn scan_find_first_with_progress(
                             0
                         }
                     }
-                    None => raw_size, // tek link veya sorgu başarısız
+                    None => raw_size, // single link or query failed
                 }
             } else {
                 raw_size
@@ -408,7 +413,7 @@ mod tests {
 
     #[test]
     fn unc_path_accepted_as_root() {
-        // `\\server\share` ve alt-path varyantları geçerli kabul edilmeli.
+        // `\\server\share` and sub-path variants must be accepted as valid.
         assert_eq!(
             drive_to_root(r"\\fileserver\public").unwrap(),
             PathBuf::from(r"\\fileserver\public")
@@ -421,7 +426,7 @@ mod tests {
 
     #[test]
     fn unc_path_forward_slash_normalized() {
-        // Forward-slash kullanan kullanıcılar — backslash'a normalize edilir.
+        // Users typing forward slashes — normalized to backslash.
         assert_eq!(
             drive_to_root("//server/share").unwrap(),
             PathBuf::from(r"\\server\share")
@@ -430,7 +435,7 @@ mod tests {
 
     #[test]
     fn unc_path_missing_share_errors() {
-        // `\\server` (share yok) reddedilmeli.
+        // `\\server` (no share) must be rejected.
         let err = drive_to_root(r"\\server").unwrap_err();
         if let Error::Scan(msg) = err {
             assert!(msg.contains("UNC"));
@@ -455,7 +460,7 @@ mod tests {
         std::fs::create_dir(tmp.join("sub")).unwrap();
         std::fs::write(tmp.join("sub").join("inner.bin"), b"xx").unwrap();
 
-        // drive_to_root tek harf bekler; bu test için doğrudan kullanırız.
+        // drive_to_root expects a single letter; for this test we use it directly.
         let start = Instant::now();
         let mut entries: Vec<RawMftEntry> = Vec::new();
         let mut next_id = SYNTHETIC_ID_START;

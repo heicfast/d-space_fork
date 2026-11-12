@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Cloud placeholder detection — Master mimari Bölüm 11.1.
+// Cloud placeholder detection — Master architecture Chapter 11.1.
 //
-// Faz 1: path-bazlı kurallar (OneDrive/Dropbox/GoogleDrive folder match,
-// Bölüm 6.2). Yararlı ama "yalnızca buluttaki" dosyaları (placeholder)
-// "yerel kopyalı"lardan ayırt edemez.
+// Phase 1: path-based rules (OneDrive/Dropbox/GoogleDrive folder match,
+// Chapter 6.2). Useful but it cannot tell "cloud-only" files (placeholders)
+// apart from ones that have a local copy.
 //
-// Faz 2 v0.1 (bu sprint): Win32 GetFileAttributesW ile gerçek bayrak
-// kontrolü:
+// Phase 2 v0.1 (this sprint): real flag checking with Win32
+// GetFileAttributesW:
 //   * FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS (0x00400000) → online-only
-//     placeholder. Açmak buluttan indirir, disk alanı 0.
+//     placeholder. Opening it downloads from the cloud, disk usage 0.
 //   * FILE_ATTRIBUTE_RECALL_ON_OPEN (0x00040000) → "always-available
-//     offline" işaretli ama buluta bağlı.
+//     offline" marked but tied to the cloud.
 //   * FILE_ATTRIBUTE_REPARSE_POINT (0x00000400) → reparse point (cloud
-//     veya başka).
+//     or something else).
 //
-// Faz 2 v0.2: FindFirstFileEx + dwReserved0 ile reparse tag (IO_REPARSE_
-// TAG_CLOUD = 0x9000001A) okuma — provider ayırt etmek için (OneDrive vs
-// Dropbox vs Google Drive).
+// Phase 2 v0.2: read the reparse tag (IO_REPARSE_TAG_CLOUD = 0x9000001A)
+// via FindFirstFileEx + dwReserved0 — to tell providers apart (OneDrive
+// vs Dropbox vs Google Drive).
 //
-// İlke: scan-time hot-path'te asla — sadece on-demand drilldown probe
-// (Bölüm 11.1 + 34.5.1 hot-path izolasyonu pattern'i).
+// Principle: never on the scan-time hot path — on-demand drilldown probe
+// only (Chapter 11.1 + 34.5.1 hot-path isolation pattern).
 
 use crate::error::Result;
 use serde::Serialize;
@@ -36,20 +36,20 @@ const INVALID_FILE_ATTRIBUTES: u32 = u32::MAX;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CloudPlaceholderState {
-    /// Bayraklar temiz — yerel dosya, bulutta veya reparse point değil.
+    /// Flags clean — a local file, not cloud nor a reparse point.
     LocalOnly,
     /// `FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS` set — online-only placeholder.
-    /// Açmak buluttan indirir, disk alanı 0 (mantıksal boyut > 0).
+    /// Opening it downloads from the cloud, disk usage 0 (logical size > 0).
     OnlineOnly,
     /// `FILE_ATTRIBUTE_RECALL_ON_OPEN` set — "always available offline"
-    /// işaretli ama buluta bağlı; silmek bulut sürümünü de kaldırabilir.
+    /// marked but tied to the cloud; deleting it may also remove the cloud copy.
     AlwaysAvailable,
-    /// REPARSE_POINT set ama cloud bayrakları yok — symlink, junction,
-    /// Windows Dedup, vs. olabilir.
+    /// REPARSE_POINT set but no cloud flags — may be a symlink, junction,
+    /// Windows Dedup, etc.
     OtherReparse,
-    /// Yol bulunamadı veya erişilemedi.
+    /// Path not found or inaccessible.
     NotFound,
-    /// Win32 hata kodu.
+    /// Win32 error code.
     OtherError(u32),
 }
 
@@ -140,12 +140,12 @@ mod tests {
             classify(FILE_ATTRIBUTE_RECALL_ON_OPEN),
             CloudPlaceholderState::AlwaysAvailable
         ));
-        // 0x00000400 → OtherReparse (cloud bayrak yok)
+        // 0x00000400 → OtherReparse (no cloud flags)
         assert!(matches!(
             classify(FILE_ATTRIBUTE_REPARSE_POINT),
             CloudPlaceholderState::OtherReparse
         ));
-        // Cloud öncelikli (REPARSE da set ise OnlineOnly döner)
+        // Cloud takes priority (if REPARSE is also set, OnlineOnly is returned)
         assert!(matches!(
             classify(FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_REPARSE_POINT),
             CloudPlaceholderState::OnlineOnly

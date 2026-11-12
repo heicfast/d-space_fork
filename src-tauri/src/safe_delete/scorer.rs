@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Safe-delete scorer concrete impl — Bölüm 6.5.
+// Safe-delete scorer concrete impl — Chapter 6.5.
 //
-// Tier 1 (RulesScorer): deterministik kural motoru (mevcut `RULES` +
-// user_rules tablosu) + `ml_scores` SQLite cache lookup. **Daima** çalışır,
-// derleme zamanı bağımlılığı sıfır.
+// Tier 1 (RulesScorer): deterministic rule engine (the existing `RULES` +
+// the user_rules table) + `ml_scores` SQLite cache lookup. Runs **always**,
+// zero compile-time dependencies.
 //
-// Tier 2 (TractMlScorer, opsiyonel): `ml-tflite` feature aktif olduğunda
-// tract-tflite runtime ile inference. Model `assets/models/safe_delete_v1.tflite`
-// (henüz yok — v0.3 sprint'inde train edilecek). Cold start ~50-200 ms,
-// idle background indexing için (Bölüm 6.5.3).
+// Tier 2 (TractMlScorer, optional): inference via the tract-tflite runtime
+// when the `ml-tflite` feature is active. Model `assets/models/safe_delete_v1.tflite`
+// (does not exist yet — will be trained in the v0.3 sprint). Cold start ~50-200 ms,
+// fine for idle background indexing (Chapter 6.5.3).
 //
 // Tier 3 (CloudScorer): premium opt-in, v2.0. Trait stub `crate::v2::ml_scorer`.
 
@@ -20,14 +20,14 @@ use blake3::Hasher;
 use rusqlite::{params, Connection};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Tier 1 — kural motoru. `match_user_rule` öncelikli + `match_rule` built-in.
-/// SQLite cache lookup (`ml_scores`) Tier 2/3 ile paylaşılan görsel —
-/// burada `tier=Rules` ile yazılır, tutarlılık için.
+/// Tier 1 — the rule engine. `match_user_rule` first + `match_rule` built-in.
+/// The SQLite cache lookup (`ml_scores`) is the view shared with Tiers 2/3 —
+/// written here with `tier=Rules`, for consistency.
 pub struct RulesScorer<'a> {
     pub conn: &'a Connection,
-    /// Gemini review B7 — construction anında yüklenen aktif user rules
-    /// (Bölüm 6.4 önceliği). Kural seti nadiren değişir; scorer kısa ömürlü
-    /// tutulmalı.
+    /// Gemini review B7 — the active user rules loaded at construction
+    /// (Chapter 6.4 precedence). The rule set rarely changes; keep the
+    /// scorer short-lived.
     user_rules: Vec<UserRuleSnapshot>,
 }
 
@@ -49,14 +49,14 @@ fn score_path_via_rules(path: &str, is_dir: bool, user_rules: &[UserRuleSnapshot
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string());
-    // Gemini review B7 — Bölüm 6.4 önceliği: user rules önce (build_tree
-    // ile aynı sıra), sonra built-in. Eskiden user rules yok sayılıyordu.
+    // Gemini review B7 — Chapter 6.4 precedence: user rules first (the same
+    // order as build_tree), then built-in. Previously user rules were ignored.
     if let Some(ur) = crate::safe_delete::match_user_rule(user_rules, &name, is_dir) {
         return ur.score;
     }
     match crate::safe_delete::match_rule(&name, is_dir) {
         Some(r) => r.score,
-        None => 50, // bilinmeyen → İNCELE tier varsayılan
+        None => 50, // unknown → default REVIEW tier
     }
 }
 
@@ -66,11 +66,11 @@ impl<'a> RulesScorer<'a> {
         Self { conn, user_rules }
     }
 
-    /// `ml_scores` cache'inden okur; miss ise rules üzerinden skorlar + cache'le.
+    /// Reads from the `ml_scores` cache; on a miss, scores via rules + caches it.
     fn score_and_cache(&self, path: &str, mtime_unix: i64, is_dir: bool) -> Result<MlScoreRecord> {
         let hash = path_hash(path);
 
-        // Hit check (mtime eşleşmeli; aksi durumda yeniden hesapla)
+        // Hit check (mtime must match; otherwise recompute)
         let cached: Option<(u8, i64, i64)> = self
             .conn
             .query_row(
@@ -102,9 +102,9 @@ impl<'a> RulesScorer<'a> {
 
         self.conn
             .execute(
-                // Gemini review B22 — model_version kolonu INTEGER NOT NULL
-                // (migration 0001); TEXT 'rules-v1' affinity ile sessizce TEXT
-                // kalıyordu. Kural motoru = tier 1.
+                // Gemini review B22 — the model_version column is INTEGER NOT NULL
+                // (migration 0001); TEXT 'rules-v1' used to silently stay TEXT
+                // due to affinity. The rule engine = tier 1.
                 "INSERT INTO ml_scores (path_hash, mtime, score, model_version, computed_at)
                  VALUES (?1, ?2, ?3, 1, ?4)
                  ON CONFLICT(path_hash) DO UPDATE SET
@@ -136,8 +136,8 @@ fn hex32(bytes: &[u8; 32]) -> String {
 
 impl<'a> MlSafeDeleteScorer for RulesScorer<'a> {
     fn score_one(&self, path: &str, mtime_unix: i64) -> Result<MlScoreRecord> {
-        // is_dir bilinmiyor (path metadata yapılmıyor — pure-rule scoring),
-        // varsayılan false.
+        // is_dir is unknown (no path metadata is fetched — pure-rule scoring),
+        // defaults to false.
         self.score_and_cache(path, mtime_unix, false)
     }
 
@@ -178,13 +178,13 @@ impl<'a> MlSafeDeleteScorer for RulesScorer<'a> {
     }
 }
 
-/// Tier 2 — `ml-tflite` feature aktifse tract-tflite ile inference.
-/// **Henüz model dosyası yok**; v0.3 sprint'inde train + paketleme.
-/// Şu an placeholder olarak `unimplemented!()` döner; cargo feature gate
-/// ile derleme zamanında devre dışı.
+/// Tier 2 — inference via tract-tflite when the `ml-tflite` feature is active.
+/// **No model file yet**; training + packaging in the v0.3 sprint.
+/// Currently returns `unimplemented!()` as a placeholder; disabled at
+/// compile time via the cargo feature gate.
 #[cfg(feature = "ml-tflite")]
 pub struct TractMlScorer {
-    // `tract` runtime burada tutulacak — placeholder.
+    // The `tract` runtime will be held here — placeholder.
 }
 
 #[cfg(feature = "ml-tflite")]
@@ -259,7 +259,7 @@ mod tests {
         let first = scorer.score_one(path, mtime).unwrap();
         assert_eq!(first.score, 88); // ext-log
 
-        // İkinci çağrı cache'ten gelir (aynı mtime).
+        // The second call comes from the cache (same mtime).
         let hash = path_hash(path);
         let cached = scorer.lookup_cache(&hash).unwrap();
         assert!(cached.is_some());
@@ -274,7 +274,7 @@ mod tests {
 
         let r1 = scorer.score_one(path, 100).unwrap();
         let r2 = scorer.score_one(path, 200).unwrap();
-        // Skor aynı (kural değişmedi) ama mtime farklı kaydedilmiş olmalı.
+        // The score is the same (the rule did not change) but a different mtime must be recorded.
         assert_eq!(r1.score, r2.score);
         assert_eq!(r2.mtime_unix, 200);
     }

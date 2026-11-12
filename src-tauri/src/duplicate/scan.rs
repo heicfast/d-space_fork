@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Duplicate Detector — 4-aşamalı pipeline (Bölüm 7).
+// Duplicate Detector — 4-stage pipeline (Chapter 7).
 //
-// v0.1 implementasyonu:
-//   Aşama 1 — Boyut bucket'ı: aynı boyuttaki dosyaları topla (≥2 → aday).
-//             Bölüm 7.2: 0-byte ve `min_size_bytes` altı filtre (varsayılan 4 KB).
-//   Aşama 2 — Tam Blake3 hash (streaming, 64 KB buffer).
-//             Bölüm 7.3: SIMD, sabit RAM, paralel — şu an tek-thread.
-//   Aşama 3 — Hash bucket'ı (≥2 → grup).
-//   Aşama 4 — DuplicateGroup vec'i sırala (`redundant_bytes` desc).
+// v0.1 implementation:
+//   Stage 1 — size bucket: collect files of the same size (≥2 → candidate).
+//             Chapter 7.2: 0-byte and below-`min_size_bytes` filter (default 4 KB).
+//   Stage 2 — full Blake3 hash (streaming, 64 KB buffer).
+//             Chapter 7.3: SIMD, constant RAM, parallel — currently single-thread.
+//   Stage 3 — hash bucket (≥2 → group).
+//   Stage 4 — sort the DuplicateGroup vec (`redundant_bytes` desc).
 //
-// Optimizasyonlar (v0.2):
-//   * Aşama 2'den önce 4 KB "head hash" — büyük çoğunluğu erken eler.
-//   * rayon paralel hash.
-//   * Aynı `inode` (NodeId) iki kez sayılmaz — hardlink/junction (Bölüm 7.2).
-//   * 100 GB karışık veri < 60 sn (Bölüm 7.4) ölçümü için bench harness.
+// Optimizations (v0.2):
+//   * 4 KB "head hash" before Stage 2 — eliminates the vast majority early.
+//   * rayon parallel hashing.
+//   * The same `inode` (NodeId) is not counted twice — hardlink/junction (Chapter 7.2).
+//   * Bench harness for measuring 100 GB mixed data < 60 s (Chapter 7.4).
 
 use crate::duplicate::{DuplicateGroup, DuplicateScanResult, DuplicateStats};
 use crate::error::{Error, Result};
@@ -30,36 +30,36 @@ use std::time::Instant;
 use tracing::{debug, info, warn};
 
 const HASH_BUFFER: usize = 64 * 1024;
-/// Head-hash prefilter buffer (ilk 4 KB). Bölüm 7.4 — full Blake3 öncesi
-/// aynı boyutlu dosyaların büyük çoğunluğu farklı başlıklara sahiptir;
-/// bu küçük read full hash workload'ını ~%80-95 azaltır.
+/// Head-hash prefilter buffer (first 4 KB). Chapter 7.4 — before the full
+/// Blake3 pass, the vast majority of same-size files have different
+/// headers; this small read cuts the full hash workload by ~80-95%.
 const HEAD_HASH_SIZE: usize = 4096;
-/// Head-hash uygulamak için dosya boyutu eşiği. Bu altı (≤64 KB) full
-/// hash zaten ucuz, prefilter overhead'i kazanımdan büyük.
+/// File size threshold for applying the head hash. Below it (≤64 KB) the
+/// full hash is already cheap; prefilter overhead would exceed the gain.
 const HEAD_HASH_THRESHOLD: u64 = 64 * 1024;
-/// Head-hash uygulamak için size bucket'ı minimum üye sayısı. Çift
-/// dosyaya prefilter overhead'i koymak anlamsız.
+/// Minimum member count of a size bucket for applying the head hash.
+/// Putting prefilter overhead on a pair of files makes no sense.
 const HEAD_HASH_BUCKET_MIN: usize = 4;
-/// Bölüm 7.2 — sistem dosyaları ve cache'leri eler.
+/// Chapter 7.2 — filters out system files and caches.
 pub const DEFAULT_MIN_DUP_SIZE: u64 = 4096;
-/// Hash aşamasında patolojik dağılım koruması.
+/// Protection against pathological distribution in the hash stage.
 const MAX_CANDIDATE_FILES: usize = 500_000;
 
-/// Bölüm 7 ayarları — UI'dan parametrik gelir.
+/// Chapter 7 settings — provided parametrically from the UI.
 #[derive(Debug, Clone, Copy, serde::Deserialize, Serialize)]
 pub struct DuplicateOptions {
     pub min_size_bytes: u64,
-    /// Aşama 2'yi atlayıp sadece boyut bucket'ı raporlamak için (debug/UI önizleme).
-    /// Default false — hash şart.
+    /// For skipping Stage 2 and reporting only size buckets (debug/UI preview).
+    /// Default false — hashing is mandatory.
     pub size_only: bool,
-    /// Head-hash prefilter'ı devre dışı bırak — benchmark ve regresyon
-    /// karşılaştırması için. Üretimde default false (prefilter etkin).
+    /// Disable the head-hash prefilter — for benchmark and regression
+    /// comparisons. In production the default is false (prefilter enabled).
     #[serde(default)]
     pub skip_head_prefilter: bool,
-    /// IPC payload üst limiti (kazanım sıralı). 1M dosyalık scan'de
-    /// 100k+ duplicate group olabilir; UI tarafına 50 MB JSON gönderirsek
-    /// frontend dondurur (Gemini review 2.1). Default 500 group;
-    /// kullanıcı filtre daralttıkça daha fazlasını çekebilir.
+    /// IPC payload upper limit (sorted by reclaim gain). In a 1M-file scan
+    /// there can be 100k+ duplicate groups; sending 50 MB of JSON to the
+    /// UI side freezes the frontend (Gemini review 2.1). Default 500 groups;
+    /// the user can fetch more by narrowing the filter.
     #[serde(default = "default_max_groups")]
     pub max_groups: usize,
 }
@@ -79,8 +79,8 @@ impl Default for DuplicateOptions {
     }
 }
 
-/// Bir aday dosyanın (id, tam yol, byte boyutu) snapshot'ı.
-/// `id` v0.2'de Bölüm 7.2 inode-bazlı hardlink/junction elemesi için kullanılacak.
+/// Snapshot of a candidate file (id, full path, byte size).
+/// `id` will be used in v0.2 for Chapter 7.2 inode-based hardlink/junction elimination.
 #[derive(Debug, Clone)]
 struct Candidate {
     #[allow(dead_code)]
@@ -89,8 +89,8 @@ struct Candidate {
     size_bytes: u64,
 }
 
-/// Streaming Blake3 — `Read` üzerinden generic. Test ve VSS retry için
-/// reader-bazlı yardımcı.
+/// Streaming Blake3 — generic over `Read`. A reader-based helper for
+/// tests and VSS retry.
 fn hash_reader<R: Read>(mut reader: R) -> std::io::Result<[u8; 32]> {
     let mut hasher = Hasher::new();
     let mut buf = vec![0u8; HASH_BUFFER];
@@ -104,26 +104,26 @@ fn hash_reader<R: Read>(mut reader: R) -> std::io::Result<[u8; 32]> {
     Ok(*hasher.finalize().as_bytes())
 }
 
-/// Win32 `ERROR_SHARING_VIOLATION` kodu — `std::io::Error::raw_os_error()`
-/// üzerinden tespit. Path string'inde Türkçe veya farklı locale mesaj
-/// içermeyen güvenilir tek heuristik.
+/// Win32 `ERROR_SHARING_VIOLATION` code — detected via
+/// `std::io::Error::raw_os_error()`. The only reliable heuristic that does
+/// not depend on Turkish or other-locale messages in the path string.
 const WIN32_ERROR_SHARING_VIOLATION: i32 = 32;
 
 fn is_share_violation(err: &std::io::Error) -> bool {
     err.raw_os_error() == Some(WIN32_ERROR_SHARING_VIOLATION)
 }
 
-/// Düz hash — `std::io::Error` korur (share violation tespiti için).
+/// Plain hash — preserves `std::io::Error` (for share violation detection).
 fn hash_file_inner(path: &Path) -> std::io::Result<[u8; 32]> {
     let file = fs::File::open(path)?;
     let reader = BufReader::with_capacity(HASH_BUFFER, file);
     hash_reader(reader)
 }
 
-/// Head-hash — yalnız ilk `HEAD_HASH_SIZE` baytı okur. Full Blake3
-/// pahalısının %95'inden tasarruf ettirir; aynı boyutta ama farklı
-/// içerikli iki dosya genelde ilk 4 KB'de farklılaşır (header, magic
-/// bytes, manifest vb.).
+/// Head hash — reads only the first `HEAD_HASH_SIZE` bytes. Saves ~95% of
+/// the cost of the full Blake3 pass; two same-size files with different
+/// content usually differ within the first 4 KB (header, magic bytes,
+/// manifest etc.).
 fn head_hash_inner(path: &Path) -> std::io::Result<[u8; 32]> {
     let mut file = fs::File::open(path)?;
     let mut buf = [0u8; HEAD_HASH_SIZE];
@@ -140,19 +140,19 @@ fn head_hash_inner(path: &Path) -> std::io::Result<[u8; 32]> {
     Ok(*hasher.finalize().as_bytes())
 }
 
-/// Streaming Blake3 — sabit RAM, dosya boyutundan bağımsız.
-/// `Error::Duplicate` wrap eder; ham hata için `hash_file_inner` kullan.
-/// Üretimde `hash_file_with_retry` kullanılır; bu sade form yalnızca testlerde.
+/// Streaming Blake3 — constant RAM, independent of file size.
+/// Wraps in `Error::Duplicate`; for the raw error use `hash_file_inner`.
+/// In production `hash_file_with_retry` is used; this plain form is only for tests.
 #[cfg(test)]
 fn hash_file(path: &Path) -> Result<[u8; 32]> {
     hash_file_inner(path)
         .map_err(|e| Error::Duplicate(format!("hash open/read '{}': {}", path.display(), e)))
 }
 
-/// Bölüm 7.3 + 34.5.4 — locked dosya hash retry zinciri.
-/// ShareViolation alırsa VSS pool üzerinden snapshot-bazlı reader ile dener.
-/// `vss` feature kapalıysa orijinal hatayı `Error::Duplicate` olarak döner
-/// (eski davranış korunur).
+/// Chapter 7.3 + 34.5.4 — locked-file hash retry chain.
+/// On ShareViolation it retries via a snapshot-based reader from the VSS pool.
+/// If the `vss` feature is off, it returns the original error as
+/// `Error::Duplicate` (legacy behavior is preserved).
 pub(crate) fn hash_file_with_retry(path: &Path) -> Result<[u8; 32]> {
     match hash_file_inner(path) {
         Ok(h) => Ok(h),
@@ -170,8 +170,8 @@ pub(crate) fn hash_file_with_retry(path: &Path) -> Result<[u8; 32]> {
                     });
                 }
             }
-            // share violation değilse ya da vss kapalıysa orijinal hata.
-            let _ = is_share_violation; // dead_code uyarısı bastır
+            // If it is not a share violation, or vss is off: the original error.
+            let _ = is_share_violation; // suppress dead_code warning
             Err(Error::Duplicate(format!(
                 "hash open/read '{}': {}",
                 path.display(),
@@ -189,17 +189,17 @@ fn hex32(bytes: &[u8; 32]) -> String {
     s
 }
 
-/// Bölüm 7 — ScanTree üzerinden duplicate aramayı çalıştırır.
-/// `drive_letter` path reconstruction için kullanılır.
+/// Chapter 7 — runs the duplicate search over the ScanTree.
+/// `drive_letter` is used for path reconstruction.
 pub fn find_duplicates(
     tree: &ScanTree,
     drive_letter: char,
     opts: DuplicateOptions,
 ) -> Result<DuplicateScanResult> {
     let started = Instant::now();
-    let min_size = opts.min_size_bytes.max(1); // 0-byte her zaman atlanır
+    let min_size = opts.min_size_bytes.max(1); // 0-byte is always skipped
 
-    // --- Aşama 1: boyut bucket'ı ---------------------------------------
+    // --- Stage 1: size buckets -----------------------------------------
     let mut size_buckets: HashMap<u64, Vec<Candidate>> = HashMap::new();
     let mut scanned_files = 0u64;
     let mut filtered_small = 0u64;
@@ -224,8 +224,8 @@ pub fn find_duplicates(
         });
     }
 
-    // En az 2 aday içeren bucket'ları al — ama paralel head-hash için
-    // bucket yapısını koru (her size grubu içinde head-hash sub-bucket).
+    // Take the buckets with at least 2 candidates — but keep the bucket
+    // structure for the parallel head-hash (head-hash sub-buckets per size group).
     let mut candidate_pairs: u64 = 0;
     let mut size_groups: Vec<Vec<Candidate>> = Vec::new();
     let mut bucket_count: u64 = 0;
@@ -256,12 +256,12 @@ pub fn find_duplicates(
         "duplicate stage 1 (size buckets) complete"
     );
 
-    // --- Aşama 1.5: head-hash prefilter (Bölüm 7.4 v0.2) ---------------
-    // Her size grubu içinde paralel olarak ilk 4 KB'yi hash'le; aynı
-    // (size, head) sub-group'larında ≥2 üye varsa survivor olarak full
-    // hash'e geç. Geri kalanlar elinir.
+    // --- Stage 1.5: head-hash prefilter (Chapter 7.4 v0.2) -------------
+    // Within each size group, hash the first 4 KB in parallel; if a
+    // (size, head) sub-group has ≥2 members, it moves on to the full hash
+    // as a survivor. The rest are eliminated.
     let candidates: Vec<Candidate> = if opts.size_only || opts.skip_head_prefilter {
-        // Prefilter kapalı: tüm aday'ları olduğu gibi geçir.
+        // Prefilter off: pass all candidates through unchanged.
         size_groups.into_iter().flatten().collect()
     } else {
         let mut survivors: Vec<Candidate> = Vec::new();
@@ -270,12 +270,12 @@ pub fn find_duplicates(
         for group in size_groups {
             let size = group.first().map(|c| c.size_bytes).unwrap_or(0);
             if size < HEAD_HASH_THRESHOLD || group.len() < HEAD_HASH_BUCKET_MIN {
-                // Küçük dosya ya da küçük bucket: prefilter overhead'i
-                // kazanımdan büyük, doğrudan full hash'e geç.
+                // Small file or small bucket: prefilter overhead would
+                // exceed the gain — go straight to the full hash.
                 survivors.extend(group);
                 continue;
             }
-            // Paralel head-hash. Hata olursa konservatif: aday'ı tut.
+            // Parallel head-hash. On error, be conservative: keep the candidate.
             let heads: Vec<Option<[u8; 32]>> = group
                 .par_iter()
                 .map(|c| head_hash_inner(Path::new(&c.path)).ok())
@@ -286,7 +286,7 @@ pub fn find_duplicates(
             for (c, h) in group.into_iter().zip(heads) {
                 match h {
                     Some(h) => by_head.entry(h).or_default().push(c),
-                    None => survivors.push(c), // hata → konservatif tut
+                    None => survivors.push(c), // error → keep (conservative)
                 }
             }
             for (_, sub) in by_head {
@@ -306,12 +306,12 @@ pub fn find_duplicates(
         survivors
     };
 
-    // --- Aşama 2/3: full hash + hash bucket ----------------------------
+    // --- Stage 2/3: full hash + hash bucket ----------------------------
     let mut groups: Vec<DuplicateGroup> = Vec::new();
     let mut hash_errors = 0u64;
 
     if opts.size_only {
-        // Yalnızca size bucket'larını DuplicateGroup'a çevir (hash = placeholder).
+        // Convert only the size buckets into DuplicateGroup (hash = placeholder).
         let mut by_size: HashMap<u64, Vec<Candidate>> = HashMap::new();
         for c in candidates {
             by_size.entry(c.size_bytes).or_default().push(c);
@@ -329,8 +329,8 @@ pub fn find_duplicates(
             });
         }
     } else {
-        // Rayon paralel full hash. par_iter'in dönüşü ardından sıralı
-        // hash bucket toplama (HashMap mutation tek thread'de).
+        // Rayon parallel full hash. After par_iter returns, sequential
+        // hash bucket collection (HashMap mutation on one thread).
         let results: Vec<(Candidate, std::result::Result<[u8; 32], String>)> = candidates
             .into_par_iter()
             .map(|cand| {
@@ -369,7 +369,7 @@ pub fn find_duplicates(
         }
     }
 
-    // --- Aşama 4: sırala (en çok kazanım önce) -------------------------
+    // --- Stage 4: sort (biggest gain first) ----------------------------
     groups.sort_by(|a, b| {
         let a_red = a
             .size_bytes
@@ -395,9 +395,9 @@ pub fn find_duplicates(
         elapsed_ms: started.elapsed().as_millis() as u64,
     };
 
-    // Gemini review 2.1 — IPC payload limiti. Gruplar zaten kazanım
-    // sıralı, top-N yeterli; geri kalanı kullanıcı `min_size_bytes`
-    // filtresini sıkı tutarak çekebilir.
+    // Gemini review 2.1 — IPC payload limit. The groups are already sorted
+    // by gain, top-N is enough; the user can fetch the rest by tightening
+    // the `min_size_bytes` filter.
     let cap = opts.max_groups.clamp(50, 5_000);
     let truncated = groups.len() > cap;
     if truncated {
@@ -468,8 +468,8 @@ mod tests {
 
     #[test]
     fn head_hash_matches_full_when_file_under_4k() {
-        // <4 KB: head_hash dosyanın tamamını okur; aynı içerikli iki
-        // dosyada full hash ile aynı bayt aralığında olur.
+        // <4 KB: head_hash reads the entire file; for two files with the
+        // same content it covers the same byte range as the full hash.
         let dir = tempdir();
         let a = dir.path().join("a.bin");
         let content = b"under-4kb-payload";
@@ -483,8 +483,8 @@ mod tests {
 
     #[test]
     fn head_hash_differs_for_different_starts() {
-        // Aynı boyutta ama farklı baş içerikli iki dosya — head_hash
-        // farklı olmalı (prefilter işlevselliği).
+        // Two files of the same size but different head content — head_hash
+        // must differ (prefilter functionality).
         let dir = tempdir();
         let a = dir.path().join("a.bin");
         let b = dir.path().join("b.bin");
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn head_hash_groups_same_starts() {
-        // Aynı ilk 4 KB, farklı tail → head_hash eşit olmalı.
+        // Same first 4 KB, different tail → head_hash must be equal.
         let dir = tempdir();
         let a = dir.path().join("a.bin");
         let b = dir.path().join("b.bin");
@@ -511,7 +511,7 @@ mod tests {
             content_a[i] = (i % 251) as u8;
             content_b[i] = (i % 251) as u8;
         }
-        // Tail farklı
+        // Tail differs
         for i in 4096..8192 {
             content_a[i] = 0xAA;
             content_b[i] = 0xBB;
@@ -536,11 +536,11 @@ mod tests {
         assert!(!is_share_violation(&synthetic));
     }
 
-    /// Belirli boyutlardaki dosyalar üretir, ScanTree benzeri yapı simüle eder,
-    /// `find_duplicates` boyut bucket aşamasının kandidat sayısını doğru
-    /// raporladığını ölçer (size_only modu hash çağrısı yapmaz, geçici dosya
-    /// yolları gerçekten okunmaz → tree path resolver test ediliyor).
-    /// Modül-genelinde `RawMftEntry` helper'ı — birden çok test paylaşır.
+    /// Produces files of specific sizes, simulates a ScanTree-like structure,
+    /// and verifies that `find_duplicates` reports the candidate count of the
+    /// size bucket stage correctly (size_only mode makes no hash calls, the
+    /// temp file paths are never actually read → the tree path resolver is tested).
+    /// Module-wide `RawMftEntry` helper — shared by multiple tests.
     fn r(
         record_no: u64,
         parent: u64,
@@ -562,14 +562,14 @@ mod tests {
     fn size_only_groups_by_size() {
         use crate::scan::tree::{build_tree, ROOT_RECORD};
 
-        // İki çift aynı boyut, bir tekil.
+        // Two pairs of the same size, one singleton.
         let raw = vec![
             r(100, ROOT_RECORD, "a.bin", 8192, false),
             r(101, ROOT_RECORD, "b.bin", 8192, false),
             r(102, ROOT_RECORD, "c.bin", 16384, false),
             r(103, ROOT_RECORD, "d.bin", 16384, false),
             r(104, ROOT_RECORD, "lonely.bin", 32768, false),
-            // 4 KB altı → filtrelenir
+            // below 4 KB → filtered out
             r(105, ROOT_RECORD, "tiny1.bin", 100, false),
             r(106, ROOT_RECORD, "tiny2.bin", 100, false),
         ];
@@ -582,7 +582,7 @@ mod tests {
         };
         let result = find_duplicates(&tree, 'C', opts).unwrap();
         assert_eq!(result.groups.len(), 2, "expected two size buckets");
-        // tiny'ler filtrelendi
+        // the tiny ones were filtered out
         assert!(result.filtered_small >= 2);
     }
 
@@ -590,19 +590,19 @@ mod tests {
         tempfile::tempdir().expect("tempdir")
     }
 
-    /// Sprint 4.1 entegrasyon: head-hash prefilter + paralel full hash
-    /// gerçek dosya üzerinde uçtan uca. Aynı boyutta ama ilk 4 KB'si
-    /// farklı iki dosya prefilter'da elinmeli; aynı boyutta + aynı içerikli
-    /// üçüncü çift duplicate olarak rapor edilmeli.
+    /// Sprint 4.1 integration: head-hash prefilter + parallel full hash
+    /// end-to-end on real files. Two files of the same size but with a
+    /// different first 4 KB should be eliminated by the prefilter; a third
+    /// pair of the same size + same content should be reported as duplicates.
     #[test]
     fn duplicate_v02_pipeline_end_to_end() {
         use crate::scan::tree::{build_tree, ROOT_RECORD};
 
         let dir = tempdir();
-        // 4 dosya, hepsi 128 KB (HEAD_HASH_THRESHOLD üstü).
-        //   a, b: aynı içerik (duplicate çift)
-        //   c, d: a/b'den farklı içerik AMA aynı boyut — prefilter
-        //         elinmeli, full hash'e gitmemeli.
+        // 4 files, all 128 KB (above HEAD_HASH_THRESHOLD).
+        //   a, b: same content (duplicate pair)
+        //   c, d: content different from a/b BUT same size — the prefilter
+        //         should eliminate them; they must not reach the full hash.
         let make = |name: &str, fill: u8| -> std::path::PathBuf {
             let p = dir.path().join(name);
             let content = vec![fill; 128 * 1024];
@@ -614,9 +614,9 @@ mod tests {
         let _c = make("c.bin", 0xBB);
         let _d = make("d.bin", 0xCC);
 
-        // ScanTree'yi temp path'lere yönlendiremiyoruz (path resolver C: bekliyor).
-        // Bu yüzden doğrudan hash_file ile tetikleyelim — head-hash ve full hash
-        // tutarlılığını uçtan uca doğrula.
+        // We cannot point the ScanTree at temp paths (the path resolver expects C:).
+        // So let's trigger it directly with hash_file — verify head-hash and
+        // full hash consistency end to end.
         let head_a = head_hash_inner(&a).unwrap();
         let head_b = head_hash_inner(&b).unwrap();
         assert_eq!(head_a, head_b, "same content → same head_hash");
@@ -625,7 +625,7 @@ mod tests {
         let full_b = hash_file(&b).unwrap();
         assert_eq!(full_a, full_b, "same content → same full hash");
 
-        // Build_tree + find_duplicates yolu için synthetic raw entries:
+        // Synthetic raw entries for the build_tree + find_duplicates path:
         let raw = vec![
             r(100, ROOT_RECORD, "a.bin", 128 * 1024, false),
             r(101, ROOT_RECORD, "b.bin", 128 * 1024, false),
@@ -633,7 +633,7 @@ mod tests {
             r(103, ROOT_RECORD, "d.bin", 128 * 1024, false),
         ];
         let tree = build_tree("vol".into(), raw);
-        // size_only modu: prefilter pipeline'ı geçer, sadece size bucket.
+        // size_only mode: skips the prefilter pipeline, only size buckets.
         let opts = DuplicateOptions {
             min_size_bytes: DEFAULT_MIN_DUP_SIZE,
             size_only: true,
@@ -641,15 +641,15 @@ mod tests {
             max_groups: 500,
         };
         let result = find_duplicates(&tree, 'C', opts).unwrap();
-        // Size_only: dört dosya aynı boyutta → tek bucket.
+        // size_only: four files of the same size → one bucket.
         assert_eq!(result.groups.len(), 1);
         assert_eq!(result.groups[0].paths.len(), 4);
     }
 
-    /// `skip_head_prefilter` ile size_only=false yolu — prefilter
-    /// devre dışı bırakılınca full hash tüm aday'lara koşulur. Bu test
-    /// path'ler temp olduğundan gerçek hash başarısız → 0 group bekleniyor
-    /// (kontrollü hata davranışı).
+    /// The size_only=false path with `skip_head_prefilter` — when the
+    /// prefilter is disabled, the full hash runs on all candidates. Since
+    /// the paths in this test are temp, the real hash fails → 0 groups
+    /// expected (controlled failure behavior).
     #[test]
     fn duplicate_skip_prefilter_runs_full_hash() {
         use crate::scan::tree::{build_tree, ROOT_RECORD};
@@ -666,7 +666,7 @@ mod tests {
             max_groups: 500,
         };
         let result = find_duplicates(&tree, 'C', opts).unwrap();
-        // Path'ler diskte yok → hash hatası beklenir. Grup oluşmaz.
+        // The paths don't exist on disk → hash errors expected. No groups form.
         assert!(result.hash_errors >= 2);
         assert_eq!(result.groups.len(), 0);
     }

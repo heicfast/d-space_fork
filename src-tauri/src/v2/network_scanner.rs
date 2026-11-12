@@ -2,12 +2,12 @@
 //
 // 26.2 Network Share Scanner — v2 stub.
 //
-// Faz 1: network drive'lar `volume::pre_flight_check` ile drive_kind=Remote
-// olarak işaretlenir, kullanıcı uyarı görür (Bölüm 33.3). Tarama
-// FindFirstFile fallback ile yapılır — yavaş.
+// Phase 1: network drives are marked drive_kind=Remote by `volume::pre_flight_check`,
+// the user sees a warning (Chapter 33.3). Scanning is done via the
+// FindFirstFile fallback — slow.
 //
-// Faz 2: UNC path için özel scanner. MFT olmadığı için stream-based,
-// chunked listing + cache. SMB üzerinden bandwidth-aware.
+// Phase 2: a dedicated scanner for UNC paths. Since there is no MFT, it is
+// stream-based, chunked listing + cache. Bandwidth-aware over SMB.
 
 use crate::error::Result;
 use serde::Serialize;
@@ -23,20 +23,20 @@ pub struct NetworkScanResult {
     pub partial: bool,
 }
 
-/// Bölüm 26.2 + 33.3 — UNC path scanner.
+/// Chapter 26.2 + 33.3 — UNC path scanner.
 pub trait NetworkShareScanner: Send + Sync {
-    /// Network share'i tara. `bandwidth_cap_bps` 0 ise sınırsız.
-    /// Bölüm 33.3 ilkesi: kullanıcı network maliyetini bilmeli, partial
-    /// result her zaman kabul edilir (timeout veya cap aşımı).
+    /// Scan the network share. If `bandwidth_cap_bps` is 0, unlimited.
+    /// Chapter 33.3 principle: the user must know the network cost; a partial
+    /// result is always accepted (timeout or cap exceeded).
     fn scan_unc(&self, unc_path: &str, bandwidth_cap_bps: u64) -> Result<NetworkScanResult>;
 }
 
-/// Bölüm 26.2 — `NetworkShareScanner` concrete impl. Mevcut
-/// `find_first` walker'ı UNC path desteği zaten kabul ettiği için
-/// (Sprint 4.4) thin wrapper olarak inşa edilir. `bandwidth_cap_bps`
-/// v0.3.2'de gerçek throttling için tahsis edildi; v0.3.1 sürümünde
-/// metadata fetch yoğun SMB workload'ı için tipik 4 KB/dosya
-/// tahmini bandwidth raporu döner.
+/// Chapter 26.2 — `NetworkShareScanner` concrete impl. Since the existing
+/// `find_first` walker already accepts UNC paths
+/// (Sprint 4.4), it is built as a thin wrapper. `bandwidth_cap_bps`
+/// is reserved for real throttling in v0.3.2; in the v0.3.1 release
+/// it returns an estimated bandwidth report of a typical 4 KB/file
+/// for metadata-fetch-heavy SMB workloads.
 pub struct WindowsNetworkScanner;
 
 impl WindowsNetworkScanner {
@@ -51,17 +51,17 @@ impl Default for WindowsNetworkScanner {
     }
 }
 
-/// SMB metadata fetch tipik maliyeti — tek dosya stat ~4 KB (handle +
-/// FILE_NETWORK_OPEN_INFORMATION). Gerçek bandwidth değil ama UI'a
-/// "X MB veri çekildi" izlenimi vermek için kullanışlı tahmin.
+/// Typical cost of an SMB metadata fetch — a single file stat ~4 KB (handle +
+/// FILE_NETWORK_OPEN_INFORMATION). Not real bandwidth, but a useful estimate
+/// for giving the UI an "X MB of data pulled" impression.
 const SMB_METADATA_BYTES_PER_FILE: u64 = 4096;
 
 impl WindowsNetworkScanner {
-    /// Gemini review (scan_unc_path uncancellable) — iptal bayrağı ve
-    /// progress callback'i içeren zenginleştirilmiş tarama. Trait metodunu
-    /// şekil bozmadan geniştirir; `scan_unc` bu metodu None/None ile
-    /// çağırır. SMB üzerindeki saatler sürebilen walk'lar UI'dan
-    /// durdurulabilir + canlı ilerleme alabilir.
+    /// Gemini review (scan_unc_path uncancellable) — an enriched scan with a
+    /// cancel flag and a progress callback. Extends the trait method without
+    /// changing its shape; `scan_unc` calls this method with None/None.
+    /// Walks over SMB that can take hours become stoppable from the UI
+    /// + can report live progress.
     pub fn scan_unc_with_progress(
         &self,
         unc_path: &str,
@@ -70,10 +70,10 @@ impl WindowsNetworkScanner {
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> Result<NetworkScanResult> {
         let started = std::time::Instant::now();
-        // `scan_find_first_with_progress` UNC path'ini doğrudan kabul eder
-        // (drive_to_root UNC formunu tanır, Sprint 4.4).
+        // `scan_find_first_with_progress` directly accepts the UNC path
+        // (drive_to_root recognizes the UNC form, Sprint 4.4).
         let entries = crate::scan::scan_find_first_with_progress(unc_path, progress_cb, cancel)
-            .map_err(|e| crate::error::Error::Volume(format!("UNC tarama: {:?}", e)))?;
+            .map_err(|e| crate::error::Error::Volume(format!("UNC scan: {:?}", e)))?;
         self.summarize(unc_path, bandwidth_cap_bps, entries, started)
     }
 
@@ -126,15 +126,15 @@ mod tests {
     #[test]
     fn invalid_unc_rejected() {
         let s = WindowsNetworkScanner::new();
-        // `\\server` (share yok) — find_first reject'lemeli.
+        // `\\server` (no share) — find_first should reject it.
         let res = s.scan_unc(r"\\server", 0);
-        assert!(res.is_err(), "share-less UNC reddedilmeli");
+        assert!(res.is_err(), "share-less UNC must be rejected");
     }
 
     #[test]
     fn bandwidth_estimate_uses_per_file_constant() {
-        // Bandwidth tahmini formula doğrulaması — tipik 1000 dosya +
-        // 100 klasör için 4 KB × 1100 = ~4.4 MB beklenir.
+        // Bandwidth estimate formula verification — for a typical 1000 files +
+        // 100 folders, 4 KB × 1100 = ~4.4 MB is expected.
         let n_files: u64 = 1000;
         let n_dirs: u64 = 100;
         let expected = (n_files + n_dirs) * SMB_METADATA_BYTES_PER_FILE;

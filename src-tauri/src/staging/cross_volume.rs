@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Cross-Volume Staging — Two-Phase Commit
-// Master mimari Bölüm 12.3 Katman C (v1.4 fix).
+// Master architecture Chapter 12.3 Layer C (v1.4 fix).
 //
-// Hata senaryosu: Cross-volume kopya 2-5 dk sürer, atomik değildir.
-// Elektrik kesintisi / app crash %40 ortasında olursa hedefte yarım
-// bozuk dosya + kaynakta hâlâ var + tracking bozuk. AI doğrulama v1.4
-// bu race condition'ı işaret etti.
+// Failure scenario: a cross-volume copy takes 2-5 min and is not atomic.
+// If a power loss / app crash hits at the 40% mark, the target has a
+// half-written corrupt file + the source is still there + tracking is broken.
+// The AI review in v1.4 flagged this race condition.
 //
-// Çözüm: write-ahead pattern.
-//   Faz 1 (yaz):   .dspace_tmp + WAL BEGIN + Blake3 hash verify
-//   Faz 2 (commit): atomik rename → final isim, DB insert, source delete,
-//                   WAL COMMITTED
+// Solution: write-ahead pattern.
+//   Phase 1 (write):  .dspace_tmp + WAL BEGIN + Blake3 hash verify
+//   Phase 2 (commit): atomic rename → final name, DB insert, source delete,
+//                     WAL COMMITTED
 
 use crate::error::{Error, Result};
 use crate::staging::ops::StagedItem;
@@ -26,7 +26,7 @@ use tracing::{debug, info, warn};
 
 const HASH_BUFFER: usize = 64 * 1024;
 
-/// Dosyanın Blake3 hash'i. Streaming, sabit RAM.
+/// The file's Blake3 hash. Streaming, constant RAM.
 pub fn blake3_file(path: &Path) -> Result<[u8; 32]> {
     let file = fs::File::open(path)
         .map_err(|e| Error::Staging(format!("hash open '{}': {}", path.display(), e)))?;
@@ -45,9 +45,9 @@ pub fn blake3_file(path: &Path) -> Result<[u8; 32]> {
     Ok(*hasher.finalize().as_bytes())
 }
 
-/// Streaming copy. Hedef üzerine yazar. İlerleme callback'i yoksa şimdilik
-/// (v0.2'de event stream UI'ya). Gemini review B1 — `pub(crate)`: undo
-/// cross-volume geri taşıması da aynı kopya yardımcısını kullanır.
+/// Streaming copy. Overwrites the destination. No progress callback for
+/// now (event stream to the UI in v0.2). Gemini review B1 — `pub(crate)`: the
+/// undo cross-volume move-back also uses this same copy helper.
 pub(crate) fn copy_file_streaming(src: &Path, dst: &Path) -> Result<u64> {
     let mut s = fs::File::open(src).map_err(|e| Error::Staging(format!("copy src open: {}", e)))?;
     let mut d =
@@ -55,10 +55,10 @@ pub(crate) fn copy_file_streaming(src: &Path, dst: &Path) -> Result<u64> {
     std::io::copy(&mut s, &mut d).map_err(|e| Error::Staging(format!("copy: {}", e)))
 }
 
-/// Tek dosya için cross-volume two-phase commit. `final_path` aynı dizinde
-/// olmalı (atomik rename garantisi için).
+/// Cross-volume two-phase commit for a single file. `final_path` must be
+/// in the same directory (for the atomic rename guarantee).
 ///
-/// `target_volume` WAL kaydında bilgi amaçlı (örn. "D:").
+/// `target_volume` is informational in the WAL record (e.g. "D:").
 pub fn cross_volume_stage_file(
     src: &Path,
     final_path: &Path,
@@ -69,22 +69,22 @@ pub fn cross_volume_stage_file(
 ) -> Result<StagedItem> {
     let started = Instant::now();
     if is_dir {
-        // Bölüm 12.3 dosyalar üzerinden tarif edildi. Klasör için recursive
-        // walk + per-file two-phase + sonunda klasörü kaldır (v0.2). Şimdilik
-        // klasörler için cross-volume reddedilir — kullanıcıya açık mesaj.
+        // Chapter 12.3 is defined in terms of files. For folders: recursive
+        // walk + per-file two-phase + remove the folder at the end (v0.2). For
+        // now, cross-volume is rejected for folders — explicit message to the user.
         return Err(Error::Staging(
-            "Cross-volume klasör staging v0.2'de (per-file recursive two-phase). \
-             Şimdilik klasörü aynı volume'da staging'e gönderin."
+            "Cross-volume folder staging arrives in v0.2 (per-file recursive two-phase). \
+             For now, send the folder to staging on the same volume."
                 .into(),
         ));
     }
 
     let parent = final_path
         .parent()
-        .ok_or_else(|| Error::Staging("final_path parent yok".into()))?;
+        .ok_or_else(|| Error::Staging("final_path has no parent".into()))?;
     let file_name = final_path
         .file_name()
-        .ok_or_else(|| Error::Staging("final_path filename yok".into()))?
+        .ok_or_else(|| Error::Staging("final_path has no filename".into()))?
         .to_string_lossy()
         .to_string();
     let tmp_path: PathBuf = parent.join(format!("{}.dspace_tmp", file_name));
@@ -99,14 +99,14 @@ pub fn cross_volume_stage_file(
     )?;
     debug!(wal_id, "two-phase commit phase 1 starting");
 
-    // Faz 1a: copy
+    // Phase 1a: copy
     if let Err(e) = copy_file_streaming(src, &tmp_path) {
         let _ = fs::remove_file(&tmp_path);
         wal_abort(conn, wal_id, &format!("copy: {}", e))?;
         return Err(e);
     }
 
-    // Faz 1b: hash verify
+    // Phase 1b: hash verify
     let src_hash = match blake3_file(src) {
         Ok(h) => h,
         Err(e) => {
@@ -139,7 +139,7 @@ pub fn cross_volume_stage_file(
 
     debug!(wal_id, "phase 1 done, phase 2 starting");
 
-    // Faz 2a: atomic rename .dspace_tmp → final
+    // Phase 2a: atomic rename .dspace_tmp → final
     if let Err(e) = fs::rename(&tmp_path, final_path) {
         let _ = fs::remove_file(&tmp_path);
         wal_abort(conn, wal_id, &format!("final rename: {}", e))?;
@@ -149,7 +149,7 @@ pub fn cross_volume_stage_file(
     let staged_at = crate::staging::ops::now_unix();
     let expires_at = staged_at + crate::staging::ops::STAGING_TTL_SECS;
 
-    // Faz 2b: staging_items kaydı
+    // Phase 2b: staging_items record
     if let Err(e) = conn.execute(
         "INSERT INTO staging_items
             (original_path, staged_path, size_bytes, staged_at, expires_at,
@@ -164,10 +164,10 @@ pub fn cross_volume_stage_file(
             is_dir as i64,
         ],
     ) {
-        // Gemini review B13 — final dosya commit edildi ama DB insert fail:
-        // WAL satırını BEGIN'de bırakmak yerine açıkça ABORT et (bir sonraki
-        // açılış recovery'sinde yanlış yorumlanmasın); final dosya yerinde
-        // kalır (veri kaybı yok), hata fırlatılır.
+        // Gemini review B13 — the final file was committed but the DB insert failed:
+        // instead of leaving the WAL row in BEGIN, ABORT it explicitly (so the
+        // next startup recovery does not misread it); the final file stays in
+        // place (no data loss), and the error is thrown.
         let msg = format!("DB insert (final var ama tracking yok): {}", e);
         warn!(?msg);
         let _ = wal_abort(conn, wal_id, &msg);
@@ -175,10 +175,10 @@ pub fn cross_volume_stage_file(
     }
     let staging_id = conn.last_insert_rowid();
 
-    // Faz 2c: kaynak sil
+    // Phase 2c: delete the source
     if let Err(e) = fs::remove_file(src) {
-        // Kaynak silinemedi ama hedef yazıldı + DB kayıtlı. Kullanıcı her iki
-        // kopyaya da sahip. Conflict ama veri kaybı YOK.
+        // The source could not be deleted but the target was written + the DB row
+        // exists. The user owns both copies. A conflict, but NO data loss.
         warn!(?e, "source could not be deleted — user keeps both copies");
         return Err(Error::Staging(format!(
             "source deletion failed: {} (target intact, undo possible)",
@@ -186,7 +186,7 @@ pub fn cross_volume_stage_file(
         )));
     }
 
-    // Faz 2d: WAL COMMITTED
+    // Phase 2d: WAL COMMITTED
     wal_commit(conn, wal_id)?;
 
     info!(
@@ -244,7 +244,7 @@ mod tests {
         let h1 = blake3_file(&p).unwrap();
         let h2 = blake3_file(&p).unwrap();
         assert_eq!(h1, h2);
-        // İlk byte değişirse hash de değişmeli
+        // If the first byte changes, the hash must change too
         fs::write(&p, b"E-Space is awesome").unwrap();
         let h3 = blake3_file(&p).unwrap();
         assert_ne!(h1, h3);
@@ -253,8 +253,8 @@ mod tests {
 
     #[test]
     fn two_phase_commit_happy_path() {
-        // Same-volume kullanıyoruz ama fonksiyon iki-fazlı protokolü
-        // çalıştırıyor — semantik aynı.
+        // We use same-volume, but the function still runs the two-phase
+        // protocol — the semantics are the same.
         let src_dir = unique_dir("src");
         let dst_dir = unique_dir("dst");
         let src = src_dir.join("important.txt");
@@ -282,7 +282,7 @@ mod tests {
             .unwrap();
         assert_eq!(state, "COMMITTED");
 
-        // .dspace_tmp ortalıkta YOK
+        // No .dspace_tmp left lying around
         let tmp_glob = dst_dir.join("important.txt.dspace_tmp");
         assert!(!tmp_glob.exists());
 

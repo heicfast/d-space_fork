@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Duplicate Detector — dört aşamalı pipeline.
-// Master mimari Bölüm 7.
+// Duplicate Detector — four-stage pipeline.
+// Master architecture Chapter 7.
 //
-// İlkeler:
-//   * 0-byte ve <4 KB filtre (Bölüm 7.2): kullanıcı `min_size_bytes`.
-//   * Hash: Blake3 (Bölüm 7.3) — paralel, SIMD, en hızlı dengeli.
-//   * Symlink/junction/hardlink inode bazlı (Bölüm 7.2): aynı NodeId iki kez
-//     sayılmaz (ScanTree HashMap garantisi — v0.2'de symlink/reparse açık eleme).
-//   * Performans hedefi: 100 GB karışık veride <60 sn (Bölüm 7.4).
+// Principles:
+//   * 0-byte and <4 KB filter (Chapter 7.2): user `min_size_bytes`.
+//   * Hash: Blake3 (Chapter 7.3) — parallel, SIMD, the fastest balanced choice.
+//   * Symlink/junction/hardlink by inode (Chapter 7.2): a NodeId is never
+//     counted twice (ScanTree HashMap guarantee — explicit symlink/reparse elimination in v0.2).
+//   * Performance target: <60 s on 100 GB of mixed data (Chapter 7.4).
 //
-// v0.1 sınırı: tek-thread hash. v0.2'de rayon + head-hash prefilter.
+// v0.1 limit: single-threaded hashing. v0.2 adds rayon + head-hash prefilter.
 
 pub mod scan;
 
@@ -20,7 +20,7 @@ use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DuplicateGroup {
-    /// Tam Blake3 hash hex (64 char) ya da `size_only` modunda "size:<N>".
+    /// Full Blake3 hash hex (64 chars) or "size:<N>" in `size_only` mode.
     pub hash_hex: String,
     pub size_bytes: u64,
     pub paths: Vec<String>,
@@ -28,16 +28,16 @@ pub struct DuplicateGroup {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DuplicateStats {
-    /// Bulunan TOPLAM grup sayısı (truncate öncesi). UI'a dönen
-    /// `groups` vec'i `DuplicateOptions.max_groups` ile sınırlanmış
-    /// olabilir; kullanıcı "X grup daha var, filtreyi daralt"
-    /// mesajını bu fark ile gösterir.
+    /// TOTAL number of groups found (before truncation). The `groups` vec
+    /// returned to the UI may be capped by `DuplicateOptions.max_groups`;
+    /// the user is shown the "X more groups remain, narrow the filter"
+    /// message based on this difference.
     pub group_count: u64,
     pub redundant_bytes: u64,
     pub elapsed_ms: u64,
 }
 
-/// Bölüm 7 — `find_duplicates` Tauri komutu cevabı.
+/// Chapter 7 — response of the `find_duplicates` Tauri command.
 #[derive(Debug, Clone, Serialize)]
 pub struct DuplicateScanResult {
     pub drive_letter: String,

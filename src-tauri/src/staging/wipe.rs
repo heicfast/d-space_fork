@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// DoD 5220.22-M secure wipe — Master mimari Bölüm 12.4 (hassas dosya
-// modu, opt-in). Gemini review 3.1 — kalıcı silme öncesi disk üstündeki
-// veriyi 3 geçişte üzerine yazar, ardından dosyayı siler. Forensic
-// recovery araçları (Recuva, PhotoRec) artık veriyi geri getiremez.
+// DoD 5220.22-M secure wipe — Master architecture Chapter 12.4 (sensitive
+// file mode, opt-in). Gemini review 3.1 — overwrites the on-disk data in
+// 3 passes before permanent deletion, then deletes the file. Forensic
+// recovery tools (Recuva, PhotoRec) can no longer bring the data back.
 //
-// Standart:
-//   * Pass 1: 0x00 (sıfır) — orijinal byte'ları silver
-//   * Pass 2: 0xFF (bir, 0x00'ın tümleyeni)
-//   * Pass 3: pseudo-rastgele bayt (xorshift64 PRNG, sistem saatinden
-//     seed). Cryptographic random gerekmez — amaç forensic recovery'yi
-//     bozmak, gizlilik koruma değil.
+// Standard:
+//   * Pass 1: 0x00 (zeros) — deletes the original bytes
+//   * Pass 2: 0xFF (ones, the complement of 0x00)
+//   * Pass 3: pseudo-random bytes (xorshift64 PRNG, seeded from the
+//     system clock). Cryptographic random is not required — the goal is
+//     to defeat forensic recovery, not privacy protection.
 //
-// Her geçiş sonrası `sync_all` ile OS buffer flush + fiziksel disk
-// commit. SSD'lerde wear leveling nedeniyle %100 garanti yok (kontrolör
-// gizli blok kopyaları tutabilir); bu sınırı kullanıcıya UI'da belirtmek
-// caller sorumluluğu (kontrat dokümantasyon).
+// After each pass, `sync_all` flushes the OS buffers + commits to the
+// physical disk. On SSDs there is no 100% guarantee due to wear leveling
+// (the controller may keep hidden block copies); noting this limitation
+// for the user in the UI is the caller's responsibility (contract docs).
 //
-// Güvenlik kontrolü: caller `confirm_phrase` parametresinde dosya adının
-// tam olarak yazılmasını ister (Bölüm 12.4 double-confirm pattern). Bu
-// modülün ham `dod_wipe_file` fonksiyonu confirm yapmaz — `permanent`
-// modülündeki sarmalayıcı bunu yapar; ham fonksiyonu kullanmamalı.
+// Safety check: the caller requires the file name to be typed exactly in
+// the `confirm_phrase` parameter (Chapter 12.4 double-confirm pattern).
+// The raw `dod_wipe_file` function in this module does not confirm — the
+// wrapper in the `permanent` module does; the raw function must not be used.
 
 use crate::error::{Error, Result};
 use std::fs::{File, OpenOptions};
@@ -29,12 +29,12 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, info};
 
-/// Üzerine yazma chunk boyutu — 64 KB ile cluster sınırlarına oturur,
-/// büyük dosyalarda RAM'i şişirmez.
+/// Overwrite chunk size — 64 KB lands on cluster boundaries and does
+/// not bloat RAM on large files.
 const WIPE_CHUNK: usize = 64 * 1024;
 
-/// `xorshift64` — Marsaglia 2003. Cryptographic değil; forensic recovery
-/// için yeterli. State 0 olmamalı (sıfır kalıcı).
+/// `xorshift64` — Marsaglia 2003. Not cryptographic; good enough against
+/// forensic recovery. State must never be 0 (stuck at zero).
 struct Xorshift64 {
     state: u64,
 }
@@ -75,15 +75,16 @@ impl Xorshift64 {
     }
 }
 
-/// Geçiş türü — log'a ne yazıldığı görünür.
+/// Pass type — visible in what gets written to the log.
 enum Pass {
     Zero,
     Ones,
     Random,
 }
 
-/// Bir dosyanın tüm uzunluğunu verilen pattern ile baştan sona yaz +
-/// sync_all. File handle çağırıcıdan; pozisyon başa sarılır.
+/// Writes the given pattern over the file's entire length, start to
+/// finish, + sync_all. The file handle comes from the caller; the
+/// position is rewound to the start.
 fn overwrite_pass(file: &mut File, len: u64, pass: &Pass) -> std::io::Result<()> {
     file.seek(SeekFrom::Start(0))?;
     let mut buf = vec![0u8; WIPE_CHUNK];
@@ -104,12 +105,12 @@ fn overwrite_pass(file: &mut File, len: u64, pass: &Pass) -> std::io::Result<()>
     Ok(())
 }
 
-/// DoD 5220.22-M secure wipe + delete. 3 geçiş overwrite + sync, sonra
-/// dosyayı sil. Path bir DOSYA olmalı (klasör veya symlink reddedilir —
-/// caller permanent.rs'de bunu doğrular).
+/// DoD 5220.22-M secure wipe + delete. 3 overwrite passes + sync, then
+/// delete the file. The path must be a FILE (folders and symlinks are
+/// rejected — the caller verifies this in permanent.rs).
 ///
-/// **DİKKAT**: Bu işlem geri alınamaz. Caller `permanent::permanent_delete`
-/// double-confirm yaptıktan SONRA çağırır.
+/// **WARNING**: This operation cannot be undone. The caller invokes it
+/// only AFTER `permanent::permanent_delete` has double-confirmed.
 pub fn dod_wipe_file(path: &Path) -> Result<()> {
     let metadata = std::fs::symlink_metadata(path)
         .map_err(|e| Error::Staging(format!("wipe: meta '{}': {}", path.display(), e)))?;
@@ -120,16 +121,16 @@ pub fn dod_wipe_file(path: &Path) -> Result<()> {
         )));
     }
     let len = metadata.len();
-    // Gemini review B17 — FILE_ATTRIBUTE_READONLY dosyalar OpenOptions
-    // .write(true) ile ACCESS_DENIED verir. Staging'e MOVE attribute'yi
-    // korur; wipe öncesi readonly bayrağını temizle (best-effort).
+    // Gemini review B17 — FILE_ATTRIBUTE_READONLY files get ACCESS_DENIED
+    // from OpenOptions .write(true). The MOVE into staging preserves the
+    // attribute; clear the readonly flag before the wipe (best-effort).
     {
         let perms = std::fs::metadata(path)
             .map_err(|e| Error::Staging(format!("wipe perms '{}': {}", path.display(), e)))?
             .permissions();
         if perms.readonly() {
-            // Windows hedefi: FILE_ATTRIBUTE_READONLY temizliği. Clippy'nin
-            // Unix "world writable" uyarısı bu platformda geçerli değil.
+            // Windows target: clearing FILE_ATTRIBUTE_READONLY. Clippy's
+            // Unix "world writable" warning does not apply on this platform.
             #[allow(clippy::permissions_set_readonly_false)]
             {
                 let mut cleared = perms;
@@ -141,7 +142,7 @@ pub fn dod_wipe_file(path: &Path) -> Result<()> {
         }
     }
 
-    // 0-byte dosya: passes anlamsız, direkt sil.
+    // 0-byte file: passes are pointless, delete directly.
     if len == 0 {
         std::fs::remove_file(path).map_err(|e| Error::Staging(format!("wipe remove: {}", e)))?;
         debug!(path = %path.display(), "0-byte file — delete without passes");
@@ -156,17 +157,18 @@ pub fn dod_wipe_file(path: &Path) -> Result<()> {
     for (i, pass) in [Pass::Zero, Pass::Ones, Pass::Random].iter().enumerate() {
         overwrite_pass(&mut file, len, pass)
             .map_err(|e| Error::Staging(format!("wipe pass {}: {}", i + 1, e)))?;
-        debug!(path = %path.display(), pass = i + 1, "DoD pass tamam");
+        debug!(path = %path.display(), pass = i + 1, "DoD pass complete");
     }
-    // Gemini review B18 — geçişler bittiğinde dosyayı 0'a truncate et ki
-    // son uzunluk + son geçişin içerik kalıntısı MFT resident verisinden
-    // okunamasın.
+    // Gemini review B18 — once the passes finish, truncate the file to 0
+    // so the final length + the last pass's content remnants cannot be
+    // read from the MFT resident data.
     file.set_len(0)
         .map_err(|e| Error::Staging(format!("wipe truncate: {}", e)))?;
     drop(file);
 
-    // Gemini review B18 — silmeden önce rastgele kısa isme rename: NTFS
-    // directory entry'sinde orijinal dosya adı forensic kalıntısı bırakır.
+    // Gemini review B18 — rename to a random short name before deleting:
+    // the original file name leaves a forensic remnant in the NTFS
+    // directory entry.
     let random_suffix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
@@ -184,7 +186,7 @@ pub fn dod_wipe_file(path: &Path) -> Result<()> {
     info!(
         path = %path.display(),
         bytes = len,
-        "DoD 5220.22-M secure wipe + delete tamam"
+        "DoD 5220.22-M secure wipe + delete complete"
     );
     Ok(())
 }
@@ -248,9 +250,9 @@ mod tests {
         let err = dod_wipe_file(&inner).unwrap_err();
         match err {
             Error::Staging(msg) => assert!(msg.contains("folders") || msg.contains("files")),
-            _ => panic!("Staging hata bekleniyor"),
+            _ => panic!("expected a staging error"),
         }
-        // Klasör hâlâ varlığını korumalı
+        // The folder must still exist
         assert!(inner.exists());
     }
 
@@ -262,9 +264,9 @@ mod tests {
         assert!(matches!(err, Error::Staging(_)));
     }
 
-    /// 3-geçiş üzerine yazma bayt değerlerini sırayla değiştirir mi
-    /// kanıtla — overwrite_pass'i doğrudan çağır, file content'i her
-    /// pass sonrası kontrol et.
+    /// Prove that the 3-pass overwrite changes the byte values in sequence —
+    /// call overwrite_pass directly and check the file content after
+    /// each pass.
     #[test]
     fn overwrite_pass_writes_expected_bytes() {
         let dir = tempfile::tempdir().unwrap();

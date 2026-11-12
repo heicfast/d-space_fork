@@ -1,27 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Locked File Handling — Master mimari Bölüm 34.
+// Locked File Handling — Master architecture Chapter 34.
 //
-// İlkeler:
-//   * Bölüm 34.5.1 VSS scan critical path DIŞINDA. Scan sırasında kilitli
-//     dosya sadece flag konur, içerik atlanır. Bu modülün API'si on-demand
-//     (drill-down, hash-time) çağrılır — asla per-record.
-//   * Bölüm 34.5.6 Reference counting + lease renewal (v1.4 fix): aktif
-//     okuma sırasında snapshot ASLA evict edilmez. **v0.2 sprint'i.**
-//   * Bölüm 34.5.2 Üç path stratejisi: scan-time (VSS yok), hash-time
-//     (global snapshot pool), user drill-down (on-demand). v0.1 yalnızca
-//     scan-time + drill-down probe; pool v0.2.
+// Principles:
+//   * Chapter 34.5.1 VSS is OUTSIDE the scan critical path. During a scan
+//     a locked file is merely flagged, its content is skipped. This
+//     module's API is called on demand (drill-down, hash-time) — never
+//     per-record.
+//   * Chapter 34.5.6 Reference counting + lease renewal (v1.4 fix): a
+//     snapshot is NEVER evicted during an active read. **v0.2 sprint.**
+//   * Chapter 34.5.2 Three-path strategy: scan-time (no VSS), hash-time
+//     (global snapshot pool), user drill-down (on-demand). v0.1 only has
+//     scan-time + drill-down probe; the pool is v0.2.
 //
-// Şu anki kapsam (v0.1):
-//   * `probe_lock_state` — CreateFileW share-violation probe (Bölüm 34.5.3).
-//   * `find_lock_owners` — Windows Restart Manager (Bölüm 34.4 alternatifi).
-//   * `probe_file` — yüksek seviye API: state + owners + önerilen aksiyon.
+// Current scope (v0.1):
+//   * `probe_lock_state` — CreateFileW share-violation probe (Chapter 34.5.3).
+//   * `find_lock_owners` — Windows Restart Manager (Chapter 34.4 alternative).
+//   * `probe_file` — high-level API: state + owners + recommended action.
 
 pub mod detect;
 pub mod owner;
 
-// Bölüm 34.5.4 — VSS pool yalnızca Windows + `vss` feature açıkken.
-// Default OFF (Discovery Log #002 → Plan A: winapi 0.3.9).
+// Chapter 34.5.4 — the VSS pool only exists on Windows + with the `vss`
+// feature enabled. Default OFF (Discovery Log #002 → Plan A: winapi 0.3.9).
 #[cfg(all(windows, feature = "vss"))]
 pub mod vss;
 #[cfg(all(windows, feature = "vss"))]
@@ -35,40 +36,40 @@ use serde::Serialize;
 use std::path::Path;
 use tracing::info;
 
-/// Bölüm 34.1 — locked dosya kategorilerine göre önerilen aksiyon.
+/// Chapter 34.1 — recommended action per locked-file category.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LockedFileAction {
-    /// Dosya boştu, normal işlem yapılabilir.
+    /// The file was free; normal processing can proceed.
     Proceed,
-    /// İçerik atlanır, sadece metadata kullanılır (scan-time default).
+    /// Content is skipped, only metadata is used (scan-time default).
     SkipContent,
-    /// VSS snapshot üzerinden read-only oku (v0.2 hash-time path).
+    /// Read via a VSS snapshot, read-only (v0.2 hash-time path).
     SnapshotRead,
-    /// Kullanıcıya seçenekler sun (drill-down dialog).
+    /// Present options to the user (drill-down dialog).
     UserDrillDown,
-    /// Sistem dosyası — hard pass, denemez.
+    /// System file — hard pass, do not attempt.
     HardPass,
 }
 
-/// Bölüm 34.3 — user-facing diagnostic için top-level probe sonucu.
+/// Chapter 34.3 — top-level probe result for user-facing diagnostics.
 #[derive(Debug, Clone, Serialize)]
 pub struct LockedFileProbe {
     pub path: String,
     pub state: LockState,
     pub owners: Vec<LockOwner>,
     pub recommended_action: LockedFileAction,
-    /// v0.2'de aktif olacak — şu an her zaman false.
+    /// Becomes active in v0.2 — currently always false.
     pub vss_available: bool,
     pub probe_elapsed_ms: u64,
 }
 
-/// Tek dosya için yüksek seviye probe:
-///   1) Share-violation probe ile lock state.
-///   2) Locked ise Restart Manager ile owner listesi.
-///   3) Spec Bölüm 34.1 tablosuna göre önerilen aksiyonu seç.
+/// High-level probe for a single file:
+///   1) Lock state via the share-violation probe.
+///   2) If locked, the owner list via Restart Manager.
+///   3) Pick the recommended action per the spec's Chapter 34.1 table.
 ///
-/// **VSS yok** (Bölüm 34.5.1). Hash-time snapshot pool v0.2 sprint'inde.
+/// **No VSS** (Chapter 34.5.1). Hash-time snapshot pool in the v0.2 sprint.
 pub fn probe_file(path: &Path) -> Result<LockedFileProbe> {
     let start = std::time::Instant::now();
     let state = probe_lock_state(path)?;
@@ -106,14 +107,15 @@ pub fn probe_file(path: &Path) -> Result<LockedFileProbe> {
     })
 }
 
-/// Bölüm 34.5.4 — verilen yol için VSS snapshot kullanılabilir mi?
-/// v0.2 ilk hali: feature açıksa true (admin/NTFS deep-check sonraki sprint'te).
-/// Feature kapalıyken her zaman false.
+/// Chapter 34.5.4 — is a VSS snapshot usable for the given path?
+/// v0.2 first cut: true when the feature is enabled (admin/NTFS deep-check
+/// in the next sprint). Always false while the feature is off.
 #[cfg(all(windows, feature = "vss"))]
 pub fn vss_available_for(_path: &Path) -> bool {
-    // İlk iterasyon: pool worker hazır olduğu sürece true varsayıyoruz.
-    // is_volume_supported probe'u (admin + NTFS) sonraki sprint'te eklenecek;
-    // şu an deep probe çağırmak her drill-down'da COM init maliyetini doğurur.
+    // First iteration: assume true as long as the pool worker is ready.
+    // The is_volume_supported probe (admin + NTFS) lands in the next
+    // sprint; calling a deep probe now would cost COM init on every
+    // drill-down.
     true
 }
 
@@ -122,8 +124,8 @@ pub fn vss_available_for(_path: &Path) -> bool {
     false
 }
 
-/// Bölüm 34.1 — kategoriye göre aksiyon önerisi.
-/// v0.1'de heuristik: locked + system path → HardPass, aksi SnapshotRead.
+/// Chapter 34.1 — action recommendation by category.
+/// v0.1 heuristic: locked + system path → HardPass, otherwise SnapshotRead.
 fn recommend_action(state: &LockState, _owners: &[LockOwner], path: &Path) -> LockedFileAction {
     match state {
         LockState::Free => LockedFileAction::Proceed,
@@ -131,7 +133,7 @@ fn recommend_action(state: &LockState, _owners: &[LockOwner], path: &Path) -> Lo
         LockState::OtherError(_) => LockedFileAction::SkipContent,
         LockState::Locked => {
             let lc = path.to_string_lossy().to_ascii_lowercase();
-            // Sistem dosyaları → hard pass (Bölüm 34.1 "Hard pass — denenmez")
+            // System files → hard pass (Chapter 34.1 "Hard pass — not attempted")
             let system_marker = [
                 "\\windows\\system32\\",
                 "\\windows\\winsxs\\",
@@ -144,7 +146,7 @@ fn recommend_action(state: &LockState, _owners: &[LockOwner], path: &Path) -> Lo
             if system_marker.iter().any(|m| lc.contains(m)) {
                 LockedFileAction::HardPass
             } else {
-                // Bölüm 34.5.4 — VSS pool aktifse SnapshotRead, aksi UserDrillDown.
+                // Chapter 34.5.4 — SnapshotRead if the VSS pool is active, else UserDrillDown.
                 #[cfg(all(windows, feature = "vss"))]
                 {
                     LockedFileAction::SnapshotRead
@@ -175,8 +177,8 @@ mod tests {
             LockedFileAction::Proceed
         ));
         assert!(probe.owners.is_empty());
-        // `vss_available` feature'a göre değişir; sadece probe çalıştığını
-        // doğrula. Detay test'i `vss_pool::tests` altında.
+        // `vss_available` depends on the feature; just verify the probe
+        // ran. The detailed test lives under `vss_pool::tests`.
         #[cfg(not(feature = "vss"))]
         assert!(!probe.vss_available);
     }

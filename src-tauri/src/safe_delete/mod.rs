@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Safe-to-Delete zeka katmanı.
-// Master mimari Bölüm 6.
+// Safe-to-Delete intelligence layer.
+// Master architecture Chapter 6.
 //
-// Faz 1: deklaratif kural motoru (50+ dahili kural).
-// Faz 2 (v1.4 spec, kod v2): TFLite tier'lı ML scorer (Bölüm 6.5).
+// Phase 1: declarative rule engine (50+ built-in rules).
+// Phase 2 (v1.4 spec, code v2): TFLite-tiered ML scorer (Chapter 6.5).
 //
-// İlkeler:
-//   * Skor 0-100, renk: 0-30 kırmızı, 31-60 sarı, 61-85 yeşil, 86-100 mavi.
-//   * Inference ASLA scan critical path'inde değil (Bölüm 6.5.1).
-//   * ML cache (Bölüm 6.5.2): mtime değişmezse yeniden hesaplanmaz.
-//   * Battery + idle throttle (Bölüm 6.5.3).
-//   * v2 stub trait (Bölüm 26.1).
+// Principles:
+//   * Score 0-100, colors: 0-30 red, 31-60 yellow, 61-85 green, 86-100 blue.
+//   * Inference is NEVER on the scan critical path (Chapter 6.5.1).
+//   * ML cache (Chapter 6.5.2): not recomputed when mtime is unchanged.
+//   * Battery + idle throttle (Chapter 6.5.3).
+//   * v2 stub trait (Chapter 26.1).
 
 pub mod rules;
 pub mod scorer;
@@ -42,10 +42,10 @@ pub struct RuleMatch {
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub enum ScoreTier {
-    Danger,  // 0-30  kırmızı
-    Caution, // 31-60 sarı
-    Likely,  // 61-85 yeşil
-    Cache,   // 86-100 mavi
+    Danger,  // 0-30  red
+    Caution, // 31-60 yellow
+    Likely,  // 61-85 green
+    Cache,   // 86-100 blue
 }
 
 impl ScoreTier {

@@ -2,20 +2,20 @@
 //
 // USN delta watcher — Sprint 3.8.
 //
-// Discovery Log #005 — Bölüm 5.6: background thread, 5 sn polling. Her
-// tick'te `FSCTL_READ_USN_JOURNAL` çağrısı yapılır, gelen kayıtlar
-// `apply_delta` ile DB'ye yazılır, watermark güncellenir. Shutdown
-// kanalı ile durdurulur.
+// Discovery Log #005 — Chapter 5.6: background thread, 5 sec polling. On
+// each tick `FSCTL_READ_USN_JOURNAL` is called, the incoming records
+// are written to the DB via `apply_delta`, the watermark is updated.
+// Stopped via the shutdown channel.
 //
-// **Yetki notu**: USN journal okuma `\\.\C:` raw volume handle açmayı
-// gerektirir — admin gerekli. `spawn_watcher` admin yoksa watcher
-// başlatmaz, `IndexStatus { mode: "needs_admin" }` döner. Hızlı Mod
-// (Bölüm 5.2A Katman 1) yetkisinin aynısı.
+// **Privilege note**: reading the USN journal requires opening a `\\.\C:`
+// raw volume handle — admin required. `spawn_watcher` does not start the
+// watcher without admin, it returns `IndexStatus { mode: "needs_admin" }`.
+// The same privilege as Fast Mode (Chapter 5.2A Layer 1).
 //
-// v0.3.1 — production'a bağlanmış durumda: `lib.rs::spawn_usn_watchers`
-// açılışta ve `index_build` sonrası watcher başlatır; tick closure'ı
-// `index::sync_volume` çağırır (lazy dedicated Connection ile).
-// Test platform-agnostic kısımları kapsar (channel-shutdown semantiği).
+// v0.3.1 — now wired into production: `lib.rs::spawn_usn_watchers`
+// starts the watchers at launch and after `index_build`; the tick closure
+// calls `index::sync_volume` (with a lazy dedicated Connection).
+// The tests cover the platform-agnostic parts (channel-shutdown semantics).
 
 use crate::error::Result;
 use std::sync::mpsc::{channel, Sender};
@@ -23,20 +23,20 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 use tracing::{info, warn};
 
-/// Watcher poll aralığı — 60 sn (Gemini review 2.4 — batarya dostu).
-/// İdeal: tamamen event-driven `FSCTL_READ_USN_JOURNAL` Timeout > 0
-/// (`read_journal_blocking` index/usn.rs); v0.3.1 prod wire bunu
-/// kullanacak. Bu polling interval scaffold için fallback.
+/// Watcher poll interval — 60 sec (Gemini review 2.4 — battery friendly).
+/// Ideal: fully event-driven `FSCTL_READ_USN_JOURNAL` with Timeout > 0
+/// (`read_journal_blocking` in index/usn.rs); the v0.3.1 prod wire will
+/// use that. This polling interval is the fallback for the scaffold.
 pub const WATCHER_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Watcher handle — drop ile thread kapatma sinyali yollar.
+/// Watcher handle — drop sends the thread-shutdown signal.
 pub struct WatcherHandle {
     shutdown: Option<Sender<()>>,
     join: Option<JoinHandle<()>>,
 }
 
 impl WatcherHandle {
-    /// Thread'i durdur, join et. Hata varsa log'a düşer.
+    /// Stop the thread and join it. Errors are logged.
     pub fn shutdown(mut self) {
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
@@ -54,17 +54,17 @@ impl Drop for WatcherHandle {
         if let Some(tx) = self.shutdown.take() {
             let _ = tx.send(());
         }
-        // Join'i drop'a bırakmıyoruz — caller `shutdown()` çağrısıyla
-        // explicit yapsın; drop'ta detach.
+        // We do not leave the join to drop — the caller should do it
+        // explicitly via `shutdown()`; detach on drop.
     }
 }
 
-/// Watcher thread'i başlat. **Test sahnesinde** gerçek DeviceIoControl
-/// yerine kullanıcı tarafından enjekte edilen tick fonksiyonu çağrılır;
-/// production'da `cfg(windows)` altındaki real-impl çalışır.
+/// Start the watcher thread. **In the test harness**, instead of the real
+/// DeviceIoControl the tick function injected by the caller is invoked;
+/// in production the real impl under `cfg(windows)` runs.
 ///
-/// `is_admin` false ise watcher BAŞLATILMAZ, `Ok(None)` döner. Caller
-/// bunu "needs_admin" status'una çevirir.
+/// If `is_admin` is false the watcher is NOT started, `Ok(None)` is returned.
+/// The caller turns this into the "needs_admin" status.
 pub fn spawn_watcher<F>(
     volume_id: String,
     is_admin: bool,
@@ -95,7 +95,7 @@ where
                         warn!(volume = volume_id, ?e, "USN watcher tick failed");
                     }
                 }
-                // Shutdown sinyali veya 5 sn time-out
+                // Shutdown signal or 5 sec time-out
                 match rx.recv_timeout(WATCHER_POLL_INTERVAL) {
                     Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                         info!(volume = volume_id, "USN watcher shutting down");
@@ -136,16 +136,16 @@ mod tests {
             Ok(())
         })
         .unwrap()
-        .expect("watcher handle bekleniyor");
+        .expect("expected watcher handle");
 
-        // İlk tick anında çalışmalı
+        // The first tick must run immediately
         std::thread::sleep(Duration::from_millis(50));
         let before_shutdown = counter.load(Ordering::SeqCst);
         assert!(before_shutdown >= 1, "tick must run at least once");
 
-        // shutdown çağrısı thread'i join etmeli
+        // The shutdown call must join the thread
         handle.shutdown();
-        // Shutdown sonrası counter artık değişmemeli
+        // After shutdown the counter must no longer change
         let after = counter.load(Ordering::SeqCst);
         std::thread::sleep(Duration::from_millis(50));
         assert_eq!(counter.load(Ordering::SeqCst), after);

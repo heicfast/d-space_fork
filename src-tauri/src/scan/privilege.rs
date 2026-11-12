@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Yetki probe — Bölüm 5.2A Üç Katmanlı Yetki Stratejisi.
+// Privilege probe — Chapter 5.2A Three-Layer Privilege Strategy.
 //
-// is_elevated() process token elevation flag'ini sorgular. UAC dialog
-// AÇMAZ, sadece mevcut process'in admin yetkisi olup olmadığını döner.
-// Bu Bölüm 5.2A Katman 1 ilkesi: ilk açılışta UAC isteme.
+// is_elevated() queries the process token elevation flag. It does NOT
+// open a UAC dialog; it only reports whether the current process has
+// admin rights. This is the Chapter 5.2A Layer 1 principle: do not ask
+// for UAC at first launch.
 
 #[cfg(windows)]
 pub fn is_elevated() -> bool {

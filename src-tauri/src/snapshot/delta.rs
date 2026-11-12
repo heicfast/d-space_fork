@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Snapshot delta — Master mimari Bölüm 8.6 (Time Machine karşılaştırma).
+// Snapshot delta — Master architecture Chapter 8.6 (Time Machine comparison).
 //
-// İki snapshot ID arasında değişen path'leri 4 kategoriye ayırır:
-//   * added    — to'da var, from'da yok
-//   * removed  — from'da var, to'da yok
+// Splits the paths changed between two snapshot IDs into 4 categories:
+//   * added    — present in to, absent in from
+//   * removed  — present in from, absent in to
 //   * grew     — to_size > from_size
 //   * shrunk   — to_size < from_size
 //
-// Her kategori için top-10 entry döner; ancak `total_changed_paths` 4
-// kategorinin toplam path sayısını verir. UI streaming delta loader
-// (Bölüm 9.6.5) bu özetle aç → genişlet pattern'ini sağlar.
+// Returns the top-10 entries per category; however `total_changed_paths`
+// gives the total path count across the 4 categories. The UI streaming
+// delta loader (Chapter 9.6.5) uses this summary for its open → expand pattern.
 
 use crate::error::{Error, Result};
 use crate::snapshot::SnapshotId;
@@ -22,11 +22,11 @@ use tracing::{debug, info};
 
 const TOP_N: usize = 10;
 
-/// Bir kategoriye top-N entry tutan min-heap wrapper. Yeni entry'lerde
-/// `len > N` olunca en küçük (= en az ilgi çeken) item atılır. RAM
-/// O(N) sabit kalır; full HashMap yerine streaming SQL JOIN ile birlikte
-/// kullanılır (Gemini review 3.4 — 1M entry snapshot'larda 600 MB'lık
-/// RAM patlamasını engeller).
+/// Min-heap wrapper keeping the top-N entries of one category. When a new
+/// entry makes `len > N`, the smallest (= least interesting) item is dropped.
+/// RAM stays O(N); used together with the streaming SQL JOIN instead of a
+/// full HashMap (Gemini review 3.4 — prevents the 600 MB RAM blow-up on
+/// 1M-entry snapshots).
 struct TopN<T: Ord> {
     heap: BinaryHeap<Reverse<T>>,
     cap: usize,
@@ -52,8 +52,8 @@ impl<T: Ord> TopN<T> {
     }
 }
 
-/// `PathEntry` heap ordering: önce size_bytes (büyük üstte), eşit ise
-/// path lex.
+/// `PathEntry` heap ordering: first size_bytes (largest on top), if equal
+/// then the path, lexically.
 impl PartialOrd for PathEntry {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
@@ -73,10 +73,10 @@ impl PartialEq for PathEntry {
 }
 impl Eq for PathEntry {}
 
-/// `DeltaEntry` heap ordering: önce mutlak |delta_bytes| (büyük üstte).
-/// Grew için pozitif, shrunk için negatif — caller türü ayırır.
-/// Burada salt mutlak büyüklük üzerinden sıralama; daha sonra
-/// `into_sorted_desc` çıktısı caller'a uygun yön ile çevrilir.
+/// `DeltaEntry` heap ordering: first the absolute |delta_bytes| (largest on top).
+/// Positive for grew, negative for shrunk — the caller tells the kinds apart.
+/// Ordering here is purely by absolute magnitude; later the
+/// `into_sorted_desc` output is converted to the direction the caller needs.
 impl PartialOrd for DeltaEntry {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
@@ -134,13 +134,13 @@ fn snapshot_captured_at(conn: &Connection, snapshot_id: SnapshotId) -> Result<i6
     .map_err(|e| Error::Snapshot(format!("snapshot id={} not found: {}", snapshot_id, e)))
 }
 
-/// Bölüm 8.6 — iki snapshot arasında set-difference + size-difference
-/// hesaplar. Top-10 entry her kategori için döner.
+/// Chapter 8.6 — computes the set-difference + size-difference between two
+/// snapshots. Returns the top-10 entries for each category.
 ///
-/// Gemini review 3.4 — RAM optimizasyonu: önceki impl iki snapshot'ı
-/// tam HashMap'e yüklüyordu (~600 MB / 1M entry). Şimdi SQL FULL OUTER
-/// JOIN ile satır satır stream'leniyor + her kategori için BinaryHeap
-/// top-N. Sabit ~MB seviyesi RAM.
+/// Gemini review 3.4 — RAM optimization: the previous impl loaded both
+/// snapshots fully into HashMaps (~600 MB / 1M entries). Now rows are
+/// streamed one by one via a SQL FULL OUTER JOIN + a per-category BinaryHeap
+/// top-N. Constant, ~MB-level RAM.
 pub fn compute_delta(
     from_id: SnapshotId,
     to_id: SnapshotId,
@@ -151,8 +151,8 @@ pub fn compute_delta(
     let from_captured_at = snapshot_captured_at(conn, from_id)?;
     let to_captured_at = snapshot_captured_at(conn, to_id)?;
 
-    // Gemini review B21 — iki snapshot aynı volume'den olmalı; cross-volume
-    // delta anlamsız sonuç üretirdi.
+    // Gemini review B21 — the two snapshots must come from the same volume; a
+    // cross-volume delta would produce meaningless results.
     let from_volume: String = conn
         .query_row(
             "SELECT volume_id FROM snapshots WHERE id = ?1",
@@ -176,8 +176,8 @@ pub fn compute_delta(
         )));
     }
 
-    // FULL OUTER JOIN: SQLite 3.39+ destekler (rusqlite 0.32 bundles ≥3.46).
-    // `a` from snapshot, `b` to snapshot. NULL → o tarafta yok.
+    // FULL OUTER JOIN: supported since SQLite 3.39+ (rusqlite 0.32 bundles ≥3.46).
+    // `a` is the from snapshot, `b` the to snapshot. NULL → absent on that side.
     let mut stmt = conn
         .prepare(
             "SELECT a.path, a.size_bytes, b.path, b.size_bytes
@@ -213,7 +213,7 @@ pub fn compute_delta(
 
         match (a_path, b_path) {
             (None, Some(p)) => {
-                // added: yalnız to'da var
+                // added: present only in to
                 let size = b_size.unwrap_or(0).max(0) as u64;
                 total_changed += 1;
                 net_change = net_change.saturating_add(size as i64);
@@ -223,7 +223,7 @@ pub fn compute_delta(
                 });
             }
             (Some(p), None) => {
-                // removed: yalnız from'da var
+                // removed: present only in from
                 let size = a_size.unwrap_or(0).max(0) as u64;
                 total_changed += 1;
                 net_change = net_change.saturating_sub(size as i64);
@@ -257,7 +257,7 @@ pub fn compute_delta(
                 }
                 // delta == 0 → unchanged
             }
-            (None, None) => {} // imkansız
+            (None, None) => {} // impossible
         }
     }
 
@@ -267,9 +267,9 @@ pub fn compute_delta(
     grew.retain(|d| d.delta_bytes > 0);
     let mut shrunk = shrunk_h.into_sorted_desc();
     shrunk.retain(|d| d.delta_bytes < 0);
-    // shrunk için en negatif önce gelmeli — heap mutlak büyüklük sıralı,
-    // sonra reverse-sort: çıktı zaten DESC abs; shrunk için ASC delta
-    // (yani en negatif önce) doğal.
+    // For shrunk the most negative must come first — the heap is ordered by
+    // absolute magnitude, then reverse-sorted: the output is already DESC by
+    // abs; for shrunk, ASC delta (i.e. most negative first) comes naturally.
     shrunk.sort_by_key(|a| a.delta_bytes);
 
     let total_changed_paths = total_changed;
@@ -405,9 +405,9 @@ mod tests {
         let d = compute_delta(from, to, &conn).unwrap();
         assert_eq!(d.added.len(), 10);
         assert_eq!(d.total_changed_paths, 15);
-        // İlk eleman en büyük
+        // The first element is the largest
         assert_eq!(d.added[0].size_bytes, 1000 + 14 * 100);
-        // Sıralama DESC
+        // The ordering is DESC
         for w in d.added.windows(2) {
             assert!(w[0].size_bytes >= w[1].size_bytes);
         }
@@ -430,7 +430,7 @@ mod tests {
 
         let d = compute_delta(from, to, &conn).unwrap();
         assert_eq!(d.shrunk.len(), 3);
-        assert_eq!(d.shrunk[0].path, r"C:\b"); // -9000 en negatif
+        assert_eq!(d.shrunk[0].path, r"C:\b"); // -9000 most negative
         assert_eq!(d.shrunk[1].path, r"C:\a"); // -100
         assert_eq!(d.shrunk[2].path, r"C:\c"); // -50
         assert!(d.shrunk[0].delta_bytes < d.shrunk[1].delta_bytes);

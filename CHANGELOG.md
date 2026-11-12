@@ -109,6 +109,26 @@ and the D-Space feature set returns inside the new design language.
   updater). The published v0.4.0-beta release flag was flipped
   accordingly and the feed verified reachable.
 
+### Post-tag follow-ups (main; first ships in the next build)
+
+- **Legacy developer-comment translation pass** — ~1,400 Turkish
+  comment lines across 43 engine files translated to English (the
+  upstream d-space core carried its original author's Turkish
+  comments). Verified comment-only by a Rust-aware lexer diff (code
+  and string literals byte-identical to the pre-pass commit).
+- **English runtime-string stragglers fixed** — 30 strings the
+  runtime-string pass had missed: staging/undo error payloads
+  (`Error::Staging` messages that surface as UI toasts), VSS HRESULT
+  descriptions, hardware summary values ("Sanal"→"Virtual",
+  "Bilinmeyen"→"Unknown", "MB/sn"→"MB/s" — including the sentinel
+  comparison and the two asserting tests), tracing messages
+  (ScanTree/DoD-wipe/MFT paths) and test panic messages. Remaining
+  Turkish in the tree: only the deliberate UTF-16 decode fixture and
+  two test file-content byte strings.
+- Stale `.github/REPO_STANDARDS.md` (orphaned pre-merge Turkish
+  duplicate of the root standards doc, referencing the retired Vue
+  stack) removed.
+
 ### Numbers
 
 197 frontend unit tests (+ wiring suite) · 12 e2e smoke · 206 Rust

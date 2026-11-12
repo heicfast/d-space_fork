@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// USN delta uygulama — Sprint 3.8.
+// USN delta application — Sprint 3.8.
 //
-// Discovery Log #005 — Bölüm 5.6: `FSCTL_READ_USN_JOURNAL` çıktısından
-// gelen `UsnRecord` listesini index'e işle. Reason maskine göre:
+// Discovery Log #005 — Chapter 5.6: apply the `UsnRecord` list that comes
+// from the `FSCTL_READ_USN_JOURNAL` output to the index. By reason mask:
 //   * USN_REASON_FILE_DELETE → DELETE
 //   * USN_REASON_FILE_CREATE / RENAME_NEW_NAME / DATA_OVERWRITE → UPSERT
-//   * USN_REASON_RENAME_OLD_NAME → skip (NEW_NAME paireli kaydı tamamlar)
+//   * USN_REASON_RENAME_OLD_NAME → skip (the NEW_NAME-paired record completes it)
 //   * USN_REASON_CLOSE → upsert (final state)
 //
-// Wraparound: `detect_wraparound(stored_jid, fresh_jid)` farklı ise
-// `Err(Error::Index("wraparound"))` → caller full re-enumerate yapar.
+// Wraparound: if `detect_wraparound(stored_jid, fresh_jid)` differs,
+// `Err(Error::Index("wraparound"))` → the caller does a full re-enumerate.
 
 use super::persist::{delete_entry, save_entries};
 use super::usn::{
@@ -22,7 +22,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use tracing::trace;
 
-/// `apply_delta` sonucu.
+/// Result of `apply_delta`.
 #[derive(Debug, Clone, Copy, Default, Serialize)]
 pub struct DeltaSummary {
     pub upserts: usize,
@@ -30,11 +30,11 @@ pub struct DeltaSummary {
     pub skipped: usize,
 }
 
-/// Watermark journal_id değiştiyse wraparound — eski USN penceresi
-/// kaybolmuş, full re-enumerate gerekli.
+/// If the watermark journal_id changed, it is a wraparound — the old USN
+/// window is gone; a full re-enumerate is required.
 pub fn detect_wraparound(stored: i64, fresh: i64) -> Result<()> {
     if stored == 0 {
-        // Henüz watermark yok — baseline aşamasındayız.
+        // No watermark yet — we are in the baseline phase.
         return Ok(());
     }
     if stored != fresh {
@@ -46,28 +46,28 @@ pub fn detect_wraparound(stored: i64, fresh: i64) -> Result<()> {
     Ok(())
 }
 
-/// USN reason'ı silme niyeti olarak yorumla. FILE_DELETE varsa silme;
-/// USN_REASON_CLOSE ile birlikte gelir (kapatma sonrası finalize).
+/// Interpret the USN reason as delete intent. If FILE_DELETE is set, delete;
+/// it comes together with USN_REASON_CLOSE (finalized after close).
 #[inline]
 fn is_delete(reason: u32) -> bool {
     reason & USN_REASON_FILE_DELETE != 0
 }
 
-/// RENAME_OLD_NAME yalnız eşlik bilgisi — eşleşen NEW_NAME geldiğinde
-/// upsert yapıldığı için OLD'u atlıyoruz (aksi takdirde eski isme upsert
-/// edip sonradan NEW_NAME ile üzerine yazıyorduk; bu da tutarsız ara
-/// state'leri persist etmek demek).
+/// RENAME_OLD_NAME is companion info only — when the matching NEW_NAME
+/// arrives we upsert, so we skip OLD (otherwise we would upsert under the
+/// old name and later overwrite it with NEW_NAME; that would also persist
+/// inconsistent intermediate states).
 #[inline]
 fn is_skippable(reason: u32) -> bool {
-    // OLD_NAME tek başına gelirse skip; NEW_NAME ile birlikteyse de skip
-    // (NEW_NAME upsert kapsar).
+    // Skip if OLD_NAME arrives alone; also skip when it arrives with NEW_NAME
+    // (the NEW_NAME upsert covers it).
     reason & USN_REASON_RENAME_OLD_NAME != 0
         && reason & USN_REASON_FILE_CREATE == 0
         && !is_delete(reason)
 }
 
-/// Verilen kayıtları DB'ye uygula. `volume_id` çağırıcıdan gelir (Win32
-/// volume handle'dan kaydın geldiği cilt zaten bilinir).
+/// Apply the given records to the DB. `volume_id` comes from the caller
+/// (the volume of the record is already known from the Win32 volume handle).
 pub fn apply_delta(
     conn: &mut Connection,
     volume_id: &str,
@@ -164,7 +164,7 @@ mod tests {
         let err = detect_wraparound(12345, 67890).unwrap_err();
         match err {
             Error::Index(m) => assert!(m.contains("wraparound")),
-            _ => panic!("Index variant beklendi"),
+            _ => panic!("expected Index variant"),
         }
     }
 
@@ -195,7 +195,7 @@ mod tests {
         assert_eq!(a.name, "a.txt");
         assert_eq!(a.parent_ref, 5);
 
-        // Aynı file_ref için overwrite — rename simülasyonu
+        // Overwrite for the same file_ref — rename simulation
         let upd = vec![rec(10, 5, 102, USN_REASON_RENAME_NEW_NAME, "a_renamed.txt")];
         apply_delta(&mut conn, v, &upd).unwrap();
         let a2 = load_entry(&conn, v, 10).unwrap().unwrap();
@@ -207,7 +207,7 @@ mod tests {
     fn apply_delta_deletes_existing() {
         let mut conn = open_test_db();
         let v = r"\\.\C:";
-        // Önce baseline
+        // Baseline first
         save_entries(
             &mut conn,
             &[IndexEntry {
@@ -242,7 +242,7 @@ mod tests {
     fn apply_delta_skips_old_name_only() {
         let mut conn = open_test_db();
         let v = r"\\.\C:";
-        // OLD_NAME yalnız — yeni isim gelene kadar atla
+        // OLD_NAME only — skip until the new name arrives
         let records = vec![rec(20, 5, 5, USN_REASON_RENAME_OLD_NAME, "old.txt")];
         let s = apply_delta(&mut conn, v, &records).unwrap();
         assert_eq!(s.skipped, 1);

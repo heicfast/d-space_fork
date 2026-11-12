@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Staging operasyonları — Bölüm 12.
-// v0.1 Faz 1: same-volume `fs::rename` (atomik). Cross-volume two-phase
-// commit (Bölüm 12.3 Katman C) sonraki sprint'te.
+// Staging operations — Chapter 12.
+// v0.1 Phase 1: same-volume `fs::rename` (atomic). Cross-volume two-phase
+// commit (Chapter 12.3 Layer C) comes in the next sprint.
 
 use crate::error::{Error, Result};
 use rusqlite::{params, Connection};
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 
-/// Bölüm 12.2 — varsayılan undo penceresi 24 saat.
+/// Chapter 12.2 — the default undo window is 24 hours.
 pub const STAGING_TTL_SECS: i64 = 24 * 3600;
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,9 +57,9 @@ fn first_drive_letter(_p: &Path) -> Option<char> {
     None
 }
 
-/// Bölüm 12.2 — kullanıcı seçimini staging klasörüne atomik MOVE eder.
-/// Cross-volume (ve UNC kaynaklı) istekler two-phase commit yoluna gider
-/// (Bölüm 12.3 Katman C).
+/// Chapter 12.2 — atomically MOVEs the user's selection into the staging
+/// folder. Cross-volume (and UNC-sourced) requests go down the two-phase
+/// commit path (Chapter 12.3 Layer C).
 pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
     let src = PathBuf::from(path);
     if !src.exists() {
@@ -77,10 +77,10 @@ pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
 
     let file_name = src
         .file_name()
-        .ok_or_else(|| Error::Staging("filename eksik".into()))?;
+        .ok_or_else(|| Error::Staging("missing filename".into()))?;
     let mut dest = dest_dir.join(file_name);
 
-    // Collision avoidance — aynı saniye içinde aynı isim olabilir
+    // Collision avoidance — the same name can occur within the same second
     let mut suffix = 1u32;
     while dest.exists() {
         dest = dest_dir.join(format!("{:03}_{}", suffix, file_name.to_string_lossy()));
@@ -90,11 +90,11 @@ pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
         }
     }
 
-    // Cross-volume kontrol (Bölüm 12.3) — two-phase commit yoluna dispatch.
-    // Gemini review B11 — UNC kaynakte `first_drive_letter` None döner; eski
-    // kod bunu same-volume sanıp raw rename hatası veriyordu. Artık None
-    // (UNC/rootless) da cross-volume kopya yoluna gider — streaming copy
-    // ağdan lokal staging'e doğru çalışır.
+    // Cross-volume check (Chapter 12.3) — dispatch to the two-phase commit path.
+    // Gemini review B11 — on a UNC source `first_drive_letter` returns None;
+    // the old code assumed same-volume and produced a raw rename error. Now
+    // None (UNC/rootless) also goes down the cross-volume copy path — the
+    // streaming copy works from the network toward local staging.
     let src_drive = first_drive_letter(&src);
     let dest_drive = first_drive_letter(&dest);
     let is_cross = src_drive != dest_drive;
@@ -103,7 +103,7 @@ pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
         debug!(
             src = %src.display(),
             dest = %dest.display(),
-            "cross-volume tespit edildi → two-phase commit"
+            "cross-volume detected → two-phase commit"
         );
         let target_vol = dest_drive
             .map(|c| format!("{}:", c))
@@ -122,9 +122,10 @@ pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
     fs::rename(&src, &dest).map_err(|e| Error::Staging(format!("rename: {}", e)))?;
 
     let expires_at = staged_at + STAGING_TTL_SECS;
-    // Gemini review B3 — DB insert başarısız olursa rename'i geri al; crash
-    // penceresi daralır (rename→insert arası hard crash hâlâ mümkün, açılış
-    // recovery'si v0.3'te untracked bucket sweep ile kapanacak).
+    // Gemini review B3 — if the DB insert fails, roll the rename back; the
+    // crash window narrows (a hard crash between rename→insert is still
+    // possible; it will be closed in v0.3 by the startup recovery's
+    // untracked bucket sweep).
     if let Err(e) = conn.execute(
         "INSERT INTO staging_items
             (original_path, staged_path, size_bytes, staged_at, expires_at,
@@ -165,8 +166,8 @@ pub fn stage(path: &str, conn: &Connection) -> Result<StagedItem> {
     })
 }
 
-/// DB'deki tüm bekleyen (henüz silinmemiş) staging item'larını döner.
-/// staged_at azalan sırada, max 200 (Bölüm 9.6 limit ile uyumlu).
+/// Returns all pending (not yet deleted) staging items in the DB.
+/// In staged_at descending order, max 200 (in line with the Chapter 9.6 limit).
 pub fn list_pending(conn: &Connection) -> Result<Vec<StagedItem>> {
     let mut stmt = conn
         .prepare(
@@ -200,26 +201,26 @@ pub fn list_pending(conn: &Connection) -> Result<Vec<StagedItem>> {
     Ok(items)
 }
 
-/// Bölüm 12.2.4.1 — conflict detection için dosya parmak izi.
+/// Chapter 12.2.4.1 — file fingerprint for conflict detection.
 #[derive(Debug, Clone, Serialize)]
 pub struct FileSnapshot {
     pub path: String,
     pub size_bytes: u64,
     pub modified_unix: i64,
-    /// İlk 4 KB Blake3 hash, hex. Klasör için None.
+    /// Blake3 hash of the first 4 KB, hex. None for folders.
     pub blake3_first4kb_hex: Option<String>,
     pub is_dir: bool,
 }
 
-/// Bölüm 12.2.4 — undo işleminin dört sonucundan biri.
+/// Chapter 12.2.4 — one of the four outcomes of the undo operation.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UndoOutcome {
-    /// Hedef yol boştu — staging dosyası taşındı, satır silindi.
+    /// The target path was empty — the staged file was moved, the row deleted.
     Restored { original_path: String },
-    /// Hedefte zaten aynı içerik var — silmek yeterli (idempotent).
+    /// The target already has the same content — deleting it is enough (idempotent).
     Idempotent { original_path: String },
-    /// Çakışma — kullanıcı kararı gerekiyor (UI dialog).
+    /// Conflict — a user decision is required (UI dialog).
     Conflict {
         original_path: String,
         staged: FileSnapshot,
@@ -227,17 +228,17 @@ pub enum UndoOutcome {
     },
 }
 
-/// Bölüm 12.2.4.2 — conflict dialog'unun döndüğü kullanıcı seçimi.
+/// Chapter 12.2.4.2 — the user selection returned by the conflict dialog.
 #[derive(Debug, Clone, Copy, serde::Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictResolution {
-    /// Hedef dosyayı sil, staged'i taşı.
+    /// Delete the target file, move the staged one.
     Overwrite,
-    /// Staged'i hedefin yanına "ad (1).ext" şeklinde yeni isimle koy.
+    /// Place the staged file next to the target with a new name like "name (1).ext".
     Rename,
-    /// Rename ile aynı semantik (her ikisi de korunur). UI ayrımı için.
+    /// Same semantics as Rename (both are preserved). For UI distinction.
     KeepBoth,
-    /// Undo iptal — staging satırı korunur.
+    /// Undo cancelled — the staging row is preserved.
     Cancel,
 }
 
@@ -317,37 +318,37 @@ fn delete_staging_row(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-/// Gemini review B32 — staged dosya bucket'tan çıkınca boş kalan
-/// `staging\<timestamp>` dizinini sessizce temizle (birikmez).
+/// Gemini review B32 — when the staged file leaves the bucket, silently
+/// clean up the `staging\<timestamp>` directory left empty (no buildup).
 fn cleanup_bucket_if_empty(staged_path: &Path) {
     if let Some(bucket) = staged_path.parent() {
-        // remove_dir yalnız BOŞ dizinde başarılı olur — doluysa no-op.
+        // remove_dir only succeeds on an EMPTY directory — if non-empty, no-op.
         if let Err(e) = fs::remove_dir(bucket) {
             debug!(bucket = %bucket.display(), error = %e, "bucket cleanup skipped");
         }
     }
 }
 
-/// Gemini review B1 — cross-volume undo: `fs::rename` Windows'ta
-/// `MOVEFILE_COPY_ALLOWED` olmadan cross-device hata verir. Staging'ten
-/// orijinal volume'üne geri taşıma, stage'in iki-fazlı protokolünün aynısı:
-/// tmp kopya → Blake3 verify → atomik rename → kaynak sil.
+/// Gemini review B1 — cross-volume undo: on Windows `fs::rename` gives a
+/// cross-device error without `MOVEFILE_COPY_ALLOWED`. Moving back from the
+/// staging area to the original volume is the same two-phase protocol as
+/// stage: tmp copy → Blake3 verify → atomic rename → delete the source.
 fn undo_move_across_volumes(src: &Path, dest: &Path) -> Result<()> {
     let parent = dest
         .parent()
-        .ok_or_else(|| Error::Staging("undo hedef parent yok".into()))?;
+        .ok_or_else(|| Error::Staging("undo target parent missing".into()))?;
     ensure_parent(dest)?;
     let file_name = dest
         .file_name()
-        .ok_or_else(|| Error::Staging("undo hedef filename yok".into()))?
+        .ok_or_else(|| Error::Staging("undo target filename missing".into()))?
         .to_string_lossy()
         .to_string();
     let tmp_path = parent.join(format!("{}.dspace_undo_tmp", file_name));
 
-    // Faz 1a: kopya
+    // Phase 1a: copy
     crate::staging::cross_volume::copy_file_streaming(src, &tmp_path)?;
 
-    // Faz 1b: hash verify
+    // Phase 1b: hash verify
     let src_hash = crate::staging::cross_volume::blake3_file(src)?;
     let dst_hash = crate::staging::cross_volume::blake3_file(&tmp_path)?;
     if src_hash != dst_hash {
@@ -357,19 +358,19 @@ fn undo_move_across_volumes(src: &Path, dest: &Path) -> Result<()> {
         ));
     }
 
-    // Faz 2: atomik rename + kaynak sil
+    // Phase 2: atomic rename + delete the source
     fs::rename(&tmp_path, dest).map_err(|e| Error::Staging(format!("undo final rename: {}", e)))?;
     fs::remove_file(src).map_err(|e| {
-        // Hedef yazıldı + kaynak duruyor — kullanıcı iki kopyaya sahip;
-        // veri kaybı yok ama satırı tutmak gerekir.
-        Error::Staging(format!("undo kaynak silinemedi: {}", e))
+        // The target was written + the source is still there — the user has
+        // two copies; no data loss, but the row must be kept.
+        Error::Staging(format!("undo source could not be deleted: {}", e))
     })?;
     cleanup_bucket_if_empty(src);
     Ok(())
 }
 
-/// Dosyayı hedefe taşı — same-volume rename, cross-volume copy+verify.
-/// undo / undo_with_resolution ortak yardımcısı (Gemini review B1).
+/// Move the file to the target — same-volume rename, cross-volume copy+verify.
+/// Shared helper of undo / undo_with_resolution (Gemini review B1).
 fn undo_move(src: &Path, dest: &Path) -> Result<()> {
     let src_drive = first_drive_letter(src);
     let dest_drive = first_drive_letter(dest);
@@ -387,16 +388,16 @@ fn undo_move(src: &Path, dest: &Path) -> Result<()> {
     }
 }
 
-/// Bölüm 12.2.4 — undo. Üç olası dönüş:
-///   * Restored — hedef boştu, taşıma yapıldı.
-///   * Idempotent — hedef zaten aynı içerikte, staged silindi.
-///   * Conflict — kullanıcı kararı gerek; UI dialog için snapshot'lar döner.
+/// Chapter 12.2.4 — undo. Three possible returns:
+///   * Restored — the target was empty, the move was performed.
+///   * Idempotent — the target already has the same content, staged deleted.
+///   * Conflict — user decision required; returns snapshots for the UI dialog.
 ///
-/// Gemini review B2 — idempotent karar artık dosya boyutuna göre:
-///   * ≤ 64 MB: tam dosya Blake3 karşılaştırması (kesin sonuç),
-///   * \> 64 MB: 4 KB + boyut eşleşmesi yalnızca “muhtemelen aynı” gösterir;
-///     sessiz silme RİSKİ olmadığından Conflict'e düşer — kullanıcı
-///     Overwrite ile aynı neticeyi bilinçli seçer.
+/// Gemini review B2 — the idempotent decision is now based on file size:
+///   * ≤ 64 MB: full-file Blake3 comparison (definitive result),
+///   * \> 64 MB: a 4 KB + size match only indicates "probably the same";
+///     it falls to Conflict so there is no RISK of silent deletion — the
+///     user consciously chooses the same outcome via Overwrite.
 pub fn undo(id: i64, conn: &Connection) -> Result<UndoOutcome> {
     let (original, staged) = lookup_staging(conn, id)?;
     let src = Path::new(&staged);
@@ -406,7 +407,7 @@ pub fn undo(id: i64, conn: &Connection) -> Result<UndoOutcome> {
         return Err(Error::Staging(format!("Staged file not found: {}", staged)));
     }
 
-    // Hedef boş — direkt restore (cross-volume dahil, undo_move halleder).
+    // Target empty — restore directly (cross-volume included, undo_move handles it).
     if !dest.exists() {
         undo_move(src, dest)?;
         delete_staging_row(conn, id)?;
@@ -416,7 +417,7 @@ pub fn undo(id: i64, conn: &Connection) -> Result<UndoOutcome> {
         });
     }
 
-    // Hedef dolu — içerik karşılaştırma (yalnızca dosyalar için).
+    // Target occupied — content comparison (only for files).
     let staged_snap = snapshot_of(src);
     let target_snap = snapshot_of(dest);
 
@@ -426,20 +427,21 @@ pub fn undo(id: i64, conn: &Connection) -> Result<UndoOutcome> {
         && staged_snap.size_bytes == target_snap.size_bytes
         && staged_snap.size_bytes > 0
         && if staged_snap.size_bytes <= FULL_HASH_THRESHOLD {
-            // Tam dosya Blake3 — kesin sonuç.
+            // Full-file Blake3 — definitive result.
             let sh = crate::staging::cross_volume::blake3_file(src);
             let th = crate::staging::cross_volume::blake3_file(dest);
             matches!((sh, th), (Ok(a), Ok(b)) if a == b)
         } else {
-            // 64 MB üzeri: 4 KB eşleşmesi “muhtemelen aynı” — kesin değil.
-            // Gemini review B2: sessiz silme yok → Conflict'e düş.
+            // Over 64 MB: a 4 KB match means "probably the same" — not certain.
+            // Gemini review B2: no silent deletion → falls to Conflict.
             false
         };
 
     if same_hash {
-        // Idempotent: hedef zaten aynı dosya. Staged'i sil, DB satırı kaldır.
-        // Gemini review B12 — satır yalnızca başarılı silmeden sonra kalkar;
-        // silinemezse (kilit vb.) uyar + satırı koru.
+        // Idempotent: the target is already the same file. Delete the staged
+        // file, remove the DB row.
+        // Gemini review B12 — the row is removed only after a successful
+        // delete; if deletion fails (lock etc.) warn + keep the row.
         match fs::remove_file(src) {
             Ok(()) => {
                 cleanup_bucket_if_empty(src);
@@ -451,7 +453,10 @@ pub fn undo(id: i64, conn: &Connection) -> Result<UndoOutcome> {
             }
             Err(e) => {
                 warn!(staged = %src.display(), error = %e, "idempotent delete failed — row preserved");
-                Err(Error::Staging(format!("Staged dosya silinemedi: {}", e)))
+                Err(Error::Staging(format!(
+                    "staged file could not be deleted: {}",
+                    e
+                )))
             }
         }
     } else {
@@ -486,8 +491,8 @@ fn rename_target(dest: &Path) -> PathBuf {
     parent.join(format!("{} (rename-overflow){}", stem, ext))
 }
 
-/// Bölüm 12.2.4.2 — kullanıcı conflict dialog'unda seçim yaptı. Seçime göre
-/// staged'i yerleştir.
+/// Chapter 12.2.4.2 — the user has made a choice in the conflict dialog.
+/// Place the staged file according to that choice.
 pub fn undo_with_resolution(
     id: i64,
     resolution: ConflictResolution,
@@ -504,11 +509,11 @@ pub fn undo_with_resolution(
     match resolution {
         ConflictResolution::Cancel => {
             info!(id, "undo conflict cancelled — staging row preserved");
-            Err(Error::Staging("Undo iptal edildi.".into()))
+            Err(Error::Staging("Undo cancelled.".into()))
         }
         ConflictResolution::Overwrite => {
             if !dest.exists() {
-                // Race: bu arada hedef boşalmış. Normal restore yap.
+                // Race: the target has meanwhile been emptied. Do a normal restore.
                 undo_move(src, dest)?;
             } else {
                 let target_is_dir = dest.is_dir();
@@ -561,8 +566,8 @@ mod tests {
 
     #[test]
     fn stage_and_undo_roundtrip() {
-        // Bu test gerçek DB ve dosya sistemi kullanır (in-memory connection +
-        // temp dir). Same-volume rename yapar.
+        // This test uses a real DB and file system (in-memory connection +
+        // temp dir). It performs a same-volume rename.
         let conn = Connection::open_in_memory().unwrap();
         let migrations = rusqlite_migration::Migrations::new(vec![rusqlite_migration::M::up(
             include_str!("../db/migrations/0001_initial.sql"),
@@ -570,36 +575,36 @@ mod tests {
         let mut conn = conn;
         migrations.to_latest(&mut conn).unwrap();
 
-        // Çalışma alanı: gerçek FS, geçici dizinler. Kaynak ve staging aynı
-        // volume'da olmalı (TEMP).
+        // Workspace: real FS, temporary directories. The source and the
+        // staging area must be on the same volume (TEMP).
         let work_root = unique_tmp("work");
         fs::create_dir_all(&work_root).unwrap();
         let src = work_root.join("doomed.txt");
         fs::write(&src, b"deletable content").unwrap();
         assert!(src.exists());
 
-        // Staging base'ı zaten LOCALAPPDATA — bu test üzerine yazılırsa
-        // gerçek staging klasörü kullanılır; sonra temizleriz.
+        // The staging base is already LOCALAPPDATA — unless this test
+        // overrides it, the real staging folder is used; we clean up afterwards.
         let staged = stage(src.to_str().unwrap(), &conn).expect("stage complete");
         assert!(!src.exists(), "source should have been moved");
         assert!(Path::new(&staged.staged_path).exists());
 
-        // Undo — hedef boş, Restored beklenir
+        // Undo — target empty, Restored is expected
         let outcome = undo(staged.id, &conn).expect("undo should succeed");
         match outcome {
             UndoOutcome::Restored { original_path } => {
                 assert_eq!(original_path, src.to_string_lossy());
             }
-            _ => panic!("Restored bekleniyordu"),
+            _ => panic!("expected Restored"),
         }
         assert!(src.exists(), "source should be restored");
         assert!(!Path::new(&staged.staged_path).exists());
 
-        // DB'de staging_item silinmiş olmalı
+        // The staging_item row must have been deleted from the DB
         let pending = list_pending(&conn).unwrap();
         assert!(pending.iter().all(|p| p.id != staged.id));
 
-        // Temizlik
+        // Cleanup
         let _ = fs::remove_dir_all(&work_root);
     }
 
@@ -620,7 +625,7 @@ mod tests {
         fs::write(&target, b"yeni icerik 13 mayis").unwrap();
         fs::write(&staged_file, b"eski icerik 12 mayis").unwrap();
 
-        // staging_items satırını manuel ekle
+        // Insert the staging_items row manually
         let now = now_unix();
         conn.execute(
             "INSERT INTO staging_items
@@ -650,9 +655,9 @@ mod tests {
                 assert_eq!(staged.size_bytes, 20);
                 assert_eq!(t.size_bytes, 20);
             }
-            other => panic!("Conflict bekleniyordu, geldi: {:?}", other),
+            other => panic!("expected Conflict, got: {:?}", other),
         }
-        // Conflict döndüğünde staged dosya hâlâ orada
+        // When Conflict is returned, the staged file is still there
         assert!(staged_file.exists());
 
         let _ = fs::remove_dir_all(&work);
@@ -735,7 +740,7 @@ mod tests {
         .unwrap();
         let id = conn.last_insert_rowid();
 
-        // İlk önce undo → Conflict
+        // First undo → Conflict
         let _ = undo(id, &conn).unwrap();
         // Resolve: Rename
         let outcome = undo_with_resolution(id, ConflictResolution::Rename, &conn).unwrap();
@@ -749,9 +754,9 @@ mod tests {
                     .to_string_lossy()
                     .contains("(1)"));
             }
-            _ => panic!("Restored (rename) bekleniyordu"),
+            _ => panic!("expected Restored (rename)"),
         }
-        // Hedef hâlâ orijinal halinde
+        // The target is still in its original state
         assert!(target.exists());
 
         let _ = fs::remove_dir_all(&work);
@@ -765,7 +770,7 @@ mod tests {
         )]);
         migrations.to_latest(&mut conn).unwrap();
 
-        // Manuel insert (gerçek FS dokunmadan)
+        // Manual insert (without touching the real FS)
         let now = now_unix();
         conn.execute(
             "INSERT INTO staging_items

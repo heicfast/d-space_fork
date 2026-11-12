@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// ScanTree builder — Bölüm 4.3 Adım 3 + Bölüm 4.4 Single Source of Truth.
+// ScanTree builder — Chapter 4.3 Step 3 + Chapter 4.4 Single Source of Truth.
 //
-// Raw MFT entry'lerinden:
-//   1. Düğüm sözlüğü (`HashMap<NodeId, Node>`)
-//   2. Çocuk listesi (`HashMap<NodeId, Vec<NodeId>>`)
-//   3. Walk-up aggregate boyut hesabı (her dosya boyutu üst klasörlerine eklenir)
+// From raw MFT entries:
+//   1. Node dictionary (`HashMap<NodeId, Node>`)
+//   2. Child list (`HashMap<NodeId, Vec<NodeId>>`)
+//   3. Walk-up aggregate size computation (each file's size is added to its parent folders)
 //
-// Sonuç `Arc<ScanTree>` olarak Tauri state'inde tutulur. Vue hiçbir zaman
-// tam ağaca sahip olmaz — sadece `tree_summary` ve `top_consumers` window
-// query'leri ile çalışır (Bölüm 9.6 lazy viewport).
+// The result is kept as `Arc<ScanTree>` in Tauri state. Vue never owns
+// the full tree — it works only via the `tree_summary` and `top_consumers`
+// window queries (Chapter 9.6 lazy viewport).
 
 use crate::safe_delete::UserRuleSnapshot;
 use crate::scan::find_first::{scan_find_first, scan_find_first_with_progress};
@@ -38,14 +38,14 @@ pub struct Node {
     pub data_size: u64,
     pub aggregate_size: u64,
     pub is_dir: bool,
-    /// Bölüm 6 safe-to-delete skor (0-100). None = eşleşen kural yok.
+    /// Chapter 6 safe-to-delete score (0-100). None = no matching rule.
     pub score: Option<u8>,
-    /// Eşleşen kural id'si. Built-in için sabit (örn. "node_modules"),
-    /// kullanıcı tanımlı için "user:<id>" (Bölüm 6.4).
+    /// Matching rule id. Fixed for built-in (e.g. "node_modules"),
+    /// "user:<id>" for user-defined (Chapter 6.4).
     pub score_rule: Option<String>,
     pub score_reason: Option<String>,
-    /// `$STANDARD_INFORMATION.modification_time` Unix saniye. Bölüm 9.1 mod 4/4
-    /// Timeline ekseni için. 0 = bilinmiyor (sentetik root veya hata).
+    /// `$STANDARD_INFORMATION.modification_time` in Unix seconds. For the
+    /// Chapter 9.1 mod 4/4 Timeline axis. 0 = unknown (synthetic root or error).
     pub modified_unix: i64,
 }
 
@@ -62,10 +62,10 @@ pub struct ScanTree {
     pub build_elapsed_ms: u64,
 }
 
-/// Bölüm 9.6.5 + 15.4 — canlı tarama görseli için sade düğüm.
-/// `ScanProgress.partial_tree` alanı bu vector'ü taşır. Frontend
-/// `LiveSunburst.vue` doğrudan tüketir — full `Node`'a göre daha küçük
-/// payload (skor alanları gerekmez, modified_unix gerekmez).
+/// Chapter 9.6.5 + 15.4 — plain node for the live scan view.
+/// The `ScanProgress.partial_tree` field carries this vector. The frontend's
+/// `LiveSunburst.vue` consumes it directly — a smaller payload than the
+/// full `Node` (score fields not needed, modified_unix not needed).
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct PartialNode {
     pub id: NodeId,
@@ -76,13 +76,13 @@ pub struct PartialNode {
     pub is_dir: bool,
 }
 
-/// Bölüm 9.6.5 — canlı sunburst için root + ilk N seviyenin top_n
-/// agrega tüketicisini döner. Düğümler agrega boyuta göre azalan sırada.
+/// Chapter 9.6.5 — returns the root + the top_n aggregate consumers of the
+/// first N levels for the live sunburst, in descending aggregate size order.
 ///
-/// * `max_depth` — root (depth 0) dahil edilecek maksimum derinlik.
-///   Örn. `max_depth=2` → root + birinci seviye + ikinci seviye.
-/// * `top_n` — sonuç vector'ünün maksimum eleman sayısı (root + ilk N-1).
-///   Root her zaman ilk eleman, kalan slotlar agrega tüketicilerine.
+/// * `max_depth` — maximum depth to include, counting the root (depth 0).
+///   E.g. `max_depth=2` → root + first level + second level.
+/// * `top_n` — max element count of the result vector (root + first N-1).
+///   The root is always the first element; remaining slots go to aggregate consumers.
 pub fn build_partial_view(tree: &ScanTree, max_depth: usize, top_n: usize) -> Vec<PartialNode> {
     if top_n == 0 {
         return Vec::new();
@@ -91,7 +91,7 @@ pub fn build_partial_view(tree: &ScanTree, max_depth: usize, top_n: usize) -> Ve
         return Vec::new();
     };
 
-    // BFS: (id, depth). depth=0 root. max_depth dahil.
+    // BFS: (id, depth). depth=0 is the root. max_depth inclusive.
     let mut candidates: Vec<PartialNode> = Vec::new();
     let mut queue: std::collections::VecDeque<(NodeId, usize)> = std::collections::VecDeque::new();
     queue.push_back((tree.root_id, 0));
@@ -103,7 +103,7 @@ pub fn build_partial_view(tree: &ScanTree, max_depth: usize, top_n: usize) -> Ve
             continue;
         }
         if let Some(node) = tree.nodes.get(&id) {
-            // Root her zaman dahil, diğer düğümler için aggregate_size > 0 şartı.
+            // Root is always included; other nodes require aggregate_size > 0.
             if id == tree.root_id || node.aggregate_size > 0 {
                 candidates.push(PartialNode {
                     id: node.id,
@@ -127,8 +127,8 @@ pub fn build_partial_view(tree: &ScanTree, max_depth: usize, top_n: usize) -> Ve
         }
     }
 
-    // Root'u ayır, kalanları boyutla azalan sırala, sonra root + top (N-1)
-    // şeklinde birleştir. Eğer top_n=1 ise sadece root döner.
+    // Separate the root, sort the rest by descending size, then merge them
+    // back as root + top (N-1). If top_n=1, only the root is returned.
     let root_partial = candidates
         .iter()
         .find(|p| p.id == tree.root_id)
@@ -168,17 +168,17 @@ pub struct ScanSummary {
     pub build_elapsed_ms: u64,
 }
 
-/// Geriye dönük uyumlu wrapper — user rule snapshot'ları olmadan çağırır.
+/// Backward-compatible wrapper — calls it without user rule snapshots.
 pub fn build_tree(volume_id: String, raw: Vec<RawMftEntry>) -> ScanTree {
     build_tree_with_user_rules(volume_id, raw, &[])
 }
 
-/// Gemini review (partial-tree perf) — canlı sunburst snapshot'ları için
-/// hafif ağaç kurucu. `build_tree_with_user_rules`'tan farkları:
-///   * borrow ile çalışır (kopya YOK),
-///   * safe-delete kural skorlaması YOK (partial view yalnız boyut/isim
-///     taşır — Node.score alanları None kalır),
-///   * volume_id boş (yalnız partial_view hesabı için kullanılır).
+/// Gemini review (partial-tree perf) — lightweight tree builder for live
+/// sunburst snapshots. Differences from `build_tree_with_user_rules`:
+///   * works on borrows (NO copies),
+///   * NO safe-delete rule scoring (the partial view carries only
+///     size/name — Node.score fields stay None),
+///   * volume_id empty (used only for the partial_view computation).
 pub fn build_tree_light(raw: &[RawMftEntry]) -> ScanTree {
     let start = Instant::now();
     let count = raw.len();
@@ -224,8 +224,8 @@ pub fn build_tree_light(raw: &[RawMftEntry]) -> ScanTree {
             continue;
         }
         match node.parent {
-            // Gemini review B7 — self-cycle (bozuk MFT) root'a bağlanır,
-            // düğüm erişilebilir kalır.
+            // Gemini review B7 — a self-cycle (corrupt MFT) is attached
+            // to the root; the node stays reachable.
             Some(p) if p == node.id => {
                 node.parent = Some(ROOT_RECORD);
             }
@@ -254,7 +254,7 @@ pub fn build_tree_light(raw: &[RawMftEntry]) -> ScanTree {
         }
     }
 
-    // Walk-up aggregate — döngü korumalı (aşağıdaki ile aynı mantık).
+    // Walk-up aggregate — cycle-guarded (same logic as below).
     let snapshot: Vec<(NodeId, Option<NodeId>, u64)> = nodes
         .iter()
         .map(|(&id, n)| (id, n.parent, n.data_size))
@@ -302,13 +302,13 @@ pub fn build_tree_light(raw: &[RawMftEntry]) -> ScanTree {
     }
 }
 
-/// Raw MFT entry'lerinden tam ScanTree kurar:
-/// 1. Düğümleri yerleştirir, ROOT_RECORD sentetik garanti.
-/// 2. Çocuk listelerini oluşturur (orphan'lar root altına).
-/// 3. Walk-up agregat: her dosya boyutu üst klasörlerine eklenir.
+/// Builds a full ScanTree from raw MFT entries:
+/// 1. Places the nodes; ROOT_RECORD guaranteed as synthetic.
+/// 2. Builds the child lists (orphans go under the root).
+/// 3. Walk-up aggregate: each file's size is added to its parent folders.
 ///
-/// Bölüm 6.4 — `user_rules` snapshot'ları built-in motoruna **öncelikli**
-/// olarak değerlendirilir. Eşleşme yoksa `safe_delete::match_rule` çağrılır.
+/// Chapter 6.4 — `user_rules` snapshots are evaluated **with priority**
+/// over the built-in engine. If nothing matches, `safe_delete::match_rule` is called.
 pub fn build_tree_with_user_rules(
     volume_id: String,
     raw: Vec<RawMftEntry>,
@@ -320,11 +320,11 @@ pub fn build_tree_with_user_rules(
     let mut nodes: HashMap<NodeId, Node> = HashMap::with_capacity(count + 1);
     let mut children: HashMap<NodeId, Vec<NodeId>> = HashMap::with_capacity(count / 8 + 1);
 
-    // 1. Düğüm yerleştirme — self-cycle (record == parent) root'a bağlanır
-    //    (Gemini review B7: eskiden parent=None yapıp düğümü görünmez
-    //    bırakıyorduk; artık orphan muamelesi görüp root altına rewiring).
-    //    Aynı zamanda Bölüm 6.4 (user rules öncelikli) + Bölüm 6.2 (built-in)
-    //    safe-to-delete kuralları uygulanır.
+    // 1. Node placement — a self-cycle (record == parent) is attached to
+    //    the root (Gemini review B7: we used to set parent=None and leave
+    //    the node invisible; now it is treated as an orphan and rewired
+    //    under the root). Chapter 6.4 (user rules first) + Chapter 6.2
+    //    (built-in) safe-to-delete rules are also applied.
     for e in &raw {
         let parent_opt = Some(e.parent_record_no);
 
@@ -361,7 +361,7 @@ pub fn build_tree_with_user_rules(
         );
     }
 
-    // Root sentetik düğüm garantisi.
+    // Root synthetic node guarantee.
     nodes.entry(ROOT_RECORD).or_insert(Node {
         id: ROOT_RECORD,
         parent: None,
@@ -375,8 +375,8 @@ pub fn build_tree_with_user_rules(
         modified_unix: 0,
     });
 
-    // 2. Orphan parent rewiring: bilinmeyen parent → ROOT_RECORD.
-    //    Aynı zamanda ROOT_RECORD'un kendi parent'ını None tutar.
+    // 2. Orphan parent rewiring: unknown parent → ROOT_RECORD.
+    //    Also keeps ROOT_RECORD's own parent as None.
     let known: std::collections::HashSet<NodeId> = nodes.keys().copied().collect();
     for node in nodes.values_mut() {
         if node.id == ROOT_RECORD {
@@ -384,8 +384,8 @@ pub fn build_tree_with_user_rules(
             continue;
         }
         match node.parent {
-            // Gemini review B7 — self-cycle (bozuk MFT) root'a bağlanır,
-            // düğüm erişilebilir kalır.
+            // Gemini review B7 — a self-cycle (corrupt MFT) is attached
+            // to the root; the node stays reachable.
             Some(p) if p == node.id => {
                 node.parent = Some(ROOT_RECORD);
             }
@@ -396,14 +396,14 @@ pub fn build_tree_with_user_rules(
         }
     }
 
-    // 3. Çocuk listesi — düzeltilmiş parent pointer'lardan oluşturulur.
+    // 3. Child list — built from the corrected parent pointers.
     for n in nodes.values() {
         if let Some(p) = n.parent {
             children.entry(p).or_default().push(n.id);
         }
     }
 
-    // 4. Sayım — sadece raw input'a göre, sentetik root sayılmaz.
+    // 4. Counting — based only on raw input; the synthetic root is not counted.
     let mut total_bytes = 0u64;
     let mut file_count = 0u64;
     let mut dir_count = 0u64;
@@ -416,13 +416,13 @@ pub fn build_tree_with_user_rules(
         }
     }
 
-    // 5. Walk-up aggregate. İki aşama (borrow checker):
+    // 5. Walk-up aggregate. Two phases (borrow checker):
     //    a) Snapshot (id, parent, data_size)
     //    b) Walk-up + mut update
-    // Gemini review B6 — karşılıklı parent döngülerinde (A↔B) eskiden aynı
-    //    boyut ~128 kez ekleniyordu (yalnız self-cycle korunuyordu). Artık
-    //    her yürüyüş kendi visited set'ini tutar — bir ancestor en fazla bir
-    //    kez eklenir.
+    // Gemini review B6 — in mutual parent cycles (A↔B) the same size used
+    //    to be added ~128 times (only self-cycles were guarded). From now
+    //    on, every walk keeps its own visited set — an ancestor is added
+    //    at most once.
     let snapshot: Vec<(NodeId, Option<NodeId>, u64)> = nodes
         .iter()
         .map(|(&id, n)| (id, n.parent, n.data_size))
@@ -464,7 +464,7 @@ pub fn build_tree_with_user_rules(
         dirs = dir_count,
         total_gb = total_bytes / 1_073_741_824,
         elapsed_ms = build_elapsed_ms,
-        "ScanTree kuruldu"
+        "ScanTree built"
     );
 
     ScanTree {
@@ -480,7 +480,7 @@ pub fn build_tree_with_user_rules(
     }
 }
 
-/// Belirli bir düğümün çocuklarını agregat boyuta göre azalan sırada N adet döner.
+/// Returns N children of a given node in descending order by aggregate size.
 pub fn top_consumers(tree: &ScanTree, parent: NodeId, limit: usize) -> Vec<Node> {
     let Some(child_ids) = tree.children.get(&parent) else {
         return Vec::new();
@@ -494,21 +494,21 @@ pub fn top_consumers(tree: &ScanTree, parent: NodeId, limit: usize) -> Vec<Node>
     out
 }
 
-/// Bölüm 9.6.3 — viewport-aware pencere sorgu anahtarı.
+/// Chapter 9.6.3 — viewport-aware window query key.
 #[derive(Debug, Clone, Copy, serde::Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[derive(Default)]
 pub enum SortKey {
-    /// Agregat boyut, azalan.
+    /// Aggregate size, descending.
     #[default]
     SizeDesc,
-    /// İsim, alfabetik artan.
+    /// Name, alphabetical ascending.
     NameAsc,
-    /// Direkt veri boyutu (sadece dosyalar için anlamlı), azalan.
+    /// Direct data size (only meaningful for files), descending.
     DataSizeDesc,
 }
 
-/// Bölüm 9.6.3 — `tree_window` Tauri komutunun döndüğü pencere.
+/// Chapter 9.6.3 — the window that the `tree_window` Tauri command returns.
 #[derive(Debug, Clone, Serialize)]
 pub struct WindowResult {
     pub parent_id: NodeId,
@@ -519,8 +519,8 @@ pub struct WindowResult {
     pub nodes: Vec<Node>,
 }
 
-/// Bölüm 9.6 — bir ebeveynin altındaki çocukları filtreli + sıralı + sayfalı dön.
-/// `min_size_bytes`: viewport pixel threshold (1px'den küçük render edilirse atla).
+/// Chapter 9.6 — returns a parent's children filtered + sorted + paginated.
+/// `min_size_bytes`: viewport pixel threshold (skip if it would render below 1px).
 pub fn window_query(
     tree: &ScanTree,
     parent: NodeId,
@@ -532,7 +532,7 @@ pub fn window_query(
     let parent_node = tree.nodes.get(&parent);
     let parent_name = parent_node
         .map(|n| n.name.clone())
-        .unwrap_or_else(|| "<bilinmeyen>".to_string());
+        .unwrap_or_else(|| "<unknown>".to_string());
     let parent_aggregate_size = parent_node.map(|n| n.aggregate_size).unwrap_or(0);
 
     let mut children: Vec<Node> = tree
@@ -554,8 +554,8 @@ pub fn window_query(
             children.sort_by_key(|n| std::cmp::Reverse(n.aggregate_size));
         }
         SortKey::NameAsc => {
-            // Gemini review B15 — karşıştırma başına String alloc yerine
-            // decorate-sort-undecorate (bir kez küçük harfe çevir).
+            // Gemini review B15 — decorate-sort-undecorate instead of a
+            // String alloc per comparison (lowercased once).
             children.sort_by_cached_key(|a| a.name.to_lowercase());
         }
         SortKey::DataSizeDesc => {
@@ -576,15 +576,15 @@ pub fn window_query(
     }
 }
 
-/// Düğümün tam Windows yolunu üretir: `C:\Projeler\d-space\main.rs`.
-/// Sentetik root ("<volume root>") gizlenir; `drive_letter` büyük harfe
-/// çevrilir. Bölüm 7 duplicate detector hash girişi olarak kullanılır.
+/// Produces the node's full Windows path: `C:\Projeler\d-space\main.rs`.
+/// The synthetic root ("<volume root>") is hidden; `drive_letter` is
+/// uppercased. Chapter 7 duplicate detector uses it as hash input.
 pub fn node_full_path(tree: &ScanTree, drive_letter: char, id: NodeId) -> Option<String> {
     let chain = node_path(tree, id);
     if chain.is_empty() {
         return None;
     }
-    // İlk eleman sentetik root ise atla.
+    // Skip the first element if it is the synthetic root.
     let parts: Vec<&str> = chain
         .iter()
         .filter(|n| n.id != tree.root_id)
@@ -597,8 +597,8 @@ pub fn node_full_path(tree: &ScanTree, drive_letter: char, id: NodeId) -> Option
     Some(format!("{}:\\{}", letter, parts.join("\\")))
 }
 
-/// Bir düğümden root'a kadar olan zinciri kök → düğüm sırasıyla döner.
-/// Breadcrumb için (Bölüm 15.1.2 progressive disclosure).
+/// Returns the chain from a node up to the root, in root → node order.
+/// For breadcrumbs (Chapter 15.1.2 progressive disclosure).
 pub fn node_path(tree: &ScanTree, id: NodeId) -> Vec<Node> {
     let mut path = Vec::new();
     let mut cur = Some(id);
@@ -624,7 +624,7 @@ pub fn node_path(tree: &ScanTree, id: NodeId) -> Vec<Node> {
     path
 }
 
-/// Geriye uyumlu — user rules olmadan MFT scan.
+/// Backward compatible — MFT scan without user rules.
 pub fn scan_to_tree_mft(drive: &str) -> crate::error::Result<(ScanSummary, ScanTree)> {
     scan_to_tree_mft_with_user_rules(drive, &[])
 }
@@ -638,7 +638,7 @@ pub fn scan_to_tree_mft_with_user_rules(
     chain_into_summary(drive, ScanStrategy::DirectRawVolume, collected, user_rules)
 }
 
-/// Geriye uyumlu — user rules olmadan fallback scan.
+/// Backward compatible — fallback scan without user rules.
 pub fn scan_to_tree_fallback(drive: &str) -> crate::error::Result<(ScanSummary, ScanTree)> {
     scan_to_tree_fallback_with_user_rules(drive, &[])
 }
@@ -657,12 +657,12 @@ pub fn scan_to_tree_fallback_with_user_rules(
     )
 }
 
-/// Bölüm 5.2A — yetkiye göre otomatik strateji seçimi. Geriye uyumlu.
+/// Chapter 5.2A — automatic strategy selection based on privilege. Backward compatible.
 pub fn scan_to_tree(drive: &str) -> crate::error::Result<(ScanSummary, ScanTree)> {
     scan_to_tree_with_user_rules(drive, &[])
 }
 
-/// Bölüm 5.2A + 6.4 — user rules ile birlikte otomatik strateji seçimi.
+/// Chapter 5.2A + 6.4 — automatic strategy selection together with user rules.
 pub fn scan_to_tree_with_user_rules(
     drive: &str,
     user_rules: &[UserRuleSnapshot],
@@ -670,40 +670,41 @@ pub fn scan_to_tree_with_user_rules(
     scan_to_tree_with_progress(drive, user_rules, None, None)
 }
 
-/// Bölüm 5.5 — MFT yolu yalnız NTFS sürücülerde anlamlı. ReFS/exFAT/FAT32
-/// volumelerde `ntfs` crate boot sector parse'ı veya MFT record okuması
-/// fail eder; pre_flight FS bilgisini önceden kontrol edip MFT denemesini
-/// atlayarak ~3-5 sn boş wait + log gürültüsü tasarrufu yapılır. UNC
-/// (`\\server\share`) girdisi burada reddedilir — UNC tarama için `scan_unc_path` komutu ayrılmıştır (Gemini review B2).
+/// Chapter 5.5 — the MFT path is only meaningful on NTFS drives. On
+/// ReFS/exFAT/FAT32 volumes the `ntfs` crate's boot sector parse or MFT
+/// record read fails; by checking FS info in pre_flight up front and
+/// skipping the MFT attempt, ~3-5 s of wasted wait + log noise is saved.
+/// UNC (`\\server\share`) input is rejected here — the `scan_unc_path`
+/// command is reserved for UNC scans (Gemini review B2).
 pub(crate) fn is_mft_compatible(drive: &str) -> bool {
-    // Gemini review B2 — UNC/radikal girdi asla sürücü harfine dönüşmesin.
+    // Gemini review B2 — UNC/radical input must never turn into a drive letter.
     if crate::volume::parse_drive_letter(drive).is_none() {
         return false;
     }
     match crate::volume::pre_flight_check(drive) {
         Ok(info) => {
             let fs = info.file_system.to_uppercase();
-            // Yalnız NTFS desteklenir. Boş string (BitLocker locked vb.)
-            // bilinmeyendir; konservatif olarak true döneriz, MFT denenir
-            // ve hatalı volume'de fallback log'lar.
+            // Only NTFS is supported. An empty string (BitLocker locked
+            // etc.) is unknown; we conservatively return true, MFT is tried
+            // and on a faulty volume the fallback logs appear.
             fs.is_empty() || fs == "NTFS"
         }
         Err(_) => true,
     }
 }
 
-/// Bölüm 5.2A + 6.4 + 9.6.5 — strateji seçimi + canlı progress callback +
-/// opsiyonel iptal flag'i. `cancel.load() == true` periyodik kontrol
-/// edildiğinde walker `Error::Scan("scan-cancelled")` döner.
+/// Chapter 5.2A + 6.4 + 9.6.5 — strategy selection + live progress callback +
+/// optional cancel flag. When the periodic check sees `cancel.load() == true`,
+/// the walker returns `Error::Scan("scan-cancelled")`.
 pub fn scan_to_tree_with_progress(
     drive: &str,
     user_rules: &[UserRuleSnapshot],
     progress_cb: Option<ProgressCb<'_>>,
     cancel: Option<&std::sync::atomic::AtomicBool>,
 ) -> crate::error::Result<(ScanSummary, ScanTree)> {
-    // Gemini review B2 — scan_full IPC sınırı: UNC/path girdi burada net
-    // hata verir (yanlış volume’ün MFT’sini tarayıp doğru sanma riski).
-    // UNC tarama için `scan_unc_path` komutu vardır.
+    // Gemini review B2 — scan_full IPC boundary: UNC/path input gets a
+    // clear error here (risk of scanning the wrong volume's MFT unnoticed).
+    // For UNC scans there is the `scan_unc_path` command.
     crate::volume::parse_drive_letter(drive).ok_or_else(|| {
         crate::error::Error::Scan(format!(
             "Invalid drive parameter: '{}' (UNC/path not supported here — use the UNC scan command)",
@@ -712,14 +713,14 @@ pub fn scan_to_tree_with_progress(
     })?;
     let mft_capable = is_mft_compatible(drive);
     if is_elevated() && mft_capable {
-        debug!("elevated process + NTFS — MFT yolu denenecek");
+        debug!("elevated process + NTFS — trying the MFT path");
         let collected = collect_mft_entries_with_progress(drive, progress_cb, cancel);
         match collected {
             Ok(c) => {
                 return chain_into_summary(drive, ScanStrategy::DirectRawVolume, c, user_rules)
             }
             Err(e) => {
-                // İptal hatasını fallback'e düşürme — direkt çevirici.
+                // Do not demote the cancel error to fallback — pass it through directly.
                 if let crate::error::Error::Scan(m) = &e {
                     if m == "scan-cancelled" {
                         return Err(e);
@@ -729,7 +730,7 @@ pub fn scan_to_tree_with_progress(
             }
         }
     } else if is_elevated() && !mft_capable {
-        // Bölüm 5.5 — ReFS/exFAT/FAT32 sürücüde MFT yolu denemiyoruz.
+        // Chapter 5.5 — we do not try the MFT path on ReFS/exFAT/FAT32 drives.
         debug!("elevated but non-NTFS — straight to fallback (chapter 5.5)");
     } else {
         debug!("not elevated — fallback path");
@@ -767,7 +768,7 @@ fn chain_into_summary(
     Ok((summary, tree))
 }
 
-/// Tauri yönetilen state — opsiyonel Arc<ScanTree>. Tek yazıcı, çok okur.
+/// Tauri-managed state — optional Arc<ScanTree>. Single writer, many readers.
 pub struct ScanTreeState {
     pub current: RwLock<Option<Arc<ScanTree>>>,
 }
@@ -814,7 +815,7 @@ mod tests {
         assert_eq!(tree.total_bytes, 650);
         assert_eq!(tree.nodes.get(&100).unwrap().aggregate_size, 600);
         assert_eq!(tree.nodes.get(&5).unwrap().aggregate_size, 650);
-        // top_consumers root → docs ilk
+        // top_consumers root → docs first
         let top = top_consumers(&tree, 5, 10);
         assert_eq!(top[0].id, 100);
         assert_eq!(top[1].id, 103);
@@ -822,7 +823,7 @@ mod tests {
 
     #[test]
     fn orphan_attached_to_root() {
-        // parent 999 sözlükte yok → root altı
+        // parent 999 not in the dictionary → under the root
         let raw = vec![r(200, 999, "lonely.dat", 128, false)];
         let tree = build_tree("vol".into(), raw);
         let root_children = tree.children.get(&ROOT_RECORD).unwrap();
@@ -832,8 +833,8 @@ mod tests {
 
     #[test]
     fn cycle_protection() {
-        // self-referencing entry — Gemini review B7: root'a rewiring edilir,
-        // düğüm erişilebilir kalır (eskiden parent=None ile görünmezdi).
+        // self-referencing entry — Gemini review B7: rewired to the root,
+        // the node stays reachable (previously invisible with parent=None).
         let raw = vec![r(300, 300, "weird", 64, false)];
         let tree = build_tree("vol".into(), raw);
         assert_eq!(tree.total_bytes, 64);
@@ -843,14 +844,14 @@ mod tests {
             root_children.contains(&300),
             "self-cycle must attach to root"
         );
-        // Walk-up döngüye girmez — root aggregate tam 64.
+        // Walk-up does not enter a cycle — root aggregate is exactly 64.
         assert_eq!(tree.nodes.get(&ROOT_RECORD).unwrap().aggregate_size, 64);
     }
 
     #[test]
     fn mutual_parent_cycle_does_not_inflate_aggregates() {
-        // Gemini review B6 — A↔B karşılıklı parent döngüsü: her ancestor
-        // en fazla bir kez sayılmalı (eski kod ~128 kez ekliyordu).
+        // Gemini review B6 — A↔B mutual parent cycle: each ancestor must
+        // be counted at most once (old code added it ~128 times).
         let raw = vec![
             r(400, 401, "a", 100, false),
             r(401, 400, "b", 0, true),
@@ -873,7 +874,7 @@ mod tests {
         ];
         let tree = build_tree("vol".into(), raw);
         let w = window_query(&tree, 5, SortKey::SizeDesc, 10, 0, None);
-        // Root altında 2 çocuk var: docs(agg 600) ve c.bin(50)
+        // There are 2 children under the root: docs(agg 600) and c.bin(50)
         assert_eq!(w.total_children, 2);
         assert_eq!(w.returned, 2);
         assert_eq!(w.nodes[0].id, 100);
@@ -931,7 +932,7 @@ mod tests {
 
     #[test]
     fn partial_view_top_n_sorted_desc() {
-        // Sprint 3.7 — root altında 5 düğüm, top_n=3 büyük üçünü vermeli (root + 2).
+        // Sprint 3.7 — 5 nodes under the root, top_n=3 must give the three largest (root + 2).
         let raw = vec![
             r(100, 5, "small", 100, false),
             r(101, 5, "medium", 500, false),
@@ -942,23 +943,23 @@ mod tests {
         let tree = build_tree("vol".into(), raw);
         let view = build_partial_view(&tree, 2, 3);
         assert_eq!(view.len(), 3);
-        // İlk eleman root.
+        // The first element is the root.
         assert_eq!(view[0].id, ROOT_RECORD);
         assert_eq!(view[0].depth, 0);
-        // Sonra azalan boyut sırası: huge(50000), big(5000).
+        // Then descending size order: huge(50000), big(5000).
         assert_eq!(view[1].name, "huge");
         assert_eq!(view[1].aggregate_size, 50_000);
         assert_eq!(view[2].name, "big");
         assert_eq!(view[2].aggregate_size, 5_000);
-        // medium / small / tiny dışarıda kaldı.
+        // medium / small / tiny are left out.
     }
 
     #[test]
     fn partial_view_respects_max_depth() {
         // root → docs/ → a.txt
         // root → bin/  → sub/  → deep.bin
-        // max_depth=1 → root + docs + bin. deep.bin (depth 3) yok.
-        // max_depth=2 → root + docs + bin + a.txt + sub. deep.bin (depth 3) yok.
+        // max_depth=1 → root + docs + bin. deep.bin (depth 3) not included.
+        // max_depth=2 → root + docs + bin + a.txt + sub. deep.bin (depth 3) not included.
         let raw = vec![
             r(100, 5, "docs", 0, true),
             r(101, 100, "a.txt", 200, false),
@@ -989,16 +990,16 @@ mod tests {
 
     #[test]
     fn partial_view_handles_empty_tree() {
-        // Hiç raw entry yok — sadece sentetik root garantili.
+        // No raw entries at all — only the synthetic root is guaranteed.
         let tree = build_tree("vol".into(), vec![]);
         let view = build_partial_view(&tree, 2, 50);
-        // Root tek başına dönmeli (aggregate_size=0 ama her zaman dahil).
+        // The root must return alone (aggregate_size=0 but always included).
         assert_eq!(view.len(), 1);
         assert_eq!(view[0].id, ROOT_RECORD);
         assert_eq!(view[0].depth, 0);
         assert_eq!(view[0].aggregate_size, 0);
 
-        // top_n=0 boş vector.
+        // top_n=0 → empty vector.
         let view0 = build_partial_view(&tree, 2, 0);
         assert!(view0.is_empty());
     }
@@ -1024,9 +1025,9 @@ mod tests {
             node_full_path(&tree, 'c', 102).unwrap(),
             r"C:\Projeler\d-space\main.rs"
         );
-        // root düğümünün kendisi → "C:\"
+        // the root node itself → "C:\"
         assert_eq!(node_full_path(&tree, 'C', tree.root_id).unwrap(), r"C:\");
-        // bilinmeyen id → None
+        // unknown id → None
         assert!(node_full_path(&tree, 'D', 9999).is_none());
     }
 }

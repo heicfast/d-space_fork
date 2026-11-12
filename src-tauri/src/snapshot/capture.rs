@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Snapshot capture — Master mimari Bölüm 8 (Time Machine).
+// Snapshot capture — Master architecture Chapter 8 (Time Machine).
 //
-// v0.1 ilkeler:
-//   * Sadece dizinler tablolanır (file sayısı çok yüksek; dir-only delta
-//     UI ihtiyaçlarını karşılar). v0.2'de Bölüm 8.6 streaming chunk
-//     formatı ile dosya seviyesi gelir.
-//   * path_hash = blake3(full_path_utf8_bytes) → BLOB 32B (Bölüm 8.5).
-//   * Tek transaction ile bulk insert (rusqlite Transaction).
-//   * Volume root path drive harfinden türetilir (`C:\\` gibi).
+// v0.1 principles:
+//   * Only directories are tabulated (the file count is very high; a
+//     dir-only delta meets the UI needs). File level arrives in v0.2 with
+//     the Chapter 8.6 streaming chunk format.
+//   * path_hash = blake3(full_path_utf8_bytes) → BLOB 32B (Chapter 8.5).
+//   * Bulk insert in a single transaction (rusqlite Transaction).
+//   * The volume root path is derived from the drive letter (like `C:\\`).
 
 use crate::error::{Error, Result};
 use crate::scan::tree::{node_path, ScanTree};
@@ -19,7 +19,7 @@ use serde::Serialize;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, info};
 
-/// Bir snapshot satırının özet meta'sı — UI/komut çıktısı.
+/// Summary meta of a snapshot row — UI/command output.
 #[derive(Debug, Clone, Serialize)]
 pub struct SnapshotMeta {
     pub id: SnapshotId,
@@ -31,13 +31,13 @@ pub struct SnapshotMeta {
     pub entry_count: u64,
 }
 
-/// `volume_id` formatlarından (`C:\\`, `\\?\C:`, `\\.\C:` vb.) sürücü
-/// harfini çıkar ve kanonik `C:\\` formatına döndür. Parse edilemezse
-/// tek `\\` döner (UNC/network case).
+/// Extracts the drive letter from `volume_id` formats (`C:\\`, `\\?\C:`,
+/// `\\.\C:`, etc.) and returns it in canonical `C:\\` form. If it cannot
+/// be parsed, returns a single `\\` (UNC/network case).
 ///
-/// `:` karakterinin hemen ÖNCESİNDEKİ ASCII harfi sürücü harfi olarak
-/// alır. Bu sayede `\\server\share` gibi UNC string'lerinde rastgele
-/// karakter `S:\\` üretmez.
+/// Takes the ASCII letter immediately BEFORE the `:` character as the
+/// drive letter. This way, UNC strings like `\\server\share` do not
+/// produce a random character `S:\\`.
 fn volume_root_prefix(volume_id: &str) -> String {
     let bytes = volume_id.as_bytes();
     for (i, b) in bytes.iter().enumerate() {
@@ -48,9 +48,9 @@ fn volume_root_prefix(volume_id: &str) -> String {
             }
         }
     }
-    // Gemini review B20 — UNC volume (drive harfi yok): ge\u00e7erli bir
-    // UNC k\u00f6k\u00fc d\u00f6nd\u00fcr ("\\\\server\\share" bi\u00e7iminde \u00e7ift backslash),
-    // tek "\" de\u011fil (ge\u00e7ersiz path \u00fcretiyordu).
+    // Gemini review B20 — UNC volume (no drive letter): return a valid
+    // UNC root (double backslash, in the form "\\\\server\\share"),
+    // not a single "\" (that produced an invalid path).
     let trimmed = volume_id.trim_end_matches('\\');
     if trimmed.starts_with("\\\\") || trimmed.starts_with("//") {
         return trimmed.replace('/', "\\");
@@ -58,8 +58,9 @@ fn volume_root_prefix(volume_id: &str) -> String {
     "\\".into()
 }
 
-/// Bir düğüm için root prefix + segmentleri "\\" ile birleşik tam Windows
-/// path string üretir. Sentetik `<volume root>` (chain[0]) atlanır.
+/// Produces the full Windows path string for a node — root prefix +
+/// segments joined with "\\". The synthetic `<volume root>` (chain[0]) is
+/// skipped.
 fn full_path_for_node(tree: &ScanTree, node_id: NodeId) -> Option<String> {
     let chain = node_path(tree, node_id);
     if chain.is_empty() {
@@ -81,12 +82,12 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-/// Bölüm 8 — mevcut `ScanTree`'den snapshot yakalar.
+/// Chapter 8 — captures a snapshot from the current `ScanTree`.
 ///
-/// `snapshots` tablosuna 1 satır, `snapshot_entries`'e **sadece dizinler**
-/// için N satır yazar (file_count → snapshots.file_count alanında saklanır
-/// ama snapshot_entries içine yazılmaz; v0.2'de streaming chunk formatı
-/// gelecek).
+/// Writes 1 row to the `snapshots` table and N rows to `snapshot_entries`
+/// **only for directories** (file_count → stored in the snapshots.file_count
+/// field but not written into snapshot_entries; the streaming chunk format
+/// arrives in v0.2).
 pub fn capture_snapshot(tree: &ScanTree, conn: &mut Connection) -> Result<SnapshotMeta> {
     let captured_at = now_unix();
     let total_size_bytes = tree.total_bytes;
@@ -123,9 +124,9 @@ pub fn capture_snapshot(tree: &ScanTree, conn: &mut Connection) -> Result<Snapsh
             )
             .map_err(|e| Error::Snapshot(format!("entry stmt prepare: {}", e)))?;
 
-        // Yalnızca dizinleri yaz. Aynı path_hash'a ait çift satır olmaması
-        // için (teorik blake3 çakışması ya da duplikasyon) PK ihlali olursa
-        // o satırı atla — pratikte 32B blake3 ile çakışma olmaz.
+        // Write only directories. So that there are no duplicate rows for
+        // the same path_hash (theoretical blake3 collision or duplication),
+        // skip the row on a PK violation — in practice 32B blake3 does not collide.
         for node in tree.nodes.values() {
             if !node.is_dir {
                 continue;
@@ -141,16 +142,16 @@ pub fn capture_snapshot(tree: &ScanTree, conn: &mut Connection) -> Result<Snapsh
                 hash_bytes,
                 path,
                 node.aggregate_size as i64,
-                // Gemini review B8 — Node.modified_unix zaten dolu (MFT
-                // $STANDARD_INFORMATION / FindFirstFile mtime); 0 placeholder
-                // kaldırıldı.
+                // Gemini review B8 — Node.modified_unix is already populated
+                // (MFT $STANDARD_INFORMATION / FindFirstFile mtime); the 0
+                // placeholder was removed.
                 node.modified_unix,
                 1i64,
             ]) {
                 Ok(_) => entry_count += 1,
                 Err(e) => {
-                    // PK çakışması (snapshot_id, path_hash) — debug seviyesinde
-                    // logla, snapshot'ı bozma.
+                    // PK collision (snapshot_id, path_hash) — log at debug
+                    // level, do not break the snapshot.
                     debug!(
                         node_id = node.id,
                         ?path,
@@ -185,18 +186,18 @@ pub fn capture_snapshot(tree: &ScanTree, conn: &mut Connection) -> Result<Snapsh
     })
 }
 
-/// Bölüm 8.4 — saklama politikası. Free tier default 90 gün, premium
-/// 365 gün; kullanıcı `settings.snapshot_retain_days` ile ezebilir.
+/// Chapter 8.4 — retention policy. Free tier default 90 days, premium
+/// 365 days; the user can override it with `settings.snapshot_retain_days`.
 pub const DEFAULT_RETAIN_DAYS: i64 = 90;
 pub const MIN_RETAIN_DAYS: i64 = 7;
 
-/// `captured_at < (now - retain_days * 86400)` olan snapshot'ları siler.
-/// `snapshot_entries` foreign key cascade ile otomatik temizlenir
-/// (migration 0001 `ON DELETE CASCADE`).
+/// Deletes snapshots where `captured_at < (now - retain_days * 86400)`.
+/// `snapshot_entries` is cleaned up automatically via the foreign key
+/// cascade (migration 0001 `ON DELETE CASCADE`).
 ///
-/// Dönüş: silinen snapshot sayısı. retain_days < MIN_RETAIN_DAYS olursa
-/// MIN_RETAIN_DAYS'e clamp edilir (kullanıcı yanlışlıkla 0 girip tüm
-/// snapshot'ları yok etmesin — Bölüm 22.6 dark pattern yok ilkesi).
+/// Returns: the number of deleted snapshots. If retain_days < MIN_RETAIN_DAYS,
+/// it is clamped to MIN_RETAIN_DAYS (so the user cannot accidentally enter 0
+/// and wipe out all snapshots — Chapter 22.6 no-dark-pattern principle).
 pub fn purge_old_snapshots(conn: &Connection, retain_days: i64) -> Result<u64> {
     let days = retain_days.max(MIN_RETAIN_DAYS);
     let cutoff = now_unix() - days * 86_400;
@@ -219,9 +220,9 @@ pub fn purge_old_snapshots(conn: &Connection, retain_days: i64) -> Result<u64> {
     Ok(n as u64)
 }
 
-/// Son 50 snapshot'ı captured_at DESC sırasında listeler. `dir_count` ve
-/// `entry_count` snapshot_entries'ten COUNT ile hesaplanır (snapshots
-/// tablosunda saklanmıyor — v0.1 schema).
+/// Lists the last 50 snapshots in captured_at DESC order. `dir_count` and
+/// `entry_count` are computed via COUNT from snapshot_entries (not stored
+/// in the snapshots table — v0.1 schema).
 pub fn list_snapshots(conn: &Connection) -> Result<Vec<SnapshotMeta>> {
     let mut stmt = conn
         .prepare(
@@ -245,9 +246,9 @@ pub fn list_snapshots(conn: &Connection) -> Result<Vec<SnapshotMeta>> {
                 captured_at_unix: r.get(2)?,
                 total_size_bytes: r.get::<_, i64>(3)? as u64,
                 file_count: r.get::<_, i64>(4)? as u64,
-                // Gemini review B19 — entry_count sentetik ROOT düğümünü
-                // de içerir; capture'ın döndüğü dir_count (root hariç)
-                // ile aynı olmak için 1 çıkarılır.
+                // Gemini review B19 — entry_count also includes the
+                // synthetic ROOT node; 1 is subtracted so it matches the
+                // dir_count returned by capture (root excluded).
                 dir_count: entry_count_u.saturating_sub(1),
                 entry_count: entry_count_u,
             })
@@ -294,8 +295,8 @@ mod tests {
         assert_eq!(volume_root_prefix(r"\\?\C:"), "C:\\");
         assert_eq!(volume_root_prefix(r"\\.\D:"), "D:\\");
         assert_eq!(volume_root_prefix("e:"), "E:\\");
-        // Gemini review B20 — UNC volume artık geçerli çift-backslash kök
-        // döndürür (eskiden geçersiz tek "\" üretiyordu).
+        // Gemini review B20 — a UNC volume now returns a valid
+        // double-backslash root (it previously produced an invalid single "\").
         assert_eq!(volume_root_prefix("//server/share"), r"\\server\share");
         assert_eq!(volume_root_prefix(r"\\fs01\projects"), r"\\fs01\projects");
     }
@@ -318,16 +319,17 @@ mod tests {
 
         let meta = capture_snapshot(&tree, &mut conn).expect("capture OK");
 
-        // 1 snapshots satırı
+        // 1 snapshots row
         let snap_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM snapshots", [], |r| r.get(0))
             .unwrap();
         assert_eq!(snap_count, 1);
 
-        // Tree'de 2 dir (docs, sub) + sentetik root = 3. Sentetik root da
-        // is_dir=true olarak yazılır (path = "C:\\"). dir_count alanı raw
-        // input'tan gelir, sentetik root sayılmaz → tree.dir_count = 2.
-        // Ama snapshot_entries'e is_dir=true olan her şey yazılır = 3 satır.
+        // 2 dirs in the tree (docs, sub) + synthetic root = 3. The synthetic
+        // root is also written with is_dir=true (path = "C\\"). The
+        // dir_count field comes from raw input, the synthetic root is not
+        // counted → tree.dir_count = 2. But everything with is_dir=true is
+        // written to snapshot_entries = 3 rows.
         let entries: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM snapshot_entries WHERE snapshot_id = ?1",
@@ -339,7 +341,7 @@ mod tests {
         assert_eq!(meta.entry_count, 3);
         assert_eq!(meta.file_count, 2, "a.txt + c.bin");
 
-        // Path inşası doğru mu — docs için "C:\\docs"
+        // Is path construction correct — "C:\\docs" for docs
         let path: String = conn
             .query_row(
                 "SELECT path FROM snapshot_entries
@@ -351,7 +353,7 @@ mod tests {
             .unwrap();
         assert_eq!(path, "C:\\docs");
 
-        // sub için "C:\\docs\\sub"
+        // "C:\\docs\\sub" for sub
         let sub_path: String = conn
             .query_row(
                 "SELECT path FROM snapshot_entries
@@ -362,7 +364,7 @@ mod tests {
             .unwrap();
         assert_eq!(sub_path, "C:\\docs\\sub");
 
-        // is_dir tümü 1
+        // is_dir is 1 for all
         let non_dir: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM snapshot_entries
@@ -373,7 +375,7 @@ mod tests {
             .unwrap();
         assert_eq!(non_dir, 0);
 
-        // path_hash 32 bayt
+        // path_hash is 32 bytes
         let hash_len: i64 = conn
             .query_row(
                 "SELECT LENGTH(path_hash) FROM snapshot_entries
@@ -389,8 +391,8 @@ mod tests {
     fn purge_old_snapshots_removes_only_old() {
         let conn = fresh_conn();
         let now = now_unix();
-        // 3 snapshot: now-100gün, now-30gün, şimdi (90 gün retention için
-        // yalnız ilki silinmeli).
+        // 3 snapshots: now-100days, now-30days, now (with 90-day retention
+        // only the first should be deleted).
         let ts_old = now - 100 * 86_400;
         let ts_recent = now - 30 * 86_400;
         let ts_fresh = now;
@@ -420,7 +422,7 @@ mod tests {
     fn purge_clamps_to_min_retain() {
         let conn = fresh_conn();
         let now = now_unix();
-        // 5 gün önce (MIN_RETAIN_DAYS=7 altında — silinmemeli).
+        // 5 days ago (below MIN_RETAIN_DAYS=7 — must not be deleted).
         let ts_recent = now - 5 * 86_400;
         conn.execute(
             "INSERT INTO snapshots
@@ -430,7 +432,7 @@ mod tests {
         )
         .unwrap();
 
-        // retain_days=1 kullanıcı yanlışlığını clamp et — 7 gün korunur.
+        // Clamp the user's retain_days=1 mistake — 7 days are preserved.
         let removed = purge_old_snapshots(&conn, 1).unwrap();
         assert_eq!(removed, 0, "MIN_RETAIN_DAYS clamp protection");
     }
@@ -455,7 +457,7 @@ mod tests {
             params![sid],
         )
         .unwrap();
-        // FK cascade için PRAGMA aktif olmalı
+        // PRAGMA must be active for the FK cascade
         conn.execute("PRAGMA foreign_keys = ON", []).unwrap();
 
         let removed = purge_old_snapshots(&conn, 90).unwrap();
@@ -473,7 +475,7 @@ mod tests {
     #[test]
     fn list_snapshots_orders_desc_and_limits_to_50() {
         let conn = fresh_conn();
-        // 3 snapshot manuel ekle, captured_at 100/200/300
+        // Manually add 3 snapshots, captured_at 100/200/300
         for ts in [100i64, 200, 300] {
             conn.execute(
                 "INSERT INTO snapshots
@@ -489,7 +491,7 @@ mod tests {
         assert_eq!(list[0].captured_at_unix, 300);
         assert_eq!(list[1].captured_at_unix, 200);
         assert_eq!(list[2].captured_at_unix, 100);
-        // entries yok → dir_count 0
+        // no entries → dir_count 0
         assert!(list.iter().all(|m| m.dir_count == 0));
     }
 
@@ -504,7 +506,7 @@ mod tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, meta.id);
         assert_eq!(list[0].volume_id, "D:\\");
-        // sentetik root + alpha + beta = 3 dir entry
+        // synthetic root + alpha + beta = 3 dir entries
         assert_eq!(list[0].entry_count, 3);
     }
 }
