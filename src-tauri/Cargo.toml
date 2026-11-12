@@ -1,6 +1,6 @@
 [package]
 name = "diskwizard"
-version = "0.4.0"
+version = "0.5.0"
 description = "DiskWizard — Windows data recovery wizard and safe disk cleanup"
 authors = ["DiskWizard contributors"]
 license = "GPL-3.0-or-later"

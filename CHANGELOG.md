@@ -5,6 +5,114 @@
 Spec v1.4 frozen (D-Space lineage). The implementation delta lives in
 `docs/DISCOVERY_LOG.md`.
 
+## [v0.5.0-beta] — 2026-11-12
+
+**Production hardening + the multi-filesystem engine.** The lost-files
+crash is fixed at five separate layers, SMART works on real hardware
+for the first time, GPT disks finally list their real partitions, and
+deleted-file recovery extends beyond NTFS to FAT12/16/32, exFAT and
+ext2/3/4 (USB sticks, SD cards and Linux partitions).
+
+### The crash (search for lost files) — fixed five ways
+
+- `panic = "abort"` removed from the release profile: a worker panic
+  used to kill the whole app silently; panics are now caught
+  (catch_unwind) and mapped to a Failed scan/job with the message, and
+  a panic hook logs every panic to the tracing sink
+- `dw_scan_start` / `dw_recover_start` no longer join their worker
+  threads — the invoke used to block for the entire scan (minutes on
+  big volumes) with the UI spinning; the id returns immediately
+- `deleted_dir_size` is cycle-safe (an in-progress sentinel): cyclic
+  deleted parent chains in a corrupt MFT used to recurse until stack
+  overflow
+- finalize consumes the collected scan instead of deep-cloning every
+  existing and deleted entry (2-3x peak memory removed); the deleted
+  map is published behind an Arc so per-query views share it
+- recovery jobs stream through a 4 MiB buffer with incremental blake3
+  (a multi-GiB deleted file could previously OOM the process whole);
+  verify re-reads stream too; the NTFS parse + $Bitmap are prepared
+  once per job instead of per file
+
+### SMART / disk health — rewritten
+
+The ATA passthrough had seven compounding defects (wrong CTL_CODE
+device type, shuffled struct layout, DataBufferOffset as an absolute
+pointer, 40 of 48 bytes copied so the command registers never reached
+the driver, wrong ATA flag constants, the task-file registers shifted
+one slot, no thresholds read) — every health query failed on every
+drive. Now:
+
+- correct ATA_PASS_THROUGH_EX (compile-time layout assert) + SMART
+  READ ATTRIBUTE THRESHOLDS merged (the below-threshold = bad verdict
+  is live)
+- NVMe health log page 0x02 via STORAGE_PROTOCOL_SPECIFIC_DATA (the
+  native path for NVMe — synthesized attribute table with spare,
+  percentage used, media errors, unsafe shutdowns)
+- IOCTL_STORAGE_PREDICT_FAILURE fallback for USB bridges
+- temperature via StorageTemperatureProperty, TRIM via
+  StorageDeviceTrimProperty (trimEnabled no longer always null)
+
+### Multi-filesystem recovery engines
+
+- **FAT12/16/32 + exFAT** (`src/fsfat`, adapted from SectorForge, MIT):
+  one BFS walk collects live entries and deleted entries (0xE5 / cleared
+  in-use bit) with LFN reconstruction and exFAT entry-set checksums;
+  deleted directories harvested from free clusters; exFAT allocation
+  bitmap as allocation authority; deleted runs contiguous-assumed from
+  the first cluster (classic FAT undelete model, honestly graded)
+- **ext2/3/4** (`src/fsext`, adapted from SectorForge, MIT): deleted
+  names harvested from directory slack; extents (ext4) + indirect
+  blocks (ext2) + inline data; per-group block bitmaps grade reuse;
+  wiped-pointer ext3/4 deletions surface as Poor with an honest
+  'try carving' model
+- read-back is engine-aware: FAT re-checks the directory slot byte,
+  ext re-checks the inode link count — records reused since the scan
+  fail loudly on every engine
+- lost-partition rescue covers NTFS/FAT/exFAT/ext: FAT classified by
+  cluster count (TestDisk rule), ext found by its superblock magic at
+  +1024, GPT now parsed from LBA 1 (was LBA 0 — dead code; no GPT disk
+  ever listed its real partitions) with backup-header fallback and
+  CRC-32 validation of header + entries
+- sessions carry the engine geometry (format DWSESS02; old sessions
+  fail with a clear re-scan message)
+
+### Recovery fidelity
+
+- deleted-ancestor chains are reconstructed: a file deleted together
+  with its folder recovers under its original directory structure
+  instead of being flattened to the destination root
+- keep_empty_folders is honored (folder-marker items); file_repair now
+  publishes the intact prefix of a partially overwritten file instead
+  of being a dead option
+- restored sessions get their cluster size back (deleted previews from
+  loaded sessions silently returned empty before)
+- registry eviction compares minted sequence numbers and never evicts
+  a running scan/job
+
+### UI
+
+- scan failures surface with a localized reason (toast + results-page
+  banner) — they retired silently before
+- 'Open location' context-menu item works in production mode
+  (it had no click handler); recovery destinations trust the
+  connector's overlap verdict instead of a hardcoded C: rule
+- duplicate finder's 'keep the newest' picks by engine-reported mtime
+- health page shows the real sector size and an honest unknown-wear
+  state; SD card page renders real device data instead of hardcoded
+  strings
+- **Quick Search** (new): the USN index finally has a surface — an
+  Everything-style name finder over scanned volumes
+- BitLocker-locked volumes show their lock state (not a misleading
+  permission error); hardware bus labels are English
+
+### Tests
+
+- 8 new engine tests (FAT walk/slot/allocation-reload, ext
+  walk/inode-reparse/reuse/hole-filling, GPT CRC vectors); 6 health
+  tests (thresholds, task-file order, layout, NVMe log + status
+  matrix); ATA/NVMe fixtures all host-independent
+- 197 frontend tests (i18n parity for the new surfaces); e2e still 12
+
 ## [v0.4.0-beta] — 2026-11-12
 
 **DiskWizard.** The Recovery Wizard React UI becomes the product

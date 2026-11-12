@@ -1,7 +1,7 @@
 {
   "name": "diskwizard",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "DiskWizard — Windows data recovery wizard and safe disk cleanup (Tauri 2 + React 19 + TypeScript, real-engine driven)",
   "type": "module",
   "license": "GPL-3.0-or-later",

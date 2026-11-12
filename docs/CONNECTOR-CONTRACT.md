@@ -69,7 +69,12 @@ guarantees, and exactly how the real bridge replaces the simulator.
 neededBytes? }` — **the overlap refusal is hard**: the UI cannot proceed
   when `allowed === false` with reason `overlap`.
 
-### Semantic notes for the real adapter (from the corpus research)
+### Semantic notes
+
+- `Volume.sectorSize` (bytes per sector, optional — 0/absent when the query fails) powers the health page's class tile.
+- `ScanState.failure` maps the engine's failure string through the shared error-code table (code + reasonKey); the UI surfaces it as a toast + results banner.
+- Duplicate groups carry `modifiedUnix` parallel to `paths` so 'keep the newest copy' is an engine-graded decision.
+  for the real adapter (from the corpus research)
 
 - Scan modes map to the reference's staged model: quick = FS index pass;
   deep = full structural walk; deep-carve adds the signature scanner.
@@ -128,7 +133,7 @@ The engine-integration session happened. Status of every domain:
 | Health               | `dw_disk_health` — SMART via ATA pass-through (SATA); NVMe degrades to `health-unavailable`                                                                                                                                                                           |
 | Repair               | `dw_repair_dry_run/apply/undo_log/undo` — NTFS boot/backup + $MFT/$MFTMirr checks, typed `REPAIR` consent, undo log, non-system volumes only                                                                                                                          |
 | System               | `dw_app_info`, `dw_mount_points`, `dw_validate_destination`, `dw_pick_directory` (native dialog), `dw_open_path`, `dw_disk_layouts`, `dw_special_folders`                                                                                                             |
-| Cleanup (new domain) | staging/undo/conflict/permanent-delete/expired, rules CRUD, duplicates (BLAKE3), snapshots + deltas, USN quick search, settings KV                                                                                                                                    |
+| Cleanup (new domain) | staging/undo/conflict/permanent-delete/expired, rules CRUD, duplicates (BLAKE3, groups carry `modifiedUnix` parallel to `paths`), snapshots + deltas, USN quick search (surfaced by the Quick Search page since v0.5), settings KV                                    |
 
 Contract extensions in this release: `CleanupDomain` (10th domain), the
 `network` device kind, `DiskLayout`/`LostPartition`/`SpecialFolders` on

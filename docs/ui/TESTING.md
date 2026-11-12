@@ -64,7 +64,7 @@ pnpm typecheck && pnpm lint && pnpm arch:lint && pnpm bundle:check
 - `ui-smoke.yml`: preview-server Playwright run (12 tests) + step screenshots +
   reports; a secondary job proves the Tauri debug bundle links
   (`tauri build --debug --no-bundle`) without `continue-on-error`.
-- `visual-compare.yml` (`workflow_dispatch`): runs `pnpm e2e` + `pnpm visual:compare`
+- Local only (`pnpm visual:compare`): renders and diffs key screens against the reference captures — no CI workflow; run it manually after visual changes
   and uploads the step screenshots and comparison summary artifact.
 - `release.yml` (tag `v*`): version match gate, NSIS bundle, SHA-256,
   unsigned-artifact disclosure in release notes.

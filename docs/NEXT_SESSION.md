@@ -2,17 +2,18 @@
 
 # DiskWizard — Next Session Roadmap
 
-> **Last updated:** 2026-11-12 — v0.4.0-beta: DiskWizard merge complete
-> (Recovery Wizard React UI + the real recovery engine, mock-backend
-> eradication, admin manifest, cleanup feature set), post-merge CI
-> stabilization, the full English runtime-string pass and the legacy
-> developer-comment translation pass (the tree is now fully English
-> except the deliberate UTF-16 decode fixture).
-> **Current version:** `v0.4.0-beta` (0.4.0 — heicfast/d-space_fork
+> **Last updated:** 2026-11-12 — v0.5.0-beta: production hardening +
+> multi-filesystem engines (FAT12/16/32, exFAT, ext2/3/4), the
+> lost-files crash fixed at five layers, SMART rewritten (NVMe +
+> thresholds + USB-bridge fallback), GPT parsing actually working,
+> deleted-directory-structure preservation, Quick Search UI. (v0.4's
+> legacy developer-comment translation pass completed — the tree is
+> fully English except the deliberate UTF-16 decode fixture.)
+> **Current version:** `v0.5.0-beta` (0.5.0 — heicfast/d-space_fork
 > channel)
-> **Target:** v0.5.0 → `v1.0.0-stable`
-> **Test count:** 206 Rust default / 215 with vss (+9 vss-gated) +
-> 197 frontend + 12 e2e
+> **Target:** `v1.0.0-stable`
+> **Test count:** ~230 Rust (incl. 8 multi-FS engine + 6 health tests,
+> +9 vss-gated) + 197 frontend + 12 e2e
 
 Open this document first thing in the next session. Flow:
 
@@ -22,7 +23,59 @@ Open this document first thing in the next session. Flow:
 
 ---
 
-## 🟢 NOW: v0.4.0-beta — DiskWizard merge + stabilization complete
+## 🟢 NOW: v0.5.0-beta — production hardening + multi-FS engines
+
+**v0.5.0 scope (delivered):**
+
+- **Crash eliminated** (search-for-lost-files): `panic=abort` removed,
+  panic hook + catch_unwind on scan/job threads, non-blocking scan and
+  recovery starts, cycle-safe deleted-dir sizing, streaming recovery
+  writes (4 MiB chunks, incremental blake3), single NTFS parse + bitmap
+  per job, Arc-shared deleted map, seq-ordered registry eviction,
+  session cluster_size restored.
+- **SMART works on real hardware for the first time**: correct
+  ATA_PASS_THROUGH_EX + threshold sector, NVMe health log (protocol-
+  specific query), predict-failure fallback (USB bridges), temperature
+  and TRIM queries.
+- **FAT12/16/32 + exFAT engine** (`src/fsfat`, adapted from
+  SectorForge/MIT — notice retained): deleted entries with LFN, exFAT
+  entry-set checksums, deleted-directory harvesting, allocation-bitmap
+  authority, slot re-check at read-back.
+- **ext2/3/4 engine** (`src/fsext`, adapted from SectorForge/MIT):
+  slack-name recovery, extents + indirect blocks + inline data, group
+  block-bitmap grading, inode link-count re-check at read-back.
+- **GPT parsing fixed** (was reading LBA 0 — dead code): LBA 1 +
+  backup header + CRC-32 of header and entries; FAT classified by
+  cluster count; ext detected by superblock magic; lost-partition
+  rescue covers NTFS/FAT/exFAT/ext.
+- **Recovery fidelity**: deleted-ancestor chain reconstruction
+  (original folder structure preserved), keep_empty_folders honored,
+  file_repair = intact-prefix publishing.
+- **UI**: failure surfacing (toast + banner), working Open-location,
+  connector-authoritative overlap verdict, mtime-based newest-copy,
+  real sector size + honest wear state, real SD-card data, Quick
+  Search page over the USN index, BitLocker-locked volume states.
+- Engine-aware sessions (DWSESS02; older sessions fail with a clear
+  re-scan message).
+
+**Next sprint (v0.5.x / v1.0 road):**
+
+1. VHDX fixture generator (phase 4.3 — needs a Windows admin
+   environment): synthetic NTFS + FAT32 + exFAT fixtures with known
+   deleted files, hash-verified recovery in CI.
+2. Raw carving engine (`raw-all` tree branch is contract-reserved):
+   signature scanner with structural end detection — the
+   SectorForge carver (95 formats, MIT) is the reference
+   implementation to adapt.
+3. NVMe pass-through reads + ReFS detection (honest unsupported
+   message for ReFS deleted recovery).
+4. ML scorer training path (phase 6.5, `ml-tflite` feature) — only if
+   a training dataset materializes; the rules engine stays the
+   default.
+5. Remaining ~1,200 Turkish developer comments in the legacy core
+   (runtime strings are all English).
+
+## ✅ v0.4.0-beta — DiskWizard merge + stabilization complete
 
 **v0.4.0 scope (delivered):**
 
@@ -124,7 +177,7 @@ git tag -l --sort=-creatordate | head -5
 
 ## 🎯 v1.0 success criteria
 
-- [ ] 200+ Rust tests + 150+ frontend tests (now 215 Rust incl. vss +
+- [x] 200+ Rust tests + 150+ frontend tests (now 215 Rust incl. vss +
       197 frontend + 12 e2e)
 - [x] All 5 pillars at v1 scope
 - [ ] EV-cert-signed MSI + NSIS (external purchase)
