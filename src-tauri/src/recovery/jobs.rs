@@ -457,10 +457,13 @@ fn run_job_inner<R: tauri::Runtime>(
                 _ => {
                     item.state = ItemState::Failed;
                     item.error_code = Some(code.clone());
-                    failed.push(JobFailureWire {
+                    failed.push(JobItemWire {
                         node_id: item.node_id.to_string(),
                         name: item.name.clone(),
-                        code,
+                        size_bytes: item.size_bytes,
+                        state: ItemState::Failed,
+                        error_code: Some(code),
+                        saved_as: None,
                     });
                     warn!(node = item.node_id, detail, "recovery item failed");
                 }
