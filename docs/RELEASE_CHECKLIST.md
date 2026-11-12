@@ -24,11 +24,11 @@ completed before a stable release.
 
 ### 1.1 Certificate type selection
 
-| Type                            | Cost      | SmartScreen behavior                                 | Recommendation     |
-| ------------------------------- | --------- | ---------------------------------------------------- | ------------------ |
-| **Self-signed**                 | free      | "publisher unknown" + red warning                    | Development only   |
-| **OV (Organization Validated)** | ~$200/yr  | "publisher unknown", 30–90 day reputation build-up   | v0.5 beta          |
-| **EV (Extended Validation)**    | ~$400/yr  | NO "publisher unknown" (instant trust)               | **Stable v1.0**    |
+| Type                            | Cost     | SmartScreen behavior                               | Recommendation   |
+| ------------------------------- | -------- | -------------------------------------------------- | ---------------- |
+| **Self-signed**                 | free     | "publisher unknown" + red warning                  | Development only |
+| **OV (Organization Validated)** | ~$200/yr | "publisher unknown", 30–90 day reputation build-up | v0.5 beta        |
+| **EV (Extended Validation)**    | ~$400/yr | NO "publisher unknown" (instant trust)             | **Stable v1.0**  |
 
 EV certificate providers: DigiCert, Sectigo, GlobalSign, SSL.com. EV
 comes with an HSM-bound token (USB dongle or cloud HSM); the private
@@ -107,12 +107,12 @@ as a separate installation).
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/heicfast/d-space_fork/releases/latest/download/latest.json"
+        "https://github.com/heicfast/d-space_fork/releases/latest/download/latest.json",
       ],
       "pubkey": "<real Ed25519 public key — set>",
-      "windows": { "installMode": "passive" }
-    }
-  }
+      "windows": { "installMode": "passive" },
+    },
+  },
 }
 ```
 
@@ -192,8 +192,8 @@ Manual checklist before pushing any release tag (`v*.*.*`):
 - [ ] `pnpm build` error-free (tsc + vite)
 - [ ] `pnpm bundle:check` within budget
 - [ ] Version gate: tag semver core equals `tauri.conf.json` version
-- [ ] `cargo audit` (v0.5) — `cargo install cargo-audit && cargo
-      audit` zero vulnerabilities
+- [ ] `cargo audit` (v0.5) — zero vulnerabilities (install via
+      `cargo install cargo-audit`)
 - [ ] Bundle size delta < 5% vs the previous release
 - [ ] `docs/DISCOVERY_LOG.md` current
 - [ ] Manual smoke test: install (UAC prompt) → scan (quick + full)

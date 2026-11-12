@@ -64,13 +64,13 @@ Open this document first thing in the next session. Flow:
 
 ## 🟡 v0.4.0 → v0.5.0 road
 
-| Sprint                | Scope                                                                                                                                                                        | Size       |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| **4.3** Test pyramid  | Synthetic NTFS VHDX fixture generator + chapter 20.3 critical test cases (1M+ node treemap render, 100%-full-disk 4-tier fallback, migration rollback). Target 200+ Rust tests | ~500 lines |
-| **6.5** ML Tier 2     | TFLite model training (path/ext/size/age → 0-100 score) + real TractMlScorer impl + ml_scores cache validation                                                               | ~400 lines |
-| **Perf tour**         | MFT walker rayon parallel parse + duplicate Criterion benchmark harness (100 GB < 60 s target, chapter 7.4)                                                                   | ~300 lines |
-| **NVMe health**       | NVMe SMART/health-log read path (currently ATA pass-through only; NVMe degrades honestly to health-unavailable)                                                               | ~200 lines |
-| **webdriver E2E**     | `cargo install tauri-driver` + `pnpm tauri build --debug` + move the webdriver project into the required check                                                                | ~150 lines |
+| Sprint               | Scope                                                                                                                                                                          | Size       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| **4.3** Test pyramid | Synthetic NTFS VHDX fixture generator + chapter 20.3 critical test cases (1M+ node treemap render, 100%-full-disk 4-tier fallback, migration rollback). Target 200+ Rust tests | ~500 lines |
+| **6.5** ML Tier 2    | TFLite model training (path/ext/size/age → 0-100 score) + real TractMlScorer impl + ml_scores cache validation                                                                 | ~400 lines |
+| **Perf tour**        | MFT walker rayon parallel parse + duplicate Criterion benchmark harness (100 GB < 60 s target, chapter 7.4)                                                                    | ~300 lines |
+| **NVMe health**      | NVMe SMART/health-log read path (currently ATA pass-through only; NVMe degrades honestly to health-unavailable)                                                                | ~200 lines |
+| **webdriver E2E**    | `cargo install tauri-driver` + `pnpm tauri build --debug` + move the webdriver project into the required check                                                                 | ~150 lines |
 
 ---
 

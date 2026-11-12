@@ -11,15 +11,15 @@
 
 ## 1. Locked GitHub metadata
 
-| Field              | Value                                                                                                                                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Owner/Repo**     | `heicfast/d-space_fork`                                                                                                                                                                          |
-| **Visibility**     | public                                                                                                                                                                                           |
-| **Default branch** | `main`                                                                                                                                                                                           |
-| **License (SPDX)** | `GPL-3.0` (or-later)                                                                                                                                                                             |
+| Field              | Value                                                                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Owner/Repo**     | `heicfast/d-space_fork`                                                                                                                                                                                                  |
+| **Visibility**     | public                                                                                                                                                                                                                   |
+| **Default branch** | `main`                                                                                                                                                                                                                   |
+| **License (SPDX)** | `GPL-3.0` (or-later)                                                                                                                                                                                                     |
 | **Description**    | `Windows data recovery wizard and safe disk cleanup — raw NTFS recovery engine, MFT-fast scanning, 0-100 safe-to-delete scoring, staging+undo guarantee with cross-volume two-phase commit. Tauri v2 + React 19 + Rust.` |
-| **Homepage**       | `https://github.com/heicfast/d-space_fork/releases`                                                                                                                                              |
-| **Topics (20)**    | `blake3, data-recovery, developer-tools, disk-analyzer, disk-space, disk-usage, filesystem, mft, ntfs, open-source, rust, safe-delete, sqlite, staging, storage, tauri, tauri-v2, undo, react, windows` |
+| **Homepage**       | `https://github.com/heicfast/d-space_fork/releases`                                                                                                                                                                      |
+| **Topics (20)**    | `blake3, data-recovery, developer-tools, disk-analyzer, disk-space, disk-usage, filesystem, mft, ntfs, open-source, rust, safe-delete, sqlite, staging, storage, tauri, tauri-v2, undo, react, windows`                  |
 
 When any of this changes, update the table and mirror it to the remote.
 

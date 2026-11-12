@@ -371,7 +371,7 @@ plugin is enabled; future releases can ship signed.
   click opens the paragraph. Permanently visible intro paragraphs
   removed.
 - Three-column workspace (Snapshot | Duplicate | Detail) side by side
-  >1600px; two columns 960–1600px; single column <960.
+  > 1600px; two columns 960–1600px; single column <960.
 - Live sunburst: Tableau 10 palette + SVG radial-gradient gloss +
   drop shadow → a light 3D feel. Hover scale 1.025 + brightness.
   Click → selected wedge halo + detail chip in the lower panel.
@@ -484,8 +484,7 @@ sprint).
 - Progressive disclosure, 3 levels (summary · expand · advanced)
 - Keyboard-first: Ctrl+R, Ctrl+1-4, Backspace, Delete, Ctrl+Z,
   Ctrl+F, Ctrl+?
-- Onboarding 3 slides + Fast/Standard mode choice (chapters 15.3 +
-  37)
+- Onboarding 3 slides + Fast/Standard mode choice (chapters 15.3 + 37)
 - System tray icon + menu (chapter 13.1)
 - Conflict / permanent-delete modals
 
