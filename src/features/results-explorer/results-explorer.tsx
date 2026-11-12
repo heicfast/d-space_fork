@@ -18,7 +18,7 @@ import {
   UploadIcon,
   XIcon,
 } from 'lucide-react';
-import { useCountResults, useResultsPages, useResultTree } from '@/queries/results';
+import { useCountResults, useResultTree, useResultsPages } from '@/queries/results';
 import { useSaveSession } from '@/queries/sessions';
 import { useConnectorMode } from '@/queries/dev';
 import { useFilterStore, useSortStore, resolveFilter } from '@/stores/filter-store';
@@ -31,6 +31,9 @@ import { ProgressGauge } from '@/components/ui/progress';
 import { ResultsTree } from '@/components/ui/results-tree';
 import { VirtualFileList } from '@/components/ui/virtual-file-list';
 import { Segmented } from '@/components/ui/stepper';
+import { MapIcon } from 'lucide-react';
+import { SizeMap } from '@/components/ui/size-map';
+import { useStagePath } from '@/queries/cleanup';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
@@ -76,6 +79,7 @@ export function ResultsExplorer({
   const selection = useSelectionStore();
   const ui = useUiStore();
   const saveSession = useSaveSession(scanId);
+  const stagePath = useStagePath();
   const connectorMode = useConnectorMode();
 
   const [filterBarOpen, setFilterBarOpen] = React.useState(false);
@@ -93,6 +97,7 @@ export function ResultsExplorer({
   const sort = { field: sortStore.field, direction: sortStore.direction };
   const pages = useResultsPages(scanId, filterPayload, sort);
   const rootTree = useResultTree(scanId, null, filter.treeMode);
+  const mapTree = useResultTree(scanId, filter.treeNodeId, 'path');
   const countQuery = useCountResults(scanId, filterPayload);
 
   const rows = React.useMemo(
@@ -113,6 +118,13 @@ export function ResultsExplorer({
   }, [activeNodeId]);
 
   const rowHeight = ui.viewMode === 'details' ? 42 : 96;
+  const stageTarget = React.useMemo(() => {
+    const single =
+      selection.mode === 'ids' && selection.ids.size === 1 ? [...selection.ids][0] : null;
+    const id = single ?? activeNodeId;
+    const node = id !== null ? rows.find((r) => r.id === id) : undefined;
+    return node && node.origin === 'existing' && node.path ? node.path : null;
+  }, [selection, activeNodeId, rows]);
   const selectionSnapshot = React.useMemo(
     () => ({
       mode: selection.mode,
@@ -303,6 +315,12 @@ export function ResultsExplorer({
               icon: LayoutGridIcon,
               srLabel: t('results.views.icons'),
             },
+            {
+              value: 'map',
+              label: '',
+              icon: MapIcon,
+              srLabel: t('results.mapTab'),
+            },
           ]}
         />
         <Button
@@ -410,6 +428,14 @@ export function ResultsExplorer({
                     }
                     onAction={filter.hasActiveFilters() ? () => filter.reset() : undefined}
                   />
+                ) : ui.viewMode === 'map' ? (
+                  <SizeMap
+                    nodes={mapTree.data?.nodes ?? []}
+                    onDrill={(node) => {
+                      setActiveNodeId(null);
+                      filter.setTreeNode(node.id);
+                    }}
+                  />
                 ) : (
                   <VirtualFileList
                     scanId={scanId}
@@ -494,6 +520,20 @@ export function ResultsExplorer({
               <ContextMenuItem onClick={() => onSmartSelect()} disabled={smartSelecting}>
                 <SparklesIcon aria-hidden />
                 {t('results.context.smartSelect')}
+              </ContextMenuItem>
+              <ContextMenuItem
+                disabled={!stageTarget}
+                title={stageTarget ? undefined : t('results.contextStage')}
+                onClick={() => {
+                  if (!stageTarget) return;
+                  stagePath.mutate(stageTarget, {
+                    onSuccess: () => toast.success(t('results.contextStaged')),
+                    onError: () => toast.error(t('results.stageFailed')),
+                  });
+                }}
+              >
+                <Trash2Icon aria-hidden />
+                {t('results.contextStage')}
               </ContextMenuItem>
               <ContextMenuSeparator />
               <ContextMenuItem

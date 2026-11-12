@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from '@/app/theme';
@@ -76,34 +76,29 @@ describe('reference UI surfaces and sidebar', () => {
     expect(await screen.findByText(/s\.m\.a\.r\.t\. attributes/i)).toBeVisible();
   });
 
-  it('renders File Repair directly on Add Files Dropzone -> Queue & Repair All', () => {
+  it('renders Volume Repair (the real workbench; the mock per-file dropzone is gone)', () => {
     wrap(<RepairPage />, '/repair');
+    expect(screen.getByRole('heading', { name: /volume repair/i })).toBeVisible();
     expect(
-      screen.getByRole('heading', {
-        name: /repair corrupted videos, photos and documents/i,
-      }),
+      screen.getByText(/read-only checks run against the volume structures/i),
     ).toBeVisible();
-    expect(
-      screen.getByText(/click or drag files from your local disk to start the repair/i),
-    ).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: /add files/i }));
-    expect(screen.getByText('WinMemoryCleaner (1).exe')).toBeVisible();
-    expect(screen.getByRole('button', { name: /repair all/i })).toBeVisible();
+    // No mock queue surfaces anywhere.
+    expect(screen.queryByText(/add files/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /repair all/i })).toBeNull();
   });
 
-  it('renders Lost Partition Rescue directly on Disk Selection -> Smart Partition Scan Completed', async () => {
+  it('renders Lost Partition Rescue from real disk layouts (no canned fixtures)', async () => {
     wrap(<LostPartitionPage />, '/lost-partition');
     expect(
       await screen.findByRole('heading', { name: /lost partition rescue/i }),
     ).toBeVisible();
-    expect(
-      screen.getByText(/choose a disk to start searching for lost partition\(s\)/i),
-    ).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: /search for lost partition/i }));
-    expect(
-      screen.getByRole('heading', { name: /smart partition scan completed/i }),
-    ).toBeVisible();
-    expect(screen.getByRole('button', { name: /try data recovery/i })).toBeVisible();
+    // The mock connector serves Disk 2 with one lost NTFS volume — the
+    // card renders it with a scan button targeting the lp: id.
+    expect(await screen.findByText(/^Disk 2$/)).toBeVisible();
+    const scanBtn = screen.getByRole('button', { name: /try data recovery/i });
+    expect(scanBtn).toBeVisible();
+    // The canned step-2 table is gone.
+    expect(screen.queryByText(/smart partition scan completed/i)).toBeNull();
   });
 
   it('renders Scan Snapshot page', () => {

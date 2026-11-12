@@ -42,3 +42,21 @@ export function usePickDirectory() {
       connector.system.pickDirectory(hint),
   });
 }
+
+/** Physical disk layouts incl. lost-partition candidates (admin required). */
+export function useDiskLayouts() {
+  return useQuery({
+    queryKey: ['system', 'disk-layouts'] as const,
+    queryFn: () => connector.system.listDiskLayouts(),
+    staleTime: 60_000,
+  });
+}
+
+/** Well-known quick-target folders (Recycle Bin, Desktop, ...). */
+export function useSpecialFolders() {
+  return useQuery({
+    queryKey: ['system', 'special-folders'] as const,
+    queryFn: () => connector.system.getSpecialFolders(),
+    staleTime: Infinity,
+  });
+}

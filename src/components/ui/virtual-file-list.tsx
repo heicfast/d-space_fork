@@ -353,6 +353,7 @@ export function VirtualFileList({
                     <span className="truncate font-medium" title={node.name}>
                       {node.name}
                     </span>
+                    <CleanupScorePill node={node} />
                   </div>
                   <div
                     role="gridcell"
@@ -498,5 +499,25 @@ function IconTile({ scanId, node }: { scanId: string; node: ResultNode }): React
     <div className="flex h-[82px] w-[112px] shrink-0 items-center justify-center rounded-[4px] bg-[#F2F6FC] dark:bg-surface-tint">
       <FileIconFor node={node} />
     </div>
+  );
+}
+
+/** Cleanup score pill (D-Space intelligence layer): rendered only when the
+ *  engine attached a cleanupScore attribute to an existing file. */
+function CleanupScorePill({ node }: { node: ResultNode }): React.JSX.Element | null {
+  const raw = node.attributes?.cleanupScore;
+  if (raw === undefined) return null;
+  const score = Number.parseInt(raw, 10);
+  if (!Number.isFinite(score)) return null;
+  const color =
+    score <= 30 ? '#DC2626' : score <= 60 ? '#D97706' : score <= 85 ? '#16A34A' : '#1677FF';
+  return (
+    <span
+      className="ml-1.5 inline-flex h-4 shrink-0 items-center rounded-full px-1.5 text-[10px] font-semibold leading-none text-white"
+      style={{ backgroundColor: color }}
+      title={node.attributes?.cleanupReason ?? undefined}
+    >
+      {score}
+    </span>
   );
 }

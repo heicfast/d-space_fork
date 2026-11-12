@@ -175,7 +175,31 @@ export class NodeSpace {
     this.dirIndexById.set('root', root);
     this.childrenOf.set('root', []);
 
-    let created = 1;
+    // Guaranteed quick-target directories (the real engine resolves these
+    // from the volume; the mock mirrors them so scoped scans succeed):
+    // $Recycle.Bin at the root and Desktop under Users\dev.
+    const addUserDir = (name: string, parentId: string, depth: number): DirectoryRecord => {
+      const rec: DirectoryRecord = {
+        // Same `d{index}` scheme as the random skeleton — resolveScope
+        // parses dir ids numerically.
+        id: `d${this.dirs.length}`,
+        parentId,
+        name,
+        depth,
+        fileCount: 0,
+        sizeBytes: 0,
+      };
+      this.dirs.push(rec);
+      this.dirIndexById.set(rec.id, rec);
+      this.childrenOf.get(parentId)!.push(rec.id);
+      this.childrenOf.set(rec.id, []);
+      return rec;
+    };
+    const users = addUserDir('Users', 'root', 1);
+    const dev = addUserDir('dev', users.id, 2);
+    addUserDir('Desktop', dev.id, 3);
+    addUserDir('$Recycle.Bin', 'root', 1);
+    let created = 5;
     let guard = 0;
     while (created < dirCount && guard < dirCount * 6) {
       guard++;

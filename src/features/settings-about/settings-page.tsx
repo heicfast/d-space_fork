@@ -2,12 +2,17 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTheme, type ThemeMode } from '@/app/theme';
 import { useAppInfo, useDriverStatus } from '@/queries/system';
+import { useAddRule, useDeleteRule, useRules, useToggleRule } from '@/queries/cleanup';
 import { exportLogText, getLogBuffer } from '@/lib/logger';
 import { setLocale, SUPPORTED_LOCALES, type AppLocale } from '@/i18n';
+import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Segmented } from '@/components/ui/stepper';
+import { Switch } from '@/components/ui/switch';
+import { Hint } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,7 +22,8 @@ import {
 } from '@/components/ui/menus';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
-import { PaletteIcon } from 'lucide-react';
+import { FolderIcon, InfoIcon, PaletteIcon, TagIcon, Trash2Icon } from 'lucide-react';
+import type { CleanupRule } from '@/connector/contract';
 import { AboutDialog } from './about-dialog';
 
 /** Picker order: app modes wrapping the adopted palettes (ADR-007). */
@@ -172,6 +178,16 @@ export function SettingsPage(): React.JSX.Element {
         </div>
       </section>
 
+      <section className="mb-8" aria-labelledby="settings-cleanup-rules">
+        <h2 id="settings-cleanup-rules" className="mb-3 text-base font-semibold">
+          {t('rulesSection.title')}
+        </h2>
+        <div className="space-y-4 rounded-lg border border-border bg-surface p-4">
+          <p className="text-xs text-foreground-secondary">{t('rulesSection.intro')}</p>
+          <CleanupRulesSection />
+        </div>
+      </section>
+
       <section aria-labelledby="settings-about">
         <div className="mb-3 flex items-center justify-between">
           <h2 id="settings-about" className="text-base font-semibold">
@@ -227,6 +243,257 @@ export function SettingsPage(): React.JSX.Element {
         </div>
       </section>
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
+    </div>
+  );
+}
+
+/** Cleanup-score tiers shown by the preview pill and on every rule row. */
+type RuleTier = 'danger' | 'caution' | 'safe' | 'cache';
+
+/** Tier pill washes per the cleanup score legend (hexes from the spec). */
+const RULE_TIER_PILL: Record<RuleTier, string> = {
+  danger: 'bg-[#DC2626]/10 text-[#DC2626] dark:bg-[#DC2626]/25 dark:text-[#FCA5A5]',
+  caution: 'bg-[#D97706]/10 text-[#D97706] dark:bg-[#D97706]/25 dark:text-[#FCD34D]',
+  safe: 'bg-[#16A34A]/10 text-[#16A34A] dark:bg-[#16A34A]/25 dark:text-[#86EFAC]',
+  cache: 'bg-[#1677FF]/10 text-[#1677FF] dark:bg-[#1677FF]/20 dark:text-[#93C5FD]',
+};
+
+/** Tier boundaries from rulesSection.scoreHint: 0–30 / 31–60 / 61–85 / 86–100. */
+function tierForScore(score: number): RuleTier {
+  if (score <= 30) return 'danger';
+  if (score <= 60) return 'caution';
+  if (score <= 85) return 'safe';
+  return 'cache';
+}
+
+function RuleTierPill({ score }: { score: number }): React.JSX.Element {
+  const { t } = useTranslation();
+  const tier = tierForScore(score);
+  // Tier label via ternary literals INSIDE t() — a Record indirection would
+  // hide the four rulesSection.tier* keys from the T12 i18n sweep.
+  const label = t(
+    tier === 'danger'
+      ? 'rulesSection.tierDanger'
+      : tier === 'caution'
+        ? 'rulesSection.tierCaution'
+        : tier === 'safe'
+          ? 'rulesSection.tierSafe'
+          : 'rulesSection.tierCache',
+  );
+  return (
+    <span
+      className={cn(
+        'inline-flex h-7 shrink-0 items-center rounded-full px-2.5 text-2xs font-semibold leading-none',
+        RULE_TIER_PILL[tier],
+      )}
+    >
+      {label}
+    </span>
+  );
+}
+
+/** Add-rule form + user rules list (runs before built-in scoring on scans). */
+function CleanupRulesSection(): React.JSX.Element {
+  const { t } = useTranslation();
+  const rules = useRules();
+  const addRule = useAddRule();
+  const toggleRule = useToggleRule();
+  const deleteRule = useDeleteRule();
+
+  const [pattern, setPattern] = React.useState('');
+  const [patternType, setPatternType] = React.useState<'name' | 'extension'>('name');
+  const [score, setScore] = React.useState('70');
+  const [explanation, setExplanation] = React.useState('');
+
+  const scoreValue = Number(score);
+  const patternValid = pattern.trim().length > 0;
+  const scoreValid =
+    score.trim() !== '' && Number.isFinite(scoreValue) && scoreValue >= 0 && scoreValue <= 100;
+  const canAdd = patternValid && scoreValid && !addRule.isPending;
+
+  const handleAdd = (): void => {
+    if (!canAdd) return;
+    addRule.mutate(
+      {
+        pattern: pattern.trim(),
+        patternType,
+        score: Math.round(scoreValue),
+        explanation: explanation.trim(),
+      },
+      {
+        onSuccess: () => {
+          setPattern('');
+          setExplanation('');
+        },
+        onError: (err) => toast.error(err instanceof Error ? err.message : t('errors.unknown')),
+      },
+    );
+  };
+
+  const ruleItems = rules.data ?? [];
+
+  return (
+    <div className="space-y-4">
+      {/* Add-rule form */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-48 flex-1">
+            <Label htmlFor="rule-pattern">{t('rulesSection.pattern')}</Label>
+            <Input
+              id="rule-pattern"
+              className="mt-1.5"
+              value={pattern}
+              autoComplete="off"
+              placeholder={patternType === 'extension' ? '.tmp' : 'Thumbs'}
+              onChange={(e) => setPattern(e.target.value)}
+            />
+          </div>
+          <div>
+            <Segmented
+              ariaLabel={t('rulesSection.pattern')}
+              value={patternType}
+              onChange={(v) => setPatternType(v)}
+              options={[
+                { value: 'name', label: t('rulesSection.patternName') },
+                { value: 'extension', label: t('rulesSection.patternExtension') },
+              ]}
+            />
+          </div>
+          <div className="w-24">
+            <Label htmlFor="rule-score" className="gap-1">
+              {t('rulesSection.score')}
+              <Hint text={t('rulesSection.scoreHint')}>
+                <span
+                  className="inline-flex cursor-help items-center text-foreground-secondary"
+                  aria-label={t('rulesSection.scoreHint')}
+                >
+                  <InfoIcon className="size-3.5" aria-hidden />
+                </span>
+              </Hint>
+            </Label>
+            <div className="mt-1.5 flex items-center gap-2">
+              <Input
+                id="rule-score"
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={score}
+                aria-invalid={!scoreValid}
+                onChange={(e) => setScore(e.target.value)}
+              />
+              {scoreValid ? <RuleTierPill score={scoreValue} /> : null}
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-48 flex-1">
+            <Label htmlFor="rule-explanation">{t('rulesSection.explanation')}</Label>
+            <Input
+              id="rule-explanation"
+              className="mt-1.5"
+              value={explanation}
+              autoComplete="off"
+              onChange={(e) => setExplanation(e.target.value)}
+            />
+          </div>
+          <Button
+            variant="primary"
+            loading={addRule.isPending}
+            disabled={!canAdd}
+            onClick={handleAdd}
+          >
+            {t('rulesSection.add')}
+          </Button>
+        </div>
+      </div>
+
+      {/* Rules list */}
+      {rules.isLoading ? (
+        <p className="text-sm text-foreground-secondary">{t('common.loading')}</p>
+      ) : rules.isError ? (
+        <p className="text-sm text-danger">
+          {rules.error instanceof Error ? rules.error.message : t('errors.unknown')}
+        </p>
+      ) : ruleItems.length === 0 ? (
+        <p className="text-sm text-foreground-secondary">{t('rulesSection.empty')}</p>
+      ) : (
+        <ul className="space-y-2">
+          {ruleItems.map((rule) => (
+            <li key={rule.id}>
+              <RuleRow
+                rule={rule}
+                onToggle={(enabled) =>
+                  toggleRule.mutate(
+                    { id: rule.id, enabled },
+                    {
+                      onError: (err) =>
+                        toast.error(err instanceof Error ? err.message : t('errors.unknown')),
+                    },
+                  )
+                }
+                onDelete={() =>
+                  deleteRule.mutate(rule.id, {
+                    onError: (err) =>
+                      toast.error(err instanceof Error ? err.message : t('errors.unknown')),
+                  })
+                }
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function RuleRow({
+  rule,
+  onToggle,
+  onDelete,
+}: {
+  rule: CleanupRule;
+  onToggle: (enabled: boolean) => void;
+  onDelete: () => void;
+}): React.JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface-muted px-3.5 py-2.5">
+      {rule.patternType === 'extension' ? (
+        <TagIcon className="size-4 shrink-0 text-foreground-secondary" aria-hidden />
+      ) : (
+        <FolderIcon className="size-4 shrink-0 text-foreground-secondary" aria-hidden />
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block break-all font-mono text-[13px] font-medium text-foreground">
+          {rule.pattern}
+        </span>
+        {rule.explanation ? (
+          <span
+            className="mt-0.5 block truncate text-xs text-foreground-secondary"
+            title={rule.explanation}
+          >
+            {rule.explanation}
+          </span>
+        ) : null}
+      </span>
+      <span className="shrink-0 font-mono text-sm font-semibold tabular text-foreground">
+        {rule.score}
+      </span>
+      <RuleTierPill score={rule.score} />
+      <Switch
+        checked={rule.enabled}
+        onCheckedChange={(v) => onToggle(v === true)}
+        aria-label={`${t('rulesSection.toggle')}: ${rule.pattern}`}
+      />
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={`${t('rulesSection.delete')}: ${rule.pattern}`}
+        onClick={onDelete}
+      >
+        <Trash2Icon aria-hidden />
+      </Button>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { createLogger } from '@/lib/logger';
 
 const logger = createLogger('ui-store');
 
-export type ResultsViewMode = 'details' | 'icons';
+export type ResultsViewMode = 'details' | 'icons' | 'map';
 
 const SIDEBAR_KEY = 'rw.ui.sidebarCollapsed';
 

@@ -1,10 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { connector } from '@/connector';
-import type {
-  CleanupUndoResolution,
-  DuplicatesResult,
-  SnapshotDelta,
-} from '@/connector/contract';
+import type { CleanupUndoResolution, SnapshotDelta } from '@/connector/contract';
 
 /**
  * Cleanup domain queries — the D-Space safety features (staging/undo,
@@ -125,15 +121,6 @@ export function useToggleRule() {
   });
 }
 
-export function useDuplicates(scanId: string | null, enabled: boolean) {
-  return useQuery<DuplicatesResult>({
-    queryKey: cleanupKeys.duplicates(scanId ?? 'none'),
-    queryFn: () => connector.cleanup.findDuplicates(scanId!),
-    enabled: enabled && scanId !== null,
-    staleTime: Infinity,
-  });
-}
-
 export function useFindDuplicates() {
   const qc = useQueryClient();
   return useMutation({
@@ -169,33 +156,5 @@ export function useSnapshotDelta(from: number | null, to: number | null) {
     queryFn: () => connector.cleanup.snapshotDelta(from!, to!),
     enabled: from !== null && to !== null && from !== to,
     staleTime: Infinity,
-  });
-}
-
-export function useIndexSearch(query: string, enabled: boolean) {
-  return useQuery({
-    queryKey: cleanupKeys.indexSearch(query),
-    queryFn: () => connector.cleanup.searchIndex(query, 50),
-    enabled: enabled && query.trim().length > 0,
-    staleTime: 30_000,
-  });
-}
-
-export function useEngineSetting(key: string) {
-  return useQuery({
-    queryKey: cleanupKeys.setting(key),
-    queryFn: () => connector.cleanup.getSetting(key),
-    staleTime: Infinity,
-  });
-}
-
-export function useSetEngineSetting() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (args: { key: string; value: string }) =>
-      connector.cleanup.setSetting(args.key, args.value),
-    onSuccess: (_data, args) => {
-      qc.setQueryData(cleanupKeys.setting(args.key), args.value);
-    },
   });
 }
