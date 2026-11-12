@@ -26,13 +26,15 @@ jobs:
       - name: Version match gate
         shell: bash
         run: |
+          # The tag may carry a prerelease suffix (v0.4.0-beta); the
+          # packaged version is the semver core (0.4.0).
           TAG="${GITHUB_REF_NAME#v}"
           CONF=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          if [ "$TAG" != "$CONF" ]; then
+          if [ "${TAG%%-*}" != "$CONF" ]; then
             echo "Tag v$TAG does not match tauri.conf.json version $CONF"
             exit 1
           fi
-          echo "Version gate passed: $TAG"
+          echo "Version gate passed: $TAG (packaged $CONF)"
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
