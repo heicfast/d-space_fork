@@ -290,6 +290,10 @@ export function createMockCleanup(deps: MockCleanupDeps): CleanupDomain {
             : `${stem.slice(0, 6).padEnd(6, '0')}${i.toString(16)}`.padEnd(64, 'a'),
           sizeBytes: min * (i + 2),
           paths: names2.map((n) => `${letter}:\\Users\\dev\\${n}`),
+          // Deterministic mock mtimes: later duplicates in a group are
+          // older (index-scaled), so the UI's newest-copy pick is
+          // exercised meaningfully.
+          modifiedUnix: names2.map((_, j) => 1_700_000_000 - j * 3_600 - i * 60),
         }));
       return {
         driveLetter: letter,

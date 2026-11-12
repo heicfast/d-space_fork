@@ -87,6 +87,7 @@ struct Candidate {
     id: NodeId,
     path: String,
     size_bytes: u64,
+    modified_unix: i64,
 }
 
 /// Streaming Blake3 — generic over `Read`. A reader-based helper for
@@ -217,10 +218,12 @@ pub fn find_duplicates(
         let Some(path) = node_full_path(tree, drive_letter, node.id) else {
             continue;
         };
+        let modified_unix = node.modified_unix;
         size_buckets.entry(size).or_default().push(Candidate {
             id: node.id,
             path,
             size_bytes: size,
+            modified_unix,
         });
     }
 
@@ -316,16 +319,18 @@ pub fn find_duplicates(
         for c in candidates {
             by_size.entry(c.size_bytes).or_default().push(c);
         }
-        for (size, list) in by_size {
+        for (size, mut list) in by_size {
             if list.len() < 2 {
                 continue;
             }
-            let mut paths: Vec<String> = list.into_iter().map(|c| c.path).collect();
-            paths.sort();
+            list.sort_by(|a, b| a.path.cmp(&b.path));
+            let paths: Vec<String> = list.iter().map(|c| c.path.clone()).collect();
+            let modified_unix: Vec<i64> = list.iter().map(|c| c.modified_unix).collect();
             groups.push(DuplicateGroup {
                 hash_hex: format!("size:{}", size),
                 size_bytes: size,
                 paths,
+                modified_unix,
             });
         }
     } else {
@@ -340,15 +345,11 @@ pub fn find_duplicates(
             })
             .collect();
 
-        let mut hash_buckets: HashMap<[u8; 32], (u64, Vec<String>)> = HashMap::new();
+        let mut hash_buckets: HashMap<[u8; 32], Vec<Candidate>> = HashMap::new();
         for (cand, res) in results {
             match res {
                 Ok(h) => {
-                    hash_buckets
-                        .entry(h)
-                        .or_insert_with(|| (cand.size_bytes, Vec::new()))
-                        .1
-                        .push(cand.path);
+                    hash_buckets.entry(h).or_default().push(cand);
                 }
                 Err(e) => {
                     warn!(path = %cand.path, error = %e, "hash skipped");
@@ -356,15 +357,19 @@ pub fn find_duplicates(
                 }
             }
         }
-        for (h, (size, mut paths)) in hash_buckets.into_iter() {
-            if paths.len() < 2 {
+        for (h, mut list) in hash_buckets.into_iter() {
+            if list.len() < 2 {
                 continue;
             }
-            paths.sort();
+            list.sort_by(|a, b| a.path.cmp(&b.path));
+            let paths: Vec<String> = list.iter().map(|c| c.path.clone()).collect();
+            let modified_unix: Vec<i64> = list.iter().map(|c| c.modified_unix).collect();
+            let size = list[0].size_bytes;
             groups.push(DuplicateGroup {
                 hash_hex: hex32(&h),
                 size_bytes: size,
                 paths,
+                modified_unix,
             });
         }
     }

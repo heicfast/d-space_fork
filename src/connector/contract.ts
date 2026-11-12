@@ -752,6 +752,8 @@ export interface DuplicateGroup {
   readonly hashHex: string;
   readonly sizeBytes: number;
   readonly paths: readonly string[];
+  /** Modification times (unix seconds), parallel to `paths`. */
+  readonly modifiedUnix: readonly number[];
 }
 
 export interface DuplicatesResult {

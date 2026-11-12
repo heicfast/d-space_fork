@@ -96,6 +96,19 @@ export function ScanProgressPage(): React.JSX.Element {
     }
   }, [progress?.status, scanId, setActiveStatus]);
 
+  // A failed scan surfaces its reason exactly once (the engine's failure
+  // string arrives through the connector with a machine code + reason
+  // key; previously failures retired silently).
+  const failureToastShownFor = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    const state = scanState.data;
+    if (state?.status !== 'failed' || !state.failure) return;
+    if (failureToastShownFor.current === state.scanId) return;
+    failureToastShownFor.current = state.scanId;
+    const key = state.failure.reasonKey;
+    toast.error(key ? t(key, { defaultValue: state.failure.code }) : t('errors.scanFailed'));
+  }, [scanState.data, t]);
+
   /** Elapsed since the engine recorded the scan start (real, not derived).
    *  A 1 s ticker keeps it live while the scan runs; completion freezes it
    *  at the engine's own timestamps (pure render — no Date.now() inline). */

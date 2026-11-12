@@ -558,13 +558,12 @@ fn validate_destination(
             needed_bytes: None,
         });
     }
-    // Source overlap: destination letter must differ from source volume.
-    let src_letter = source_device_id
-        .trim_start_matches("dev:")
-        .trim_start_matches("vol:")
-        .chars()
-        .next()
-        .filter(|c| c.is_ascii_alphabetic());
+    // Source overlap: destination letter must differ from the source
+    // volume. `lp:<disk>:<base>` lost-partition ids must never be
+    // misparsed as a letter (the naive first-char read turned them into
+    // 'l'); the strict shared parser rejects them, and lost-partition
+    // destinations are not local paths anyway.
+    let src_letter = crate::recovery::device_letter(source_device_id).ok();
     let dest_letter = path.chars().next().filter(|c| c.is_ascii_alphabetic());
     if let (Some(s), Some(d)) = (src_letter, dest_letter) {
         if s.eq_ignore_ascii_case(&d) {
@@ -575,16 +574,6 @@ fn validate_destination(
                 needed_bytes: None,
             });
         }
-    }
-    // Free space.
-    if let Some((free, _total)) = crate::recovery::partitions::unc_space(
-        &path
-            .chars()
-            .take_while(|&c| c != '\\' || path.starts_with(r"\\"))
-            .collect::<String>()
-            .to_string(),
-    ) {
-        let _ = free;
     }
     // Per-root free space via the drive list (robust for local paths).
     let letter = dest_letter.map(|c| c.to_ascii_uppercase());

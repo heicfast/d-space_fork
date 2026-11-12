@@ -32,10 +32,25 @@ export function SdCardPage(): React.JSX.Element {
     externalDevices.find((d) => d.id === selectedCardId) ??
     externalDevices.find((d) => d.kind === 'sd') ??
     externalDevices[0] ??
-    devices[0];
+    null;
+
+  // Real device data only — the old card row rendered hardcoded
+  // ("Others 58 GB", "Disk2") strings from the locale files.
+  const cardName = sdDevice?.label ?? t('sdCard.cardName');
+  const cardPartition =
+    sdDevice?.volumes[0] != null
+      ? `${sdDevice.volumes[0].fs.toUpperCase()}${sdDevice.volumes[0].letter ? ` (${sdDevice.volumes[0].letter}:)` : ''}`
+      : t('sdCard.cardPartition');
+  const cardSize =
+    sdDevice != null ? formatBytes(sdDevice.capacity.totalBytes, i18n.language) : '—';
+  const cardDiskNo = sdDevice?.model ?? sdDevice?.id ?? '—';
 
   const beginScan = (targetId?: string): void => {
-    const resolvedId = targetId ?? sdDevice?.id ?? 'dev-sd';
+    const resolvedId = targetId ?? sdDevice?.id;
+    if (!resolvedId) {
+      toast.error(t('sdCard.noDevice'));
+      return;
+    }
     startScan.mutate(
       { targetId: resolvedId },
       {
@@ -94,18 +109,18 @@ export function SdCardPage(): React.JSX.Element {
               <SdCardSlotIcon />
               <div>
                 <div className="text-[14px] font-bold text-[#1E293B] dark:text-foreground">
-                  {t('sdCard.cardName')}
+                  {cardName}
                 </div>
                 <div className="mt-0.5 flex items-center gap-4 text-[12.5px] text-[#64748B] tabular dark:text-foreground-secondary">
-                  <span>{t('sdCard.cardPartition')}</span>
-                  <span>{t('sdCard.cardSize')}</span>
+                  <span>{cardPartition}</span>
+                  <span>{cardSize}</span>
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-4">
               <span className="text-[13px] font-medium text-[#64748B] dark:text-foreground-secondary">
-                {t('sdCard.cardDiskNo')}
+                {cardDiskNo}
               </span>
             </div>
           </div>

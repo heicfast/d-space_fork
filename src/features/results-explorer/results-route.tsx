@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { RotateCcwIcon, TriangleAlertIcon } from 'lucide-react';
+import { CircleAlertIcon, RotateCcwIcon, TriangleAlertIcon } from 'lucide-react';
 import { useScanState, useStartScan } from '@/queries/scan';
 import { ResultsExplorer } from './results-explorer';
 import { ResultsPageFallback } from './page-fallback';
@@ -43,6 +43,7 @@ export function ResultsRoute(): React.JSX.Element {
   }
 
   const partial = state.data.status === 'cancelled';
+  const failed = state.data.status === 'failed';
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -52,9 +53,28 @@ export function ResultsRoute(): React.JSX.Element {
           pathScope={state.data.params.pathScope}
         />
       ) : null}
+      {failed ? <FailedBanner /> : null}
       <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
         <ResultsExplorer scanId={scanId} liveMode={false} />
       </div>
+    </div>
+  );
+}
+
+function FailedBanner(): React.JSX.Element {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+
+  return (
+    <div
+      className="flex shrink-0 items-center gap-3 border-b border-danger/40 bg-danger-muted px-4 py-2 text-sm"
+      role="alert"
+    >
+      <CircleAlertIcon className="size-4 shrink-0 text-danger" aria-hidden />
+      <span className="min-w-0 flex-1">{t('results.failedBanner')}</span>
+      <Button variant="secondary" size="sm" onClick={() => void navigate('/')}>
+        {t('results.failedBannerBack')}
+      </Button>
     </div>
   );
 }

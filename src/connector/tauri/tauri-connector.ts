@@ -88,6 +88,11 @@ const CODE_BY_MESSAGE: readonly [RegExp, ConnectorErrorCode][] = [
   [/administrator privileges are required/i, 'device-permission'],
   [/not accessible/i, 'device-gone'],
   [/is not mounted/i, 'device-gone'],
+  [/no valid (FAT|exFAT|ext) |superblock|boot sector/i, 'scan-scope-invalid'],
+  [/NTFS parse error|NTFS parse on/i, 'device-gone'],
+  [/no SMART data path succeeded/i, 'health-unavailable'],
+  [/has been reused since the scan/i, 'recovery-item-failed'],
+  [/job thread panicked|scan thread panicked/i, 'unknown'],
   [/preview-too-large/i, 'preview-too-large'],
   [/preview-damaged/i, 'preview-damaged'],
   [/compressed or encrypted/i, 'preview-damaged'],
@@ -290,6 +295,7 @@ interface EngineDevice {
     totalBytes: number;
     usedBytes: number;
     freeBytes: number;
+    sectorSize: number;
     status: string;
     quickScanAvailable: boolean;
     canRecoverDeleted: boolean;
@@ -318,6 +324,7 @@ function toDevice(d: EngineDevice): Device {
         ? 'unknown'
         : v.fs.toLowerCase()) as Device['volumes'][number]['fs'],
       capacity: { totalBytes: v.totalBytes, usedBytes: v.usedBytes, freeBytes: v.freeBytes },
+      sectorSize: v.sectorSize === 0 ? undefined : v.sectorSize,
       status: v.status as Device['volumes'][number]['status'],
       quickScanAvailable: v.quickScanAvailable,
       bitlocker: (v.bitlocker ?? undefined) as Device['volumes'][number]['bitlocker'],
@@ -512,6 +519,7 @@ interface EngineDuplicateGroup {
   hash_hex: string;
   size_bytes: number;
   paths: string[];
+  modified_unix: number[];
 }
 
 interface EngineDuplicates {
@@ -675,7 +683,7 @@ function toScanState(s: EngineScanState, params: ScanParams): ScanState {
     startedAt: iso(s.startedAtUnix),
     completedAt: s.completedAtUnix === null ? null : iso(s.completedAtUnix),
     progress: toScanProgressEvent(s.progress),
-    failure: s.failure !== null ? { code: 'unknown' as ConnectorErrorCode } : undefined,
+    failure: s.failure !== null ? toConnectorError(s.failure, 'unknown') : undefined,
   };
 }
 
@@ -728,6 +736,7 @@ function toDuplicates(d: EngineDuplicates): DuplicatesResult {
       hashHex: g.hash_hex,
       sizeBytes: g.size_bytes,
       paths: g.paths,
+      modifiedUnix: g.modified_unix,
     })),
     stats: {
       groupCount: d.stats.group_count,

@@ -400,7 +400,10 @@ export function HealthPage(): React.JSX.Element {
                           : '—'}
                     </div>
                     <div className="mt-1 text-[11px] text-[#64748B] uppercase dark:text-foreground-secondary">
-                      {selectedDevice?.volumes[0]?.fs ?? 'NTFS'} · 512B
+                      {selectedDevice?.volumes[0]?.fs ?? 'NTFS'}
+                      {selectedDevice?.volumes[0]?.sectorSize
+                        ? ` · ${selectedDevice.volumes[0].sectorSize}B`
+                        : ''}
                     </div>
                   </div>
                 </div>
@@ -431,7 +434,7 @@ export function HealthPage(): React.JSX.Element {
                       {t('health.wear')}:{' '}
                       {health.data.wearPercent != null
                         ? formatPercent(health.data.wearPercent / 100, i18n.language)
-                        : '2%'}
+                        : t('health.wearUnknown')}
                     </div>
                   </div>
                 </div>

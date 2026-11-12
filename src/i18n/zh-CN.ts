@@ -143,9 +143,8 @@ export const zhCN: TranslationSchema = {
     getHelp: '获取帮助',
     helpToast: '请确认读卡器已稳固连接且未处于写保护状态。',
     cardName: 'SD/MMC/MS PRO',
+    noDevice: '未连接存储卡或 USB 设备。',
     cardPartition: '其它',
-    cardSize: '58 GB',
-    cardDiskNo: '磁盘 2',
   },
   tools: {
     providerBody: '此专用模块可为复杂的存储拓扑准备只读恢复环境。',
@@ -303,6 +302,8 @@ export const zhCN: TranslationSchema = {
     emptyTitle: '此处未找到文件',
     emptyBody: '请尝试更深的搜索方式，或更换位置。',
     partialBanner: '搜索提前停止——结果可能不完整。{{link}}',
+    failedBanner: '搜索在完成之前失败。暂无可用结果。',
+    failedBannerBack: '返回设备列表',
     partialResume: '继续搜索',
   },
   preview: {
@@ -393,6 +394,7 @@ export const zhCN: TranslationSchema = {
     trimEnabled: '已启用',
     trimDisabled: '未启用',
     wear: '预计已消耗寿命',
+    wearUnknown: '未知',
     smartTable: 'S.M.A.R.T. 属性',
     smartCol: {
       id: 'ID',
@@ -565,6 +567,7 @@ export const zhCN: TranslationSchema = {
     openPathMock: '打开位置需要系统文件管理器权限。',
     sessionCorrupt: '无法读取已保存的搜索。',
     unknown: '发生意外问题。诊断日志中包含详细信息。',
+    scanFailed: '搜索失败。请检查磁盘连接后重试。',
     retryOrHome: '请重试，或返回设备列表。',
   },
   a11y: {

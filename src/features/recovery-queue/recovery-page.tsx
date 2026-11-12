@@ -240,9 +240,11 @@ export function RecoveryPage(): React.JSX.Element {
                     ))
                   : mounts.data?.map((m) => {
                       const isSel = destination === m.path;
-                      const isOverlap =
-                        (isSel && validation?.reason === 'overlap') ||
-                        m.path.toUpperCase().startsWith('C:');
+                      // The connector grades overlap (contract principle
+                      // 1); the UI only renders its verdict. The old
+                      // client-side "everything on C: overlaps" heuristic
+                      // contradicted the backend's real validation.
+                      const isOverlap = isSel && validation?.reason === 'overlap';
                       const isLowSpace = neededBytes > m.freeBytes;
 
                       return (

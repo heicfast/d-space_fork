@@ -55,7 +55,17 @@ export function DuplicatesPage(): React.JSX.Element {
     }
   };
 
-  const newestOf = (paths: readonly string[]): string => paths[0] ?? '';
+  /** Newest copy by the engine-reported modification time (the payload
+   *  carries mtimes parallel to paths; the old code just kept the first
+   *  path and called it the newest). */
+  const newestOf = (paths: readonly string[], modified: readonly number[]): string => {
+    if (paths.length === 0) return '';
+    let best = 0;
+    for (let i = 1; i < paths.length; i++) {
+      if ((modified[i] ?? 0) > (modified[best] ?? 0)) best = i;
+    }
+    return paths[best];
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
@@ -134,7 +144,7 @@ function DuplicatesResultCard({
 }: {
   result: DuplicatesResult;
   onStageRedundant: (paths: readonly string[], newestPath: string) => void;
-  newestOf: (paths: readonly string[]) => string;
+  newestOf: (paths: readonly string[], modified: readonly number[]) => string;
 }): React.JSX.Element {
   const { t, i18n } = useTranslation();
   const [openGroups, setOpenGroups] = React.useState<ReadonlySet<number>>(new Set());
@@ -238,7 +248,12 @@ function DuplicatesResultCard({
                     <Button
                       variant="secondary"
                       size="sm"
-                      onClick={() => onStageRedundant(group.paths, newestOf(group.paths))}
+                      onClick={() =>
+                        onStageRedundant(
+                          group.paths,
+                          newestOf(group.paths, group.modifiedUnix ?? []),
+                        )
+                      }
                     >
                       {t('duplicates.stageButNewest')}
                     </Button>

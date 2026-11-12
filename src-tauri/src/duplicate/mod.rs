@@ -24,6 +24,9 @@ pub struct DuplicateGroup {
     pub hash_hex: String,
     pub size_bytes: u64,
     pub paths: Vec<String>,
+    /// Modification times (unix seconds), parallel to `paths` — lets the
+    /// UI pick the newest copy honestly instead of guessing by order.
+    pub modified_unix: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

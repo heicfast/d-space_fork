@@ -144,9 +144,8 @@ export const en = {
     getHelp: 'Get Help',
     helpToast: 'Ensure the card reader is firmly connected and unlocked.',
     cardName: 'SD/MMC/MS PRO',
+    noDevice: 'No memory card or USB device is connected.',
     cardPartition: 'Others',
-    cardSize: '58 GB',
-    cardDiskNo: 'Disk2',
   },
   tools: {
     providerBody:
@@ -309,6 +308,8 @@ export const en = {
     emptyTitle: 'Nothing was found here',
     emptyBody: 'Try a deeper search, or a different location.',
     partialBanner: 'Search was stopped early — results may be incomplete. {{link}}',
+    failedBanner: 'The search failed before it could finish. No results are available.',
+    failedBannerBack: 'Back to devices',
     partialResume: 'Continue searching',
   },
   preview: {
@@ -403,6 +404,7 @@ export const en = {
     trimEnabled: 'Enabled',
     trimDisabled: 'Disabled',
     wear: 'Estimated life used',
+    wearUnknown: 'Unknown',
     smartTable: 'S.M.A.R.T. attributes',
     smartCol: {
       id: 'ID',
@@ -580,6 +582,7 @@ export const en = {
     openPathMock: 'Opening locations requires system file explorer access.',
     sessionCorrupt: 'The saved search could not be read.',
     unknown: 'An unexpected problem occurred. The diagnostics log has the details.',
+    scanFailed: 'The search failed. Check the drive connection and try again.',
     retryOrHome: 'Try again, or go back to the device list.',
   },
   a11y: {

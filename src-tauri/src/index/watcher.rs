@@ -2,7 +2,7 @@
 //
 // USN delta watcher — Sprint 3.8.
 //
-// Discovery Log #005 — Chapter 5.6: background thread, 5 sec polling. On
+// Discovery Log #005 — Chapter 5.6: background thread, 60 s polling. On
 // each tick `FSCTL_READ_USN_JOURNAL` is called, the incoming records
 // are written to the DB via `apply_delta`, the watermark is updated.
 // Stopped via the shutdown channel.

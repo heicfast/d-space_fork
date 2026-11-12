@@ -151,7 +151,11 @@ describe('scan domain wiring', () => {
     expect(state.status).toBe('failed');
     expect(state.startedAt).toBe(new Date(1760000000 * 1000).toISOString());
     expect(state.progress.deletedFound).toBe(2);
-    expect(state.failure).toEqual({ code: 'unknown' });
+    // The failure string now maps through the shared error-code table
+    // (an unmapped string still yields code 'unknown' but keeps the
+    // message on the error object).
+    expect(state.failure?.code).toBe('unknown');
+    expect((state.failure as Error).message).toBe('boom');
   });
 
   it('onScanProgress subscribes to dw-scan-progress and filters by scan id', () => {

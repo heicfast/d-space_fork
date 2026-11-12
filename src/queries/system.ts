@@ -60,3 +60,11 @@ export function useSpecialFolders() {
     staleTime: Infinity,
   });
 }
+
+/** Reveals a path in Windows Explorer (creates no windows in mock mode —
+ *  the connector refuses there). Used by the results context menu. */
+export function useOpenPath() {
+  return useMutation({
+    mutationFn: (path: string) => connector.system.openPath(path),
+  });
+}

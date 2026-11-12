@@ -21,6 +21,7 @@ import {
 import { useCountResults, useResultTree, useResultsPages } from '@/queries/results';
 import { useSaveSession } from '@/queries/sessions';
 import { useConnectorMode } from '@/queries/dev';
+import { useOpenPath } from '@/queries/system';
 import { useFilterStore, useSortStore, resolveFilter } from '@/stores/filter-store';
 import { selectedCountOf, useSelectionStore } from '@/stores/selection-store';
 import { useUiStore } from '@/stores/ui-store';
@@ -124,6 +125,19 @@ export function ResultsExplorer({
     const id = single ?? activeNodeId;
     const node = id !== null ? rows.find((r) => r.id === id) : undefined;
     return node && node.origin === 'existing' && node.path ? node.path : null;
+  }, [selection, activeNodeId, rows]);
+  // "Open location": the folder containing the single selected file (the
+  // explorer reveals the parent; a file path itself would just try to
+  // launch the file).
+  const openPathMutation = useOpenPath();
+  const openLocationTarget = React.useMemo(() => {
+    const single =
+      selection.mode === 'ids' && selection.ids.size === 1 ? [...selection.ids][0] : null;
+    const id = single ?? activeNodeId;
+    const node = id !== null ? rows.find((r) => r.id === id) : undefined;
+    if (!node || node.origin !== 'existing' || !node.path) return null;
+    const cut = node.path.lastIndexOf('\\');
+    return cut > 2 ? node.path.slice(0, cut) : node.path;
   }, [selection, activeNodeId, rows]);
   const selectionSnapshot = React.useMemo(
     () => ({
@@ -499,10 +513,17 @@ export function ResultsExplorer({
               </ContextMenuItem>
               <ContextMenuSeparator />
               <ContextMenuItem
-                disabled={connectorMode === 'mock'}
+                disabled={connectorMode === 'mock' || !openLocationTarget}
                 title={
                   connectorMode === 'mock' ? t('results.context.openLocationMock') : undefined
                 }
+                onClick={() => {
+                  if (openLocationTarget) {
+                    openPathMutation.mutate(openLocationTarget, {
+                      onError: (err) => toast.error(err.message),
+                    });
+                  }
+                }}
               >
                 <FolderTreeIcon aria-hidden />
                 {t('results.context.openLocation')}

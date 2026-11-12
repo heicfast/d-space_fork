@@ -79,6 +79,8 @@ pub struct DwVolume {
     pub total_bytes: u64,
     pub used_bytes: u64,
     pub free_bytes: u64,
+    /// Bytes per sector (0 when unknown).
+    pub sector_size: u32,
     /// ok | permission-denied | disconnected | locked
     pub status: String,
     pub quick_scan_available: bool,
@@ -194,6 +196,7 @@ pub fn list_devices_wire() -> Result<Vec<DwDevice>> {
             total_bytes: info.total_bytes,
             used_bytes: used,
             free_bytes: info.free_bytes,
+            sector_size: info.sector_size,
             status: status.clone(),
             quick_scan_available: raw_engine_fs && elevated,
             can_recover_deleted: raw_engine_fs && elevated,

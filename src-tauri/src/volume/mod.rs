@@ -92,6 +92,8 @@ pub struct VolumeInfo {
     pub drive_kind: DriveKind,
     pub total_bytes: u64,
     pub free_bytes: u64,
+    /// Bytes per sector (0 when the query fails / no geometry).
+    pub sector_size: u32,
     pub status: VolumeStatus,
     pub elapsed_ms: u64,
 }

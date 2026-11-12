@@ -42,7 +42,7 @@ fn normalize_drive_letter(drive: &str) -> Result<char> {
 pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::{
-        GetDiskFreeSpaceExW, GetDriveTypeW, GetVolumeInformationW,
+        GetDiskFreeSpaceExW, GetDiskFreeSpaceW, GetDriveTypeW, GetVolumeInformationW,
     };
 
     let start = Instant::now();
@@ -72,6 +72,7 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
             drive_kind,
             total_bytes: 0,
             free_bytes: 0,
+            sector_size: 0,
             status: VolumeStatus::NotMounted,
             elapsed_ms: start.elapsed().as_millis() as u64,
         });
@@ -107,10 +108,20 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
             (fs, label, serial, status)
         }
         Err(e) => {
-            // BitLocker locked volumes typically return access denied here.
-            // In v0.1 we treat them uniformly; v0.2 will distinguish BitLocker via WMI.
+            // BitLocker-locked volumes return access denied here. The app
+            // runs elevated (requireAdministrator), so a metadata access
+            // denial on a fixed/removable volume means the volume is
+            // locked — surfaced honestly as BitLockerLocked so the UI can
+            // show its lock state instead of a misleading permission
+            // error.
             debug!(?e, "GetVolumeInformationW failed");
-            (String::new(), String::new(), 0, VolumeStatus::AccessDenied)
+            let locked = matches!(drive_kind, DriveKind::Fixed | DriveKind::Removable);
+            let status = if locked {
+                VolumeStatus::BitLockerLocked
+            } else {
+                VolumeStatus::AccessDenied
+            };
+            (String::new(), String::new(), 0, status)
         }
     };
 
@@ -134,6 +145,27 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
         }
     };
 
+    // 4. Sector size (physical geometry for the health page + raw math).
+    let mut sectors_per_cluster: u32 = 0;
+    let mut bytes_per_sector: u32 = 0;
+    let mut free_clusters: u32 = 0;
+    let mut total_clusters: u32 = 0;
+    let sector_size = if unsafe {
+        GetDiskFreeSpaceW(
+            root_pcwstr,
+            Some(&mut sectors_per_cluster),
+            Some(&mut bytes_per_sector),
+            Some(&mut free_clusters),
+            Some(&mut total_clusters),
+        )
+    }
+    .is_ok()
+    {
+        bytes_per_sector
+    } else {
+        0
+    };
+
     let info = VolumeInfo {
         drive_letter,
         root_path,
@@ -143,6 +175,7 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
         drive_kind,
         total_bytes,
         free_bytes,
+        sector_size,
         status,
         elapsed_ms: start.elapsed().as_millis() as u64,
     };
@@ -162,7 +195,9 @@ pub fn pre_flight_check(drive: &str) -> Result<VolumeInfo> {
 
 #[cfg(not(windows))]
 pub fn pre_flight_check(_drive: &str) -> Result<VolumeInfo> {
-    Err(Error::NotImplemented("pre_flight_check sadece Windows"))
+    Err(Error::NotImplemented(
+        "pre_flight_check is only available on Windows",
+    ))
 }
 
 #[cfg(test)]
