@@ -18,17 +18,17 @@
 - Session prompt archived with the token redacted (`worklog/session-feature-harvest-prompt.md`); read twice before action.
 - All seven repositories cloned and pinned at session start:
 
-| Repo | Role | HEAD (pinned) | Files |
-| --- | --- | --- | --- |
-| heicfast/d-space_fork | target | `3907f7144ad8578079186b949ef5657b5e2c2d03` | 311 |
-| terraseraph/sectorforge | base ref A (same stack) | `b292a299c18013706e81d670657ced6c43f200ca` | 197 |
-| htoklu/halim-recovery | base ref B (same stack) | `3b5d66d8537432f54b76489e717387f9da198635` | 62 |
-| cgsecurity/testdisk | feature ref C (partition & carving) | `5f5d6056696d70d3a3ff1e1eaa5a5125cb42bb6a` | 793 |
-| sleuthkit/sleuthkit | feature ref D (forensic engine) | `08167c8d6d5fc1bd4ee6d822e2fe042cabcdee6d` | 959 |
-| mjgil-rust/ntfs-recover | feature ref E (NTFS deep recovery) | `5072bbc729b293efc0b2070b38ad30c3b7e043cf` | 25 |
-| hasithahaththella/mft-rescue | feature ref F (MFT analysis) | `9b0e5ecc9d24ae9918f83e3a81e4a8616f610a22` | 8 |
+| Repo                         | Role                                | HEAD (pinned)                              | Files |
+| ---------------------------- | ----------------------------------- | ------------------------------------------ | ----- |
+| heicfast/d-space_fork        | target                              | `3907f7144ad8578079186b949ef5657b5e2c2d03` | 311   |
+| terraseraph/sectorforge      | base ref A (same stack)             | `b292a299c18013706e81d670657ced6c43f200ca` | 197   |
+| htoklu/halim-recovery        | base ref B (same stack)             | `3b5d66d8537432f54b76489e717387f9da198635` | 62    |
+| cgsecurity/testdisk          | feature ref C (partition & carving) | `5f5d6056696d70d3a3ff1e1eaa5a5125cb42bb6a` | 793   |
+| sleuthkit/sleuthkit          | feature ref D (forensic engine)     | `08167c8d6d5fc1bd4ee6d822e2fe042cabcdee6d` | 959   |
+| mjgil-rust/ntfs-recover      | feature ref E (NTFS deep recovery)  | `5072bbc729b293efc0b2070b38ad30c3b7e043cf` | 25    |
+| hasithahaththella/mft-rescue | feature ref F (MFT analysis)        | `9b0e5ecc9d24ae9918f83e3a81e4a8616f610a22` | 8     |
 
-  References are depth-1 clones (HEAD only) — citation provenance is the HEAD SHA above. The target is a full clone.
+References are depth-1 clones (HEAD only) — citation provenance is the HEAD SHA above. The target is a full clone.
 
 - Target license read: **GPL-3.0-or-later** (`LICENSE`). Reference licenses to be read and recorded by each Phase 0 agent in its context sheet.
 - Target CI inventory: `.github/workflows/ci.yml` (Rust fmt/clippy -D warnings/tests + vss feature job, full frontend gate stack, all on windows-latest), `release.yml`, `ui-smoke.yml`. Worklog-only pushes do not touch compiled code paths; CI must stay green at every push.
@@ -53,15 +53,15 @@
 
 **Done this unit:** seven parallel read-agents produced the Phase 0 context sheets (2,232 lines total). No repository code was touched; only `worklog/` grew. Load-bearing citations were independently spot-verified with Grep by the session lead before this push (all passed; details below).
 
-| Sheet | Lines | License found | Coverage reported by agent |
-| --- | --- | --- | --- |
-| TARGET-STATE.md | 359 | GPL-3.0-or-later (target) | 41 files read fully, 32 partially, ~240 enumerated (assets/locks/mock/docs) of 311 |
-| SECTORFORGE-FEATURES.md | 389 | MIT | 68 fully, 4 partially, ~120 enumerated of 197 |
-| HALIM-FEATURES.md | 307 | MIT | 60 fully of 62 (2 binaries existence-only) |
-| TESTDISK-FEATURES.md | 384 | GPLv2-or-later | 30 fully + ~20 partially of 793 (subsystem-exhaustive; 353-format registry enumerated) |
-| SLEUTHKIT-FEATURES.md | 400 | CPL-1.0 core / Apache-2.0 bindings (+ islands) | 22 fully + ~18 partially of 959 (subsystem-exhaustive) |
-| NTFS-RECOVER-FEATURES.md | 241 | 0BSD | 24 of 25 files fully (Cargo.lock partial) |
-| MFT-RESCUE-FEATURES.md | 152 | MIT | 8 of 8 fully |
+| Sheet                    | Lines | License found                                  | Coverage reported by agent                                                             |
+| ------------------------ | ----- | ---------------------------------------------- | -------------------------------------------------------------------------------------- |
+| TARGET-STATE.md          | 359   | GPL-3.0-or-later (target)                      | 41 files read fully, 32 partially, ~240 enumerated (assets/locks/mock/docs) of 311     |
+| SECTORFORGE-FEATURES.md  | 389   | MIT                                            | 68 fully, 4 partially, ~120 enumerated of 197                                          |
+| HALIM-FEATURES.md        | 307   | MIT                                            | 60 fully of 62 (2 binaries existence-only)                                             |
+| TESTDISK-FEATURES.md     | 384   | GPLv2-or-later                                 | 30 fully + ~20 partially of 793 (subsystem-exhaustive; 353-format registry enumerated) |
+| SLEUTHKIT-FEATURES.md    | 400   | CPL-1.0 core / Apache-2.0 bindings (+ islands) | 22 fully + ~18 partially of 959 (subsystem-exhaustive)                                 |
+| NTFS-RECOVER-FEATURES.md | 241   | 0BSD                                           | 24 of 25 files fully (Cargo.lock partial)                                              |
+| MFT-RESCUE-FEATURES.md   | 152   | MIT                                            | 8 of 8 fully                                                                           |
 
 **Licensing conclusion (recorded for the matrix):** target is GPL-3.0-or-later. SectorForge (MIT), Halim (MIT), ntfs-recover (0BSD), mft-rescue (MIT) are permissive — still re-implemented from understanding per SOP, never copied verbatim. TestDisk (GPLv2+) and Sleuth Kit (CPL-1.0 core) require strict behavioral re-implementation from documented understanding with citation; no code copying. Both constraints are compatible with the harvest SOP.
 
@@ -122,3 +122,15 @@
 **Rust toolchain note:** the session sandbox has no system Rust; a toolchain was installed under the session workspace and a background `cargo test --lib --no-run` compile of the engine was started to determine whether the crate builds on Linux (parsing core is cross-platform; volume access is `cfg(windows)`-gated). Outcome will be recorded in the next worklog entry; engine test runs land on the repo's windows-latest CI either way.
 
 **Next:** Wave 1 per the matrix — pin the PRESENT P0 contracts with tests (FS-01..FS-04, FS-07, D-01/D-02) against this fixture, then FS-08 (sequence-aware parent validation, the top P0 correctness gap), then the Wave 5 named-feature delta.
+
+---
+
+## 2026-11-12 — CI incident + fix: prettier gate covers worklog artifacts; local-Rust outcome
+
+**Incident:** pushes d183a3f / da97ac5 / ee7ba0e turned the **CI** workflow red (Frontend job, "Format check" step) although they were worklog-only. Root cause: `format:check` = `prettier --check .` scans the whole repo, and the session's hand-written markdown + fixture manifest JSON were not prettier-formatted. Main was green at session start (3907f71 CI success) — the regression was introduced by this session's artifacts, exactly the kind of thing the no-behavior-change rule prohibits.
+
+**Fix:** all session artifacts formatted with prettier 3.9.10 (the repo's pinned version) — `worklog/**/*.md` and `src-tauri/tests/fixtures/*.json` now pass `--check`. Rule adopted for the rest of the session: every regenerated artifact gets prettier-formatted before commit (the T4 generator note: run `npx prettier@3.9.10 --write` on the manifest after regeneration, or keep the committed formatting). The in-progress acb0512 CI run is superseded by this fix push (CI cancels in-progress runs per ref).
+
+**Local-Rust outcome (recorded for the session):** the engine crate cannot build in this session sandbox — the `tauri` dependency requires gdk-3.0/gtk3 system libraries that need root to install. Consequence: **engine (Rust) code is verified on the repo's windows-latest CI**, monitored via the GitHub Actions API (read-only, token from env); the frontend gates that run on pure logic can be run locally where node tooling permits. Every engine change is therefore pushed with its tests and validated by the CI run of that push, with failures iterated — never masked. `cargo fmt` runs locally (no build needed) before every engine push.
+
+**Next:** unchanged — Wave 1 implementation begins against the T4 fixture, on the CI-verified path.

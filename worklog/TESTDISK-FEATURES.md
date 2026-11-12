@@ -1,13 +1,13 @@
 # TESTDISK & PHOTOREC — Feature Harvest Report (Agent D)
 
-| Field | Value |
-|---|---|
-| Repo | https://github.com/cgsecurity/testdisk (depth-1 clone at `/home/z/my-project/refs/testdisk`) |
-| HEAD SHA | `5f5d6056696d70d3a3ff1e1eaa5a5125cb42bb6a` |
-| License | **GPLv2-or-later** — `COPYING` is GNU GPL Version 2 (June 1991); every source header states "version 2 of the License, or (at your option) any later version" (e.g. `src/parti386.c:7-9`, `src/photorec.c:7-9`) |
-| Stack | C (ncurses CLI + optional Qt GUI `src/qphotorec.cpp`), autotools; 793 tracked files (724 in `src/`) |
-| Date / Agent | 2026-11-12 / Agent D (TestDisk/PhotoRec harvest) |
-| Mission | Partition-reconstruction & file-carving capabilities for heicfast/d-space_fork (Tauri 2 + Rust + React, Windows) |
+| Field        | Value                                                                                                                                                                                                           |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repo         | https://github.com/cgsecurity/testdisk (depth-1 clone at `/home/z/my-project/refs/testdisk`)                                                                                                                    |
+| HEAD SHA     | `5f5d6056696d70d3a3ff1e1eaa5a5125cb42bb6a`                                                                                                                                                                      |
+| License      | **GPLv2-or-later** — `COPYING` is GNU GPL Version 2 (June 1991); every source header states "version 2 of the License, or (at your option) any later version" (e.g. `src/parti386.c:7-9`, `src/photorec.c:7-9`) |
+| Stack        | C (ncurses CLI + optional Qt GUI `src/qphotorec.cpp`), autotools; 793 tracked files (724 in `src/`)                                                                                                             |
+| Date / Agent | 2026-11-12 / Agent D (TestDisk/PhotoRec harvest)                                                                                                                                                                |
+| Mission      | Partition-reconstruction & file-carving capabilities for heicfast/d-space_fork (Tauri 2 + Rust + React, Windows)                                                                                                |
 
 ---
 
@@ -15,17 +15,17 @@
 
 Full enumeration via `git ls-files` (793 files; 724 under `src/`, 69 outside). Classification of `src/` by priority-pattern match over filename:
 
-| Class | Count | Representative files |
-|---|---|---|
-| PhotoRec signature validators `src/file_*.c` | **353** | `file_jpg.c`, `file_png.c`, `file_zip.c`, `file_doc.c`, `file_txt.c` (largest) |
-| Validator companion headers `src/file_*.h` | 8 | `file_jpg.h`, `file_gz.h`, `file_doc.h`, `file_riff.h`, `file_tar.h`, `file_tiff.h`, `file_sp3.h`, `file_found.h` |
-| PhotoRec core engine | 42 | `photorec.c`, `phrecn.c`, `phbf.c`, `phbs.c`, `phcfg.c`, `phcli.c`, `phmain.c`, `psearchn.c`, `sessionp.c`, `filegen.c/h`, `pnext.h`, `pblocksize.c`, `json_log.c`, `fidentify.c`, `file_found.c` |
-| Partition subsystem core | 63 | `parti386.c`, `partgpt.c`, `partgptn.c`, `partgptro.c`, `partgptw.c`, `partmac/partsun/partxbox/parthumax/partnone/partauto` (27 `part*` files), `analyse.c`, `godmode.c`, `geometry.c/geometryn.c`, `fnctdsk.c`, `next.c`, `crc.c`, `savehdr.c`, `chgtype*.c`, `addpart*.c`, `tpartwr.c`, `tanalyse.c`, `bsd.c` |
-| Filesystem-specific modules | 126 | `fat*.c/h` (22 files), `ntfs*` (18 files incl. `ntfs_fix.c`, `ntfs_dir.c`, `ntfs_adv.c`), `ext2*` (15), `exfat*`, `hfs*`/`hfsp*`, `rfs*`, `xfs`, `jfs`, `ufs`, `bfs`, `zfs`, `btrfs`, `f2fs`, `apfs*`, `luks*`, `lvm*`, `md.c`, `swap.c`, `hpfs.c`, `refs.c`, `iso.c`, `vmfs.c`, `wbfs.c`, `netware.c`, `cramfs.c`, `sysv.c`, `sun.c`, `fat_adv.c`, `fat_unformat.c` |
-| UI/CLI (ncurses menus, editors, dir browsers) | 40 | `testdisk.c`, `intrf.c`, `intrfn.c`, `intrface.c`, `tdiskop.c`, `tdisksel.c`, `tlog.c`, `toptions.c`, `tdelete.c`, `tload.c`, `tbanner.c`, `tmbrcode.c`, `edit.c`, `hidden*.c`, `nodisk.c`, `dirn.c`, `dirpart.c`, `lang.h` |
-| Disk I/O layer | 25 | `hdaccess.c`, `hdwin32.c`, `win32.c`, `hdcache.c`, `ewf.c` (E01 images), `dimage.c`, `hpa_dco.c`, `io_redir.c`, `diskacc.c`, `diskcapa.c`, `sudo.c`, `suspend*.c` |
-| Qt GUI / icons / l10n | 35 | `qphotorec.cpp`, `qmainrec.cpp`, `qphbs.cpp`, `qpsearch.cpp`, `src/lang/qphotorec.*.ts` (15), 9 `.png`, 3 `.rc`, 2 `.qrc` |
-| Common/misc/utility | 32 | `common.c/h`, `misc.c`, `log.c`, `log_part.c`, `unicode.c`, `utfsize.c`, `setdate.c`, `dfxml.c`, `list_sort.c`, `types.h`, `memmem.h`, `guid_cpy.h`, `guid_cmp.h`, `list_add_sorted*.h` |
+| Class                                         | Count   | Representative files                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PhotoRec signature validators `src/file_*.c`  | **353** | `file_jpg.c`, `file_png.c`, `file_zip.c`, `file_doc.c`, `file_txt.c` (largest)                                                                                                                                                                                                                                                                                       |
+| Validator companion headers `src/file_*.h`    | 8       | `file_jpg.h`, `file_gz.h`, `file_doc.h`, `file_riff.h`, `file_tar.h`, `file_tiff.h`, `file_sp3.h`, `file_found.h`                                                                                                                                                                                                                                                    |
+| PhotoRec core engine                          | 42      | `photorec.c`, `phrecn.c`, `phbf.c`, `phbs.c`, `phcfg.c`, `phcli.c`, `phmain.c`, `psearchn.c`, `sessionp.c`, `filegen.c/h`, `pnext.h`, `pblocksize.c`, `json_log.c`, `fidentify.c`, `file_found.c`                                                                                                                                                                    |
+| Partition subsystem core                      | 63      | `parti386.c`, `partgpt.c`, `partgptn.c`, `partgptro.c`, `partgptw.c`, `partmac/partsun/partxbox/parthumax/partnone/partauto` (27 `part*` files), `analyse.c`, `godmode.c`, `geometry.c/geometryn.c`, `fnctdsk.c`, `next.c`, `crc.c`, `savehdr.c`, `chgtype*.c`, `addpart*.c`, `tpartwr.c`, `tanalyse.c`, `bsd.c`                                                     |
+| Filesystem-specific modules                   | 126     | `fat*.c/h` (22 files), `ntfs*` (18 files incl. `ntfs_fix.c`, `ntfs_dir.c`, `ntfs_adv.c`), `ext2*` (15), `exfat*`, `hfs*`/`hfsp*`, `rfs*`, `xfs`, `jfs`, `ufs`, `bfs`, `zfs`, `btrfs`, `f2fs`, `apfs*`, `luks*`, `lvm*`, `md.c`, `swap.c`, `hpfs.c`, `refs.c`, `iso.c`, `vmfs.c`, `wbfs.c`, `netware.c`, `cramfs.c`, `sysv.c`, `sun.c`, `fat_adv.c`, `fat_unformat.c` |
+| UI/CLI (ncurses menus, editors, dir browsers) | 40      | `testdisk.c`, `intrf.c`, `intrfn.c`, `intrface.c`, `tdiskop.c`, `tdisksel.c`, `tlog.c`, `toptions.c`, `tdelete.c`, `tload.c`, `tbanner.c`, `tmbrcode.c`, `edit.c`, `hidden*.c`, `nodisk.c`, `dirn.c`, `dirpart.c`, `lang.h`                                                                                                                                          |
+| Disk I/O layer                                | 25      | `hdaccess.c`, `hdwin32.c`, `win32.c`, `hdcache.c`, `ewf.c` (E01 images), `dimage.c`, `hpa_dco.c`, `io_redir.c`, `diskacc.c`, `diskcapa.c`, `sudo.c`, `suspend*.c`                                                                                                                                                                                                    |
+| Qt GUI / icons / l10n                         | 35      | `qphotorec.cpp`, `qmainrec.cpp`, `qphbs.cpp`, `qpsearch.cpp`, `src/lang/qphotorec.*.ts` (15), 9 `.png`, 3 `.rc`, 2 `.qrc`                                                                                                                                                                                                                                            |
+| Common/misc/utility                           | 32      | `common.c/h`, `misc.c`, `log.c`, `log_part.c`, `unicode.c`, `utfsize.c`, `setdate.c`, `dfxml.c`, `list_sort.c`, `types.h`, `memmem.h`, `guid_cpy.h`, `guid_cmp.h`, `list_add_sorted*.h`                                                                                                                                                                              |
 
 Non-`src/` (69 files): build/packaging 31 (`m4/` 11, `configure.ac`, `autogen.sh`, `Makefile.am`, `compile.sh`, 3 `.spec`, `Android.mk`, `jni/Android.mk`, 2 `progsreiserfs-*.patch`, `blacklist_cfi.txt`, `.travis.yml`, `.whitesource`, `.git*` meta, `sonar-project.properties`); docs+license 20 (`README.md`, `INSTALL`, `INFO`, `NEWS`, `ChangeLog`, `AUTHORS`, `THANKS`, `README_dev_photorec.txt`, `COPYING`, `documentation.html`, `man/` 10); platform packaging 16 (`win/` 5, `dos/` 2, `darwin/` 2, `linux/` 2, `icons/` 5); other root 2 (`doc`, `config/config.rpath`).
 
@@ -37,7 +37,7 @@ Non-`src/` (69 files): build/packaging 31 (`m4/` 11, `configure.ac`, `autogen.sh
 
 **Read path.** `read_part_i386` (`src/parti386.c:529-593`): read sector 0 → `get_geometry_from_i386mbr` requires the 0x55AA endmark at `0x1FE/0x1FF` (`src/parti386.c:457-460`) else `msg_TBL_NMARK` ("Partition sector doesn't have the endmark 0xAA55", `src/lang.h:28`); for each of the 4 entries with `sys_ind!=P_NO_OS` build a `partition_t` via `i386_entry2partition`; then `test_MBR_data`, `test_MBR_over`, `get_ext_data_i386` (EBR walk, below), `get_geometry_from_list_part`.
 
-**Geometry from MBR** (`get_geometry_from_i386mbr`, `src/parti386.c:448-501`): takes the max end-CHS over the 4 entries to propose `cylinders/heads_per_cylinder/sectors_per_head`; the proposal is *trusted only* when `sectors_per_head==32` or `(sectors_per_head==63 && heads∈{16,32,64,128,240,255})`; otherwise all geometry fields are zeroed with the comment "Don't trust the geometry" (`src/parti386.c:489-499`).
+**Geometry from MBR** (`get_geometry_from_i386mbr`, `src/parti386.c:448-501`): takes the max end-CHS over the 4 entries to propose `cylinders/heads_per_cylinder/sectors_per_head`; the proposal is _trusted only_ when `sectors_per_head==32` or `(sectors_per_head==63 && heads∈{16,32,64,128,240,255})`; otherwise all geometry fields are zeroed with the comment "Don't trust the geometry" (`src/parti386.c:489-499`).
 
 **Entry → partition.** `i386_entry2partition` (`src/parti386.c:1222-1309`): `part_offset = base_offset + get_start_sect(p)*sector_size` (base = 0 for primary entries, the EBR's own offset for logicals); `part_size = get_nr_sects(p)*sector_size`; extended types (0x05/0x0F/0x85 — `src/common.h:53,62,75`) promote to `STATUS_EXT`; `boot_ind!=0` → `STATUS_PRIM_BOOT`. CHS sanity → error codes `BAD_SS/BAD_ES/BAD_SH/BAD_SC/BAD_EH/BAD_EC` (sector/head/cylinder out of range) and `BAD_RS/BAD_SCOUNT` when the stored CHS start/end disagrees with the LBA-derived position (`src/parti386.c:1260-1305`), rendered by `errmsg_i386_entry2partition` (`src/parti386.c:1311-1328`).
 
@@ -46,6 +46,7 @@ Non-`src/` (69 files): build/packaging 31 (`m4/` 11, `configure.ac`, `autogen.sh
 **Type name table.** `i386_sys_types[]` ~90 entries (`src/parti386.c:262-357`): 0x01 "FAT12", 0x05 "extended", 0x07 "HPFS - NTFS", 0x0B "FAT32", 0x0C "FAT32 LBA", 0x0F "extended LBA", 0x0E "FAT16 LBA", 0x83 "Linux", 0x82 "Linux Swap", 0x85 "Linux extended", 0xEE "EFI GPT", 0xEF "EFI (FAT-12/16/32)", 0xFD "Linux RAID", etc. The `arch_i386` vtable (`src/parti386.c:359-378`) exposes read_part/write_part/init_part_order/get_geometry_from_mbr/check_part/write_MBR_code/set_prev_status/set_next_status/test_structure/init_structure/erase_list_part/get_partition_typename.
 
 **Structural sanity tests.**
+
 - `test_MBR_data` (`src/parti386.c:595-648`): at most one bootable (`msg_NO_BOOTABLE` "No partition is bootable" / `msg_ONLY1MUSTBOOT`); at most one extended (`msg_ONLY_ONE_EXT`); ≤1 visible DOS FAT primary; obsolete hidden-partition/OS2-MB check commented out.
 - `test_MBR_over` (`src/parti386.c:832-846`): adjacent list entries must not overlap → `msg_SAME_SPACE` "Space conflict between the following two partitions".
 - `test_structure_i386` (`src/parti386.c:1353-1398`): ≤4 primary+ext combined; exactly one contiguous logical block; logical entries never extended-typed; sorted-list overlap check via `is_part_overlapping`.
@@ -67,6 +68,7 @@ Non-`src/` (69 files): build/packaging 31 (`m4/` 11, `configure.ac`, `autogen.sh
 ### 2.3 GPT parsing — `src/partgpt.c` (623 lines, read fully)
 
 **Header validation** (`read_part_gpt_aux`, `src/partgpt.c:214-376`), in order:
+
 1. Read `sector_size` bytes at `hdr_lba * sector_size`; require `hdr_sig == "EFI PART"` (`GPT_HDR_SIG`, `src/partgpt.h:32`) else "Bad GPT partition, invalid signature."
 2. `hdr_size` must be ≥92 and ≤ sector_size ("GPT: invalid header size.").
 3. **CRC32 check**: zero `hdr_crc_self`, compute `get_crc32(gpt, hdr_size, 0xFFFFFFFF)^0xFFFFFFFF`, compare with the stored value ("Bad GPT partition, invalid header checksum.") — `src/partgpt.c:259-272`.
@@ -89,6 +91,7 @@ Non-`src/` (69 files): build/packaging 31 (`m4/` 11, `configure.ac`, `autogen.sh
 `check_part_i386` (`src/parti386.c:1741-1844`) maps `sys_ind` → checker with fallback chains and user messages: FAT family → `check_FAT` ("Invalid FAT boot sector"); P_NTFS → `check_NTFS` then `check_exFAT` ("Invalid NTFS or exFAT boot"); P_LINUX → `check_linux` (JFS/Reiser/EXT2/cramfs/XFS/LUKS/btrfs/f2fs/gfs2/ZFS — `src/analyse.c:442-458`, "No ext2, JFS, Reiser, cramfs or XFS marker"); P_HFS → HFS then HFSP; P_LINSWAP → `check_Linux_SWAP`; P_LVM → LVM/LVM2 ("No LVM or LVM2 structure"); P_RAID → `check_MD` ("Invalid RAID superblock"); P_FREEBSD/P_NETBSD/P_OPENBSD → `check_BSD` ("Invalid BSD disklabel"); P_SUN → `check_sun_i386`; extended types skip checking. Unknown types are logged "check_part_i386 %u type %02X: no test" and optionally dumped to header files (`save_header`).
 
 The deep-scan probe set (`src/analyse.c`, read fully) is the master signature list:
+
 - `search_type_0` (boot-sector at candidate+0): APFS `nx_magic==0x4253584e`; Linux swap "SWAP" (both at 0 and 8K offsets); LVM1 `LVM_ID`; FAT/exFAT/HPFS/OS2MB/NTFS `marker==0xAA55`; NetWare "Nw_PaRtItIoN" (12 bytes); XFS `XFS_SB_MAGIC`; FATX "FATX"; LUKS "LUKS\\xba\\xbe"; ReFS `fsname==0x52654653`; Linux MD (v1.x `major_version==1`, adjusts part_offset by `super_offset*512`); WBFS "WBFS"; cramfs `CRAMFS_MAGIC` — `src/analyse.c:143-236`.
 - `search_type_1` (+0x200): BSD `d_magic==DISKMAGIC` (×2), BeFS `SUPER_BLOCK_MAGIC1`, cramfs, sysv `0xfd187e20`, LVM2 label, Sun-on-i386 `SUN_LABEL_MAGIC_START` — `src/analyse.c:238-277`.
 - `search_type_2` (+0x400): ext2/3/4 `EXT2_SUPER_MAGIC`, HFS `HFS_SUPER_MAGIC`, HFS+ (`version==4|5`), f2fs `F2FS_SUPER_MAGIC` — `src/analyse.c:279-309`.
@@ -98,7 +101,7 @@ The deep-scan probe set (`src/analyse.c`, read fully) is the master signature li
 
 ### 3.1 Backup boot sectors
 
-**Scan side.** `search_NTFS_backup` (`src/analyse.c:70-84`): read at candidate offset; `0xAA55` marker + `recover_NTFS(..., backup=1)` — recover_NTFS sets `partition->sb_offset` so a partition found via its *backup* boot sector can later be fixed to its true start. `search_FAT_backup` (`src/analyse.c:129-141`, FAT32 backup BS), `search_exFAT_backup` (`src/analyse.c:112-127`, "part_offset has already been updated if found using backup sector"), `search_HFS_backup` (`src/analyse.c:86-110`, HFS MDB / HFS+ VH, sets `partition->info` "HFS found using backup sector!").
+**Scan side.** `search_NTFS_backup` (`src/analyse.c:70-84`): read at candidate offset; `0xAA55` marker + `recover_NTFS(..., backup=1)` — recover_NTFS sets `partition->sb_offset` so a partition found via its _backup_ boot sector can later be fixed to its true start. `search_FAT_backup` (`src/analyse.c:129-141`, FAT32 backup BS), `search_exFAT_backup` (`src/analyse.c:112-127`, "part_offset has already been updated if found using backup sector"), `search_HFS_backup` (`src/analyse.c:86-110`, HFS MDB / HFS+ VH, sets `partition->info` "HFS found using backup sector!").
 
 **Interactive repair (NTFS).** `ntfs_boot_sector` (`src/tntfs.c:203-303`, read fully): `ntfs_boot_sector_scan` reads boot sector at `part_offset` and backup at `part_offset+part_size-sector_size`, evaluates both with `test_NTFS` → "Status: OK"/"Status: Bad", compares bytes ("Sectors are identical."/"Sectors are not identical."), and always reminds "A valid NTFS Boot sector must be present in order to access any data; even if the partition is not bootable." Menu (options string computed from which side is valid, e.g. "DOBRL"): 'D' dump side-by-side (`dump2`), 'L' list files — **transparently IO-redirects the boot sector to the backup buffer when only the backup is valid** (`io_redir_add_redir`, `src/tntfs.c:282-291`), 'O' copy original over backup (`pwrite` at end-of-partition, confirm "Copy original NTFS boot sector over backup boot, confirm ? (Y/N)"), 'B' copy backup over boot (confirm "Copy backup NTFS boot sector over boot sector, confirm ? (Y/N)"; resets `partition->sb_offset=0`), 'R' rebuild BS, 'M' repair MFT.
 
@@ -151,6 +154,7 @@ Analyse menu (src/tanalyse.c) ──'Q' Quick Search──> interface_recovery (
         'W' "Write partition structure to disk" (confirm, then use_backup fix-ups)
         'E' maximize/minimize extended
 ```
+
 `fast_mode` can reach 2 in code (`if((*fast_mode)<2) (*fast_mode)++`) but the gate `can_search_deeper=(*fast_mode<1)` (`src/godmode.c:1409`) means stock UI/CLI never offers 'S' twice — the `fast_mode>1` branches (all-heads scan, RAID superblock probing at every position) are dead-to-UI but present in code.
 
 ### 4.2 Candidate position generation (what makes the scan "not every sector")
@@ -232,55 +236,69 @@ Registration pattern examples verified in source: `file_png.c:359-367` registers
 ## 7. Validator Deep Dives (15 formats)
 
 ### 7.1 JPG — `src/file_jpg.c` (2923 l.; key functions read)
+
 - **Hint**: extension "jpg", "JPG picture", `max_filesize=50*1024*1024` (50MB — unusual, most formats use `PHOTOREC_MAX_FILE_SIZE`), recover=1, enable_by_default=1 (`src/file_jpg.c:87-93`).
 - **header_check_jpg** (`src/file_jpg.c:882-1075`): walks markers from offset 2 while `buffer[i]==0xff && is_marker_valid(buffer[i+1])` (SOF0-15, DHT/DQT/DRI/APP0-15/COM — table at `src/file_jpg.c:798-842`); validates DHT (`jpg_check_dht`); extracts Exif date from APP1 (`jpg_get_date` → `get_date_from_tiff_header`); requires the walk to land on `FF DA` (SOS) within blocksize/512/buffer_size bounds. Rejects: embedded thumbnails (≤1024B APP12 or ≤16KiB APP0 with small SOF0 dimensions), duplicate APP1 XMP, MPO second images, JPGs inside AVI (`jpg_header_app0_avi`), MOV (`jpg_header_app0_jfif11_*`), rw2, indd, doc .albm/.prt — all via `header_ignored_adv`/`header_ignored`. When a previous file is open, APP0 must be JFIF/JFXX, APP1 must be "Exif", COM printable — else the header is ignored (no new file).
 - **End detection**: `data_check_jpg` (`src/file_jpg.c:2629-2766`) marker walk (size fields, SOF0/DHT structural checks); on SOS switches to `data_check_jpg2` (`src/file_jpg.c:2500+`) which scans entropy data for `FF D9` (EOI) and sets `calculated_file_size`; APP2 "MPF" multi-picture handled by `check_mpo` (switches to `data_check_size`+`file_check_mpo`). `file_check_jpg` (`src/file_jpg.c:2443-2500`) re-opens the file: `jpg_check_structure` full marker walk; **libjpeg decompression validation** (`jpg_check_thumb` for embedded thumbnails and `jpg_check_picture` for the image; setjmp-based error manager `my_error_exit/my_emit_message`, `src/file_jpg.c:1082-1356`); uses `offset_error`/`offset_ok` bookkeeping from the checks.
 
 ### 7.2 PNG/MNG/JNG — `src/file_png.c` (full file)
+
 - Signatures: `89 50 4E 47 0D 0A 1A 0A`, `8A 'MNG'…`, `8B 'JNG'…` (`src/file_png.c:361-363`). `header_check_png` requires the first chunk type at +8+4 to be alphabetic and, when "IHDR", validates `png_check_ihdr` (width/height non-zero; bit_depth×color_type legal matrix — `src/file_png.c:85-109`); PNG found inside an OLE doc (SolidWorks) is ignored.
 - **End detection**: `data_check_png`/`data_check_mng` (`src/file_png.c:180-256`) walk chunks: length (BE32) + 4-char type must be letters, else `DC_ERROR` with `offset_error`; stop on `IEND`/`MEND` (+12+length). `file_check_png` (`src/file_png.c:118-172`) re-walks from disk: seeks chunk-by-chunk until IEND; non-IHDR-with-invalid size → file_size=0.
 
 ### 7.3 GZ — `src/file_gz.c` (455 l.; key parts)
+
 - Signature `1F 8B 08` (`src/file_gz.c:441-445`). With zlib: inflates ~64-256KiB and **sniffs the inner content** to re-type the file: `ustar` at inner offset 0x101 → "tar.gz" (tgz under DJGPP), "RDX2" → "RData", `<?xml version=` → "xml.gz", Minecraft `schematic`, `<SCRIBUS` → "sla.gz", `<html` within 256B → "html.gz" (`src/file_gz.c:355-433`). mtime from the gzip header; `file_rename_gz`. Without zlib: min_filesize=22 only.
 
 ### 7.4 ZIP — `src/file_zip.c` (1581 l.; key parts)
+
 - `PK\x03\x04` (+ WinZip AES `PK……` variant, `src/file_zip.c:1476-1478`). `header_check_zip` (`src/file_zip.c:1357-1435`) parses the first local file entry: version≥10, filename length 1..4096; **extension derived from the first entry name**: `mimetype` (parse ODF mimetype string), `[Content_Types].xml` → docx/xlsx/pptx/vsdx depending on `word/`/`xl/`/`ppt/`/`visio/` presence, `Song.xml` → xrns, `Home` → sh3d, `project.json` → sb3, `Index/Document.iwa` → numbers; else zip + `file_rename_zip`. ZIP local-entry signatures found inside an OLE doc are suppressed.
 - **End detection**: `file_check_zip` (`src/file_zip.c:1055-1130+`) walks local entries + central directory to the EOCD record and computes the exact archive size; tracks first filename for rename and expected compressed sizes.
 
 ### 7.5 TAR — `src/file_tar.c` (full file)
+
 - `ustar` GNU (6B) / POSIX (8B) at offset **0x101**; `is_valid_tar_header` = magic + `is_valid_checksum_format` (octal, space-tolerant, or all-zero — `src/file_tar.c:55-108`); min_filesize 512; consecutive tar headers suppress other signature checks during carving (§5.2); no independent end detection (EOF = next invalid header / next carved file).
 
 ### 7.6 PDF — `src/file_pdf.c` (542 l.; key parts)
+
 - `%PDF-1` at 0 + printable byte at [6]. `read_pdf_file` (`src/file_pdf.c:470-501`) parses `/Linearized` `/L` size from the first 512 bytes → exact `calculated_file_size`; `<</Illustrator ` → extension "ai".
 - **End detection**: linearized → `data_check_size` + `file_check_pdf_and_size` (last 20 bytes must contain `%%EOF`, else file_size=0 — `src/file_pdf.c:372-415`); otherwise `file_check_pdf` = backwards footer search `file_search_footer("%%EOF")` + newline tolerance `file_allow_nl(NL_BARENL|NL_CRLF|NL_BARECR)` + date scan `file_date_pdf` (looks for `/CreationDate(D:…)` patterns).
 
 ### 7.7 OLE/DOC — `src/file_doc.c` (2122 l.; key parts)
+
 - OLE2 CFB header `D0 CF 11 E0 A1 B1 1A E1`; `header_check_doc` (`src/file_doc.c:2008-2045`) = `is_valid_doc_header` (sector shift/FAT sanity) + extension from directory-entry names via `ole_get_file_extension`/`entry2ext` (`src/file_doc.c:449+`: `WordDocument`→doc, `PowerPoint Document`→ppt, `Book`→xls, `.QDF`→qdf_backup, `Scene`→max (3ds Max), `Licom`→amb, `CONTENTS`→wps, `PageMaker`→p65, `JNBVersion`→jnb, `RSeStorage`→ipt, …); StarImpress sda→sdd; Publisher wps→pub disambiguation; fallback `ole_dirty_get_file_extension` for damaged FATs.
 - **End detection**: `file_check_doc` walks the FAT chain and directory sectors (returns exact stream sizes); `file_rename_doc` renames using embedded metadata.
 
 ### 7.8 RIFF/AVI — `src/file_riff.c` (526 l.; key parts)
+
 - "RIFF"/"RIFX" at 0; form 4CC at [8] must be uppercase/space/digit. `header_check_riff` (`src/file_riff.c:442-519`) dispatches: "AVI " → `header_check_riff_avi` (`src/file_riff.c:330-375`: detects raw `movi`+`db` data-binary AVI streams vs LIST-chunk AVI; sets `data_check_avi_stream`+`file_check_size_max` or `data_check_avi`+`file_check_avi`); "ACON"→ani; "NUND"→cpr (Cubase); others → `header_check_riff_various` (`src/file_riff.c:376-430`: CDDA→cda, CDR/cdr6→cdr, RMP3/WAVE→wav, RMID→mid, `IDF LIST`→idf, AGNX→agn, MDLX→mdl, QLCM→qcp, WEBP→webp; exact RIFF size via `data_check_size`/`file_check_size`). RIFX+"Egg!"→aep (After Effects, `file_check_size_min`).
 - **End detection**: `data_check_avi` walks LIST/chunk structure (`src/file_riff.c:253+`); `file_check_avi` searches for the `idx1` index footer (`src/file_riff.c:190-252`).
 
 ### 7.9 MOV/MP4 — `src/file_mov.c` (676 l.; key parts)
-- Atom fourcc at offset 4 (21 registered: ftyp, moov, mdat, wide, pnot, skip, free, cmov, cmvd, dcom, jp2h, jP  , mdia, stbl, trak, PICT, …— `src/file_mov.c:555-579`). `header_check_mov_aux` (`src/file_mov.c:246-330+`) walks atoms from 0: BE32 size (extended 64-bit when size==1), rejects <8 or ≥0x800000000000; `pnot` must be exactly 20 bytes, `wide` exactly 8, `moov` ≤256³; extension by ftyp brand via `file_rename_mov` (mp4/m4a/3gp/3g2/heic/jp2/cr3); separate disabled-by-default `file_hint_mov_mdat` ("mov/mdat") to carve mdat atoms standalone.
+
+- Atom fourcc at offset 4 (21 registered: ftyp, moov, mdat, wide, pnot, skip, free, cmov, cmvd, dcom, jp2h, jP , mdia, stbl, trak, PICT, …— `src/file_mov.c:555-579`). `header_check_mov_aux` (`src/file_mov.c:246-330+`) walks atoms from 0: BE32 size (extended 64-bit when size==1), rejects <8 or ≥0x800000000000; `pnot` must be exactly 20 bytes, `wide` exactly 8, `moov` ≤256³; extension by ftyp brand via `file_rename_mov` (mp4/m4a/3gp/3g2/heic/jp2/cr3); separate disabled-by-default `file_hint_mov_mdat` ("mov/mdat") to carve mdat atoms standalone.
 - **End detection**: `data_check_mov` (`src/file_mov.c:145-245`) walks the atom tree to the computed size; `file_check_size`.
 
 ### 7.10 MP3 — `src/file_mp3.c` (825 l.; key parts)
+
 - Registered patterns: "ID3" at 0 + six frame-sync headers for MPEG1/2/2.5 Layer III (`src/file_mp3.c:637-643`). `header_check_mp3` (`src/file_mp3.c:511-625`) validates a **frame chain**: sync `FF` with `(b1&0xFE)∈{FA,F2,E2}`; computes `frameLengthInBytes` from bit_rate_table/sample_rate_table (`144000*bit_rate/sample_rate+padding`, `72000*…` for MPEG2) and walks consecutive frames — requires ≥2 valid frames (`nbr<=1` reject); rejects mp3-looking data inside mkv and TIFF-RGB lookalikes. ID3 route: `header_check_id3` parses tag version/size → `data_check_id3` until tag consumed.
 - **End detection**: `data_check_mp3` (`src/file_mp3.c:274-414`) continues the frame walk (returns DC_STOP when frames stop validating); `file_check_size` truncates at `calculated_file_size`; min_filesize 287.
 
 ### 7.11 RAR — `src/file_rar.c` (full file)
+
 - `Rar!\x1a\x07\x00` (1.5) / `Rar!\x1a\x07\x01\x00` (5.0); min 70/60 bytes; **footer search only for unencrypted archives** (`buffer[0xa] & MHD_PASSWORD` == 0 — `src/file_rar.c:73,105`).
 - **End detection**: `file_check_rar15fmt`/`rar50fmt` search backwards for the exact archive-end footers `c4 3d 7b 00 40 07 00` / `1d 77 56 51 03 05 04 00` via `file_search_footer`.
 
 ### 7.12 7z — `src/file_7z.c` (full file)
+
 - `37 7A BC AF 27 1C`; validates `majorversion==0`, `nextHeaderOffset/Size` < 0x7000000000000000; exact size = `nextHeaderOffset + nextHeaderSize + 12 + 20`; `data_check_size` + `file_check_size`; min_filesize 31 (`src/file_7z.c:64-82`).
 
 ### 7.13 SQLite — `src/file_sql.c` (full file)
+
 - "SQLite format 3" (16B); page-size validation (power of two 512..32768, or 1 ⇒ 65536); **when `filesize_in_page>0` and `file_change_counter==version_valid_for`** the header is trusted for an exact size `filesize_in_page*pagesize` (→ `data_check_size`/`file_check_size`); otherwise no size computation; extension "sql" under DJGPP (`src/file_sql.c:82-108`).
 
 ### 7.14 TXT/FASTTXT — `src/file_txt.c` (4058 l.; key parts)
+
 - Three hints: `file_hint_fasttxt` ("tx?" — rtf/xml/xhtml/mbox/imm/pm/ram/reg/sh/slk/stp/jad/url…), `file_hint_snz`, `file_hint_txt` (txt/html/asp/bat/C/jsp/perl/php/py/emlx/scripts) (`src/file_txt.c:137-163`). Known-header table `fasttxt_headers[]` (~60 entries from `#!/bin/bash`→sh through `<?xml`→xml — `src/file_txt.c:163+`). `header_check_txt` (`src/file_txt.c:1649-1730+`): emlx detection (decimal length prefix + "Return-Path: "/"Received: from" → exact size + `file_check_emlx`), `@echo off`→bat, `<%@ language="vbscript`→asp, `version 4.00\r\nbegin`→vb, `begin:vcard`→vcf; generic branch applies ASCII/UTF statistics and language heuristics (large tables later in the file) to pick txt/html/etc.
 - **End detection**: `data_check_txt` (`src/file_txt.c:795`) line-oriented continuation scan; `file_check_size`.
 
@@ -301,16 +319,19 @@ Shared plumbing verified in `src/filegen.c`: `file_rsearch` (backwards 4KiB-stri
 ## 9. Session / Log / Options
 
 ### 9.1 Session checkpoint — `photorec.ses` (`src/sessionp.c`, read fully)
+
 - Saved after every pass and every 5 minutes mid-pass (`regular_session_save`, `src/sessionp.c:374-382`; cadence drops to 15 minutes if a save takes >30 s). File pre-allocated to `SESSION_MAXSIZE 40960` zero bytes (`src/sessionp.c:56-85, 351-366`).
 - **Format** (`session_save`, `src/sessionp.c:200-349`): `#<unixtime>\n` then `<device> <arch part_name_option>,<partition order>,blocksize,<N>,fileopt,…,options,…,freespace|wholespace,search,status=<status>,<offset_sector>,inter\n` followed by one `<start_sector>-<end_sector>` line per remaining search-space range. The `fileopt` section stores the **minimal diff** of the enabled-format set (either "everything,enable," + the disabled extensions, or "everything,disable," + the enabled ones, or just the deviations from defaults). Options saved verbatim: `paranoid_no|paranoid|paranoid_bf`, `keep_corrupted_file[_no]`, `mode_ext2`, `expert`, `lowmem`.
 - `session_load` (`src/sessionp.c:87-198`) restores device, command string, and ranges; an empty session file is created when absent. Clean finish → `unlink("photorec.ses")` (`src/phrecn.c:411-413`); user stop with failed save → "PhotoRec has been unable to save its session status. Answer Y to really Quit, N to resume the recovery" (`src/phrecn.c:398-405`). Resume: `photorec /cmd <device> resume` (`src/phmain.c:324-327`).
 
 ### 9.2 Logs
+
 - **photorec.log** (default name, `src/phmain.c:178`): created only with `/log` (append) or `/debug` (also verbose; `/nolog` cancels; `/logname` renames) — `src/phmain.c:243-269, 376-411`. Content: full command line, version, compiler, lib versions (ext2fs/ntfs/ewf/jpeg/curses/zlib), OS, disk list (`log_disk_list`, `src/fnctdsk.c:505+`), "Pass N (blocksize=…) STATUS_…", per-file `filename  start-end …` (parenthesized ranges = non-data/truncated, `file_block_log`, `src/photorec.c:91-108`), per-extension stats `"%s: %u/%u recovered"` + `"Total: %u files found"` (`write_stats_log`, `src/photorec.c:450-489`), "Elapsed time %uh%02um%02us" per pass (`src/phrecn.c:435-441`), final "perf: get_prev_file_header: N, get_prev_location_smart: N" and "PhotoRec exited normally." (`src/phmain.c:477-482`).
 - **JSON log** `/logjson <file>`: JSON-lines records `{"timestamp":"…","type":…}` with types `session_start`, `disk_info` (path/size_bytes/sector_size/readonly), `partition_info` (part_offset/part_size/sectors), `cli_params` (argv array), `session_resume` (device/cmd/search_space_regions/resume offset/files already found), `progress` (pass, current_sector, total_sectors, files_found), `file_recovered`, `completion` — `src/json_log.c:139-406`; registered via `log_set_json_handler(json_log_handler, …)` (`src/phmain.c:456-461`).
 - **DFXML** (`ENABLE_DFXML`): `xml_log_file_recovered` per recovered file (`src/photorec.c:757-759`).
 
 ### 9.3 Options — exact semantics
+
 - **CLI (photorec)**: `/log`, `/nolog`, `/logname <f>`, `/logjson <f>`, `/debug`, `/d <dir>`, `/all` (list all devices incl. virtual), `/direct` (O_DIRECT), `/nosetlocale`, `/cmd <device> <script>`, `/version`, `/help` (`src/phmain.c:128-139, 240-370`).
 - **Script verbs** (consumed by `menu_photorec_cli` `src/phcli.c:147-293`, `photorec()` `src/phrecn.c:180-236`, `interface_write` `src/tpartwr.c:100-121`, `ntfs_boot_sector_command` `src/tntfs.c:76-107`): `search`; `options,` with `paranoid_no|paranoid|paranoid_bf`, `keep_corrupted_file_no|keep_corrupted_file`, `mode_ext2`, `expert`, `lowmem` (`src/poptions.c:37-99`); `fileopt,` with `<ext>,enable|disable` or `everything,enable|disable` (`src/phcli.c:73-144`); `wholespace` / `freespace`; `blocksize,N`; `geometry,C,/H,/S,/N,`; `ext2_group,N` / `ext2_inode,N`; `inter` (drop to interactive); partition `<order>` digit; `status=unformat|find_offset|ext2_on[_bf|_save_everything]|ext2_off[_bf|_save_everything]`; `noconfirm`, `write`, `dump`, `list`, `rebuildbs`, `originalntfs`, `backupntfs`, `repairmft`.
 - **paranoid** (3 levels, `src/phrecn.c:507-522` + `src/photorec.c:998-1042`): 0 = "Paranoid : No" — files never re-validated; 1 = "Yes (Brute force disabled)" — `file_check` runs, failed files deleted; 2 = "Yes (Brute force enabled)" — validation + the `photorec_bf` fragmented-file brute-force pass (`STATUS_*_BF`).
@@ -323,6 +344,7 @@ Shared plumbing verified in `src/filegen.c`: `file_rsearch` (backwards 4KiB-stri
 ## 10. Error Model (notable paths, user-visible)
 
 **Partition flows:**
+
 - `msg_PART_RD_ERR` "Partition: Read error" (`src/lang.h:46`); `msg_TBL_NMARK` endmark missing (`src/lang.h:28`); `msg_SAME_SPACE` overlap (`src/lang.h:52`); `msg_ONLY_ONE_EXT` / `msg_NO_BOOTABLE` / `msg_ONLY1MUSTBOOT` (`src/lang.h:49-51`).
 - "Invalid partition structure." (`src/godmode.c:1533`); `msg_PART_WR_ERR` on write failure (`src/godmode.c:1442`); "Write isn't available because the partition table type \"%s\" has been selected." (`src/tpartwr.c:133-135`); Mac/Sun/Xbox write → `not_implemented("write_part_mac|sun|xbox")` (`src/godmode.c:1413-1429`); "You will have to reboot for the change to take effect." (`src/godmode.c:1448`); "Can't create backup.log." (`src/tanalyse.c:99-102`).
 - Geometry: "Warning: the current number of heads per cylinder is %u but the correct value may be %u." + remediation hint (`src/godmode.c:344-369, 1342-1350`).
@@ -333,6 +355,7 @@ Shared plumbing verified in `src/filegen.c`: `file_rsearch` (backwards 4KiB-stri
 - FAT rebuild: "Can't find cluster size", "Can't find FAT length", "Can't get cluster size", "dir_entries not found, should be 512", "Extrapolated boot sector and current boot sector are different/identical", "Warning: Extrapolated boot sector have incorrect values.", "Write error: Can't write new FAT boot sector" (`src/fat_adv.c:1897-1060`).
 
 **PhotoRec flows:**
+
 - `PSTATUS_EACCES` → "PhotoRec has been unable to create new file. / This problem may be due to antivirus blocking write access while scanning files created by PhotoRec. / If possible, temporarily disable your live antivirus protection." (Cygwin/MinGW interactive C/Q menu; elsewhere → quit) — `src/phrecn.c:113-131`, `src/photorec_check_header.h:35-65`; "Cannot create file %s: %s" (`src/photorec_check_header.h:145-152`).
 - `PSTATUS_ENOSPC` → "Warning: not enough free space available. Please select a destination to save the recovered files to.\nDo not choose to write the files to the same partition they were stored on." + destination re-pick (`src/phrecn.c:368-392`); "Cannot write to file %s after %llu bytes: %s" (`src/psearchn.c:188-204`; EFBIG → treat as EOF).
 - "Error reading sector %10lu" during scan (`src/psearchn.c:337-345`, `src/phbs.c:195-203`); "File too small ( %llu < %llu), reject it" (`src/photorec.c:676-681`); "ftruncate failed." (`src/photorec.c:697-700`); "File should not be bigger than %llu, stopped adding data" (`src/psearchn.c:225-240`); "Cannot write to file %s: %s" (`src/phbf.c` BF writers).
@@ -376,6 +399,7 @@ Validators fully: `src/file_png.c` (368), `src/file_rar.c` (120), `src/file_7z.c
 **Totals: 30 full + ~20 partial = ~50 of 793 files read (~6%).** The remaining **~743 files were enumerated and classified only** and are NOT presented as read: all 338 non-deep-read `file_*.c` validators (names/format list taken from `git ls-files` only), filesystem modules (fat/ntfs/ext2/... recovery internals), `partmac.c`/`partsun.c`/`partxbox.c`/`parthumax.c`/`partnone.c`/`bsd.c` bodies, disk I/O layer, ncurses UI files, Qt GUI, docs, packaging.
 
 **Anomalies / notes:**
+
 - `sed`-piped display dropped `[` characters in some terminal output (e.g. `bit_rate_table[mpeg_version]…` rendered `bit_rate_tablepeg_version]`); every affected identifier was re-verified against the file with the Grep tool before being cited.
 - `src/file_list.c:2165-2170` embeds a compile-time assert "No file format has been enabled".
 - GPT backup-entries placement check is a TODO (`src/partgpt.c:370-372`); fast_mode>1 branches in `src/godmode.c`/`src/next.c` are unreachable from stock UI/CLI.

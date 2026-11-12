@@ -1,13 +1,13 @@
 # MFT-RESCUE Feature Harvest — Agent G
 
-| Field | Value |
-|---|---|
-| Repo | https://github.com/hasithahathella/mft-rescue (local depth-1 clone `/home/z/my-project/refs/mft-rescue`) |
-| HEAD | `9b0e5ecc9d24ae9918f83e3a81e4a8616f610a22` (single commit, verified `git rev-parse HEAD`) |
-| License | MIT, "Copyright (c) 2026 Hasitha Haththella" (LICENSE, verbatim standard MIT text, 21 lines) |
-| Stack | Python 3.10+ stdlib-only (argparse, ctypes, ctypes.wintypes, json, logging, os, re, struct, sys, time, dataclasses, pathlib, typing) — **no Rust/Tauri/GUI**; Windows CLI tool |
-| Date / Agent | 2026-11-12 / Agent G (MFT-analysis & rescue features) |
-| Size | 8 tracked files, 1382 lines total; largest: recovery/ntfs_recover.py (655 ln) |
+| Field        | Value                                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Repo         | https://github.com/hasithahathella/mft-rescue (local depth-1 clone `/home/z/my-project/refs/mft-rescue`)                                                                       |
+| HEAD         | `9b0e5ecc9d24ae9918f83e3a81e4a8616f610a22` (single commit, verified `git rev-parse HEAD`)                                                                                      |
+| License      | MIT, "Copyright (c) 2026 Hasitha Haththella" (LICENSE, verbatim standard MIT text, 21 lines)                                                                                   |
+| Stack        | Python 3.10+ stdlib-only (argparse, ctypes, ctypes.wintypes, json, logging, os, re, struct, sys, time, dataclasses, pathlib, typing) — **no Rust/Tauri/GUI**; Windows CLI tool |
+| Date / Agent | 2026-11-12 / Agent G (MFT-analysis & rescue features)                                                                                                                          |
+| Size         | 8 tracked files, 1382 lines total; largest: recovery/ntfs_recover.py (655 ln)                                                                                                  |
 
 ## Overview
 
@@ -121,6 +121,7 @@ Verified by exhaustive read + grep (`LogFile|UsnJrnl|USN|journal|slack|INDEX_ALL
 **Scan-level:** mid-scan read error → `"Read error at %d: %s. Skipping 1 MiB."` (`ntfs_recover.py:437`); alignment assumes `record_size` divides 16 MiB (true for 1024/2048/4096; custom `--record-size` not dividing it desynchronizes records across buffers [UNVERIFIED — inferred]); phantom records indexed from arbitrary aligned offsets.
 
 **Recovery-level user-facing messages (copy-exact):**
+
 - `"Refusing: output {out} is on source drive {src_letter}:"` (`ntfs_recover.py:505`, SystemExit)
 - `"Refusing: output {out} is on the same volume as source {src}"` / `"... is on source drive {src_letter}:. Pick a different volume."` (`image_disk.py:173,178-180`, SystemExit)
 - `"CreateFileW({path}) failed (WinError {err}). Run as Administrator?"`, `"IOCTL_DISK_GET_LENGTH_INFO failed (WinError {err})"`, `"SetFilePointerEx({offset}) failed (WinError {err})"`, `"ReadFile failed (WinError {err})"` (OSError; `image_disk.py:108,126,138,149`)

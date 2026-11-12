@@ -26,6 +26,7 @@ src/parser/        boot_sector, mft_record, fixup, attributes, filename, data_ru
 **Entry point**: `main()` in `src/main.rs` (clap `Cli` struct; subcommands `Scan`, `List`, `Extract`, `Repair`). Global args: `device`, `-s/--scan-file` (default `./scan.rntfs`), `--cluster-size` override, `--threads` (default `available_parallelism()` via `num_cpus()`, `src/main.rs:151-155`), `-v/--verbose` (env_logger level debug vs info).
 
 **CLI surface** (`src/main.rs` `enum Commands`):
+
 - `scan <DEVICE_OR_IMAGE>` — full-disk MFT-record hunt, writes resumable `.rntfs` index.
 - `list [device] [-p pattern]* [--min-size][--max-size][--include-deleted]` — loads scan, rebuilds tree, prints `flags size path` lines (`extractor.rs list_files`, lines 213-226).
 - `extract <device> [-o DIR=./recovered] [-p glob]* [--min-size][--max-size][--list-only][--no-dirs][--include-deleted][--dry-run]` — one-shot: auto-scans first if no scan file exists (`main.rs:234-245`).
@@ -47,11 +48,13 @@ The scenario: `$MFT`'s own `$DATA` run list (and `$MFTMirr`'s copy) is corrupted
 Step-by-step, with citations:
 
 **1. Geometry without trusting the MFT.**
+
 - `scanner.rs read_boot_sector` (lines 180-198) reads 512 bytes at offset 0 and calls `parser::boot_sector::parse_boot_sector`.
 - Bad OEM ID → warn + **fall back to defaults**: sector 512, cluster 4096, record 1024, `mft_start_offset = 0` (`scan_device` lines 219-222; constants lines 17-18).
 - No backup-boot-sector fallback exists (see §Edge Cases — absence finding).
 
 **2. Salvage any fragment map that still parses.**
+
 - `scanner.rs parse_mft_fragments` (lines 61-156): seek `mft_start_offset`, read one record, check `has_file_signature`, fixup via `parse_mft_record`, then `iterate_attributes`.
 - Finds the unnamed non-resident `$DATA` (`ATTR_DATA` = 0x80, `name_length == 0`, `non_resident`) and `decode_data_runs` its run bytes (`attr.data_run_bytes(&buf)`).
 - Each run → `MftFragment { logical_start, cluster_start, cluster_count }`, `logical_start += cluster_count * (cluster_size/record_size)`; **sparse runs advance logical numbering only** (lines 103-105).
@@ -59,40 +62,49 @@ Step-by-step, with citations:
 - No FILE signature / decode failure ⇒ empty fragment list; scanning proceeds regardless (lines 81-84, warn at 124).
 
 **3. Signature sweep at every record-size boundary.**
+
 - `scan_device` loops 64 MB chunks (`CHUNK_SIZE`, line 16) via sequential `File::read` (not mmap — see §Coverage/anomalies).
 - `scan_chunk` (lines 314-358) walks each chunk in `record_size` steps: `has_file_signature(slice) && validate_mft_record(slice)`.
 - Sweep is **record-size-aligned (default 1024)**, not a generic sector sweep; parallelism = `chunk.par_chunks(1 MB)` under rayon (lines 276-279, thread pool at 244).
 
 **4. Candidate validation.**
+
 - `parser/mft_record.rs validate_mft_record` (lines 115-134): (a) ≥48 bytes + `FILE` magic; (b) allocated-size sanity — hard-reject only `> 65536` (0 and >4096 merely suspicious); (c) `first_attribute_offset` must be `≥ 0x30` and `< allocated`.
 - Deliberately permissive ("best-effort, not strict validation", `README.md` §Why a custom parser).
 
 **5. Fixup application + header extraction.**
+
 - `parse_mft_record` (mft_record.rs 99-112) parses the full header and calls `fixup.rs apply_fixup_array` — Result is **discarded** (`let _ = ...`): a fixup mismatch does NOT reject the record.
 - `apply_fixup_array` (fixup.rs 15-60): each sector-end word must equal the USA signature; originals restored in place; short buffer ⇒ break early.
 
 **6. Record numbering (chaining).** `scan_chunk` lines 332-339, three-tier fallback:
+
 1. `resolve_mft_record_number(disk_offset, fragments, ...)` (lines 158-176) — disk offset → cluster → covering fragment → logical number; **only if a fragment map covers that cluster** (`cluster >= frag.cluster_start && cluster < frag.cluster_start + frag.cluster_count`).
 2. Else the header's self-describing `mft_record_number` at 0x2C (only if non-zero).
 3. Else positional guess `disk_offset / record_size`.
+
 - When $MFT runs are garbage, the record header's own number is the primary identity; the fragment map only refines it.
 
 **7. Deduplication into a tree.** `rebuilder.rs rebuild_tree` (lines 21-155):
+
 - Base records (`base_record == 0`, from `MftRecordHeader::base_record_number()` = low 48 bits of the 0x20 reference, mft_record.rs 33-36) → `parse_record_to_entry`.
 - Extension records shelved separately (lines 31-35) and merged into empty-data base records later (lines 78-86, `extract_data_runs_from_record` 259-282).
 - Per MFT number with multiple hits: prefer **in-use over deleted, then highest sequence number** (lines 66-74).
 
 **8. Path resolution via parents, with cycle/orphan guards.**
+
 - `resolve_paths` + `build_path_cached` (rebuilder.rs 284-357): memoized DFS from each entry through `$FILE_NAME.parent_record_number` (filename.rs 63, low 48 bits) up to root record 5 (empty path, line 291).
 - Guards: `visited: HashSet<u64>` breaks cycles → `__CYCLE__/<mft_num>` prefix (line 321); missing parent → `__ORPHANED__/<mft_num>` (line 326); self-parent returns bare name (lines 338-341).
 - Deleted records are **kept during resolution** (deleted directories still resolve paths, comment lines 17-20) and pruned afterward unless `--include-deleted` (lines 119-134).
 - `identify_orphans` (lines 360-375) fills `tree.orphaned` from path markers.
 
 **9. Content extraction.** `extractor.rs extract_files` (lines 25-123):
+
 - Filter (size/glob/deleted), sort by first data-run cluster to minimize seeks (lines 48-53).
 - `extract_single_file` (lines 126-210): resident `$DATA` copied verbatim from stored record bytes; non-resident runs read at `cluster_offset*cluster_size .. +cluster_count*cluster_size`, capped at `file_size` (from `$DATA real_size` or resident length, `remaining` bookkeeping lines 160-204); sparse runs → zeros (lines 168-179); 1 MB buffer; EOF mid-run only warns (lines 194-197).
 
 **10. MFT repair (making the volume mountable).**
+
 - `main.rs` `Commands::Repair` + `--reconstruct` → `repairer.rs reconstruct_fragments` (lines 179-290):
   - Dedup by record number (highest sequence wins; extension records skipped).
   - **Group by `delta = disk_offset − mft_record_number × record_size`** — constant within one physical MFT extent (lines 227-231).
@@ -142,6 +154,7 @@ Step-by-step, with citations:
 - **A-20 Delta-based logical record resolution** — `scanner.rs resolve_mft_record_number` (lines 158-176) and its repair-time dual (A-16's delta grouping). The invariant exploited: within one MFT extent, `disk_offset − record_number × record_size` is constant.
 
 **Top extractable algorithms for the d-space port** (self-contained, no NTFS-crate dependency):
+
 1. The 1024-boundary `FILE`-signature sweep with `validate_mft_record` cheap filter + rayon sub-chunk parallelism (`scanner.rs scan_chunk`).
 2. Delta-grouping fragment reconstruction from scattered records (`repairer.rs reconstruct_fragments`) — the crown jewel; solves "no valid $MFT at all".
 3. `encode_data_runs` with sign-bit-safe `min_bytes_unsigned` — required for ntfs-3g compatibility (`data_runs.rs 109-164`, `DEBUGGING.md`).
@@ -154,21 +167,24 @@ Step-by-step, with citations:
 ## Edge Cases & Error Model
 
 **ParseError enum** (`parser/error.rs` lines 5-35; Display lines 37-76 — exact messages):
+
 - `BufferOverflow{offset,needed,available}` → `"buffer overflow at offset {:#x}: need {} bytes, only {} available"`.
 - `InvalidSignature{offset,expected}` → `"invalid signature at offset {:#x}: expected '{}'"` (used for boot OEM ID and FILE magic).
 - `FixupMismatch{sector,expected,found}` → `"fixup mismatch at sector {}: expected {:#06x}, found {:#06x}"`.
 - `InvalidAttributeLength{offset,length}` → `"invalid attribute length {} at offset {:#x}"`.
 - `InvalidDataRun{offset,reason}` → `"invalid data run at offset {:#x}: {}"`.
 - `Generic(String)`.
-All reads go through bounds-checked helpers `read_u8/i8/u16_le/u32_le/u64_le/i64_le/uint_le/int_le/read_bytes` (lines 82-195); `read_int_le` sign-extends from the n-byte MSB.
+  All reads go through bounds-checked helpers `read_u8/i8/u16_le/u32_le/u64_le/i64_le/uint_le/int_le/read_bytes` (lines 82-195); `read_int_le` sign-extends from the n-byte MSB.
 
 **anyhow user-facing failures** (strings copy-exact):
+
 - `scanner.rs`: `"Device/image reports size 0"` (line 204); resume bail reasons `"no scan file"`, `"wrong magic"`, `"device size mismatch"`, `"params mismatch"`, `"header too small"`, `"fragment count too large: {}"` (line 377, cap 10,000), `"open scan file"`, `"create scan file"`, `"reopen scan file"`, `"deserialize legacy"`, `"file too small"`.
 - `main.rs`: `"No scan file found. Run 'scan' first."` (list, line 194; repair, line 280); `"invalid glob pattern: '{}'"` (line 386).
 - `repairer.rs`: `"No MFT fragments found in scan results. The scan must have found MFT record 0 with parseable data runs, or fragments must be reconstructed from the scan. Cannot repair without fragment map."` (lines 35-39); `"MFT start offset is 0 — boot sector was likely unreadable. Cannot determine where to write the repaired record."` (lines 42-46); `"Boot sector is required for repair — cannot determine disk geometry"` (line 50); `"Record at offset {:#x} does not have FILE signature"` (line 485); `"Could not find unnamed non-resident $DATA attribute in existing record"` (line 533-535); `"New data runs ({} bytes) don't fit in existing $DATA attribute ({} bytes available). Would need to restructure the record."` (lines 549-555); `"MFT record too small to fit data runs. … Use repair with --fit-record to auto-trim fragments."` (lines 728-736, unreachable dead path — `--fit-record` flag **does not exist** in the CLI and `fit_record` is always `false`).
 - `extractor.rs`: `"failed to open device/image for reading"`, `"failed to create output directory"`, `"failed to create parent directories"`, `"failed to create output file"`, `"failed to write resident data"`; per-file failures warn `"Failed to extract '{}': {}"` and continue (lines 101-108) — extraction never aborts on one bad file.
 
 **Behavioral edge cases:**
+
 - Truncated images: scan chunk read may return short (`chunk.truncate(n)`, scanner.rs 268-270).
 - Extraction EOF mid-run: warn `"Unexpected EOF reading data run"`, keep partial file (extractor.rs 194-197).
 - Scan-file truncation: read as many valid batches as possible (`read_all_batches` breaks on EOF / length `>1_000_000_000` / deserialize error with warns, scanner.rs 493-518).
@@ -204,6 +220,7 @@ All reads go through bounds-checked helpers `read_u8/i8/u16_le/u32_le/u64_le/i64
 ## Coverage
 
 Repo has **25 tracked files** (`git ls-files | wc -l` = 25). Read fully with the Read tool (or full equivalent via persisted output for the oversized file):
+
 1. `README.md` (260 lines)
 2. `SPEC.md` (613)
 3. `DEBUGGING.md` (182)
@@ -233,6 +250,7 @@ Repo has **25 tracked files** (`git ls-files | wc -l` = 25). Read fully with the
 Not read: `.git/` directory contents (excluded per rules; no credentials touched; `git remote` never run).
 
 **Anomalies / absence findings (plain):**
+
 - `memmap2` declared in Cargo.toml and locked, but **zero uses** in `src/` (grep `memmap` = no matches) — scanning is plain `File::read` into 64 MB buffers. README's "Memory-mapped I/O" claim is stale.
 - Dead code: `build_mft_record_0` (repairer.rs 590-796) and `fit_record` field never called/read; `save_tree`/`load_tree` (rebuilder.rs 378-391) exported but unused; `parse_attribute_list` + `attribute_list.rs` module never invoked; `ScanIndexEntry` (types.rs 72-79) never constructed; `hard_link_count`, `parent_sequence`, `lsn`, `index_record_size`, `volume_serial`, `total_sectors` parsed but unused downstream.
 - `main.rs` note at line 294 ("end_vcn = 1,154,035 → records 0 through 4,616,143") embeds a real-drive constant in a comment only — code is generic.

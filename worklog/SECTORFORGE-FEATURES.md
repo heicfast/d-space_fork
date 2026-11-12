@@ -1,15 +1,15 @@
 # SECTORFORGE — Feature Map (Agent B)
 
-| Field | Value |
-|---|---|
-| Repo | https://github.com/terraseraph/sectorforge (depth-1 clone at `/home/z/my-project/refs/sectorforge`) |
-| HEAD | `b292a299c18013706e81d670657ced6c43f200ca` (verified via `git rev-parse HEAD`) |
-| Tracked files | 197 (verified via `git ls-files \| wc -l`) |
-| License | **MIT**, `LICENSE` lines 1–21, "Copyright (c) 2026 terra seraph" — read in full |
-| Stack | Rust workspace: `crates/sf-core` (engine) + `crates/sf-cli` (CLI; clap 4, anyhow, serde_json, sha2; thiserror; windows-sys / libc for raw IO) |
-| GUI | Tauri 2 (`gui/src-tauri`, Rust) + React 19 / TypeScript strict / Vite 6 / zustand 5 / @tanstack/react-virtual 3 / Vitest + Testing Library (`gui/package.json`) |
-| Version | workspace `version = "0.3.0"` (`Cargo.toml` line 7); JSON contract v2 (`crates/sf-cli/src/lib.rs` `CONTRACT_VERSION: u32 = 2`, line 22) |
-| Date / agent | 2026-11-12, Agent B (research only; nothing modified, no network, no git state changes) |
+| Field         | Value                                                                                                                                                           |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Repo          | https://github.com/terraseraph/sectorforge (depth-1 clone at `/home/z/my-project/refs/sectorforge`)                                                             |
+| HEAD          | `b292a299c18013706e81d670657ced6c43f200ca` (verified via `git rev-parse HEAD`)                                                                                  |
+| Tracked files | 197 (verified via `git ls-files \| wc -l`)                                                                                                                      |
+| License       | **MIT**, `LICENSE` lines 1–21, "Copyright (c) 2026 terra seraph" — read in full                                                                                 |
+| Stack         | Rust workspace: `crates/sf-core` (engine) + `crates/sf-cli` (CLI; clap 4, anyhow, serde_json, sha2; thiserror; windows-sys / libc for raw IO)                   |
+| GUI           | Tauri 2 (`gui/src-tauri`, Rust) + React 19 / TypeScript strict / Vite 6 / zustand 5 / @tanstack/react-virtual 3 / Vitest + Testing Library (`gui/package.json`) |
+| Version       | workspace `version = "0.3.0"` (`Cargo.toml` line 7); JSON contract v2 (`crates/sf-cli/src/lib.rs` `CONTRACT_VERSION: u32 = 2`, line 22)                         |
+| Date / agent  | 2026-11-12, Agent B (research only; nothing modified, no network, no git state changes)                                                                         |
 
 Citation convention: paths relative to repo root; anchors are function/struct/const/line-ranges; identifiers copy-exact (Grep-verified where noted).
 
@@ -24,23 +24,27 @@ Citation convention: paths relative to repo root; anchors are function/struct/co
 ## Overview & Architecture
 
 **Product** (README.md lines 13–20):
+
 - Windows/Linux portable data-recovery app for failing drives: two-pass ddrescue-style imaging → partition discovery → filesystem file listing incl. deleted + extraction; or header-signature carving when no filesystem survives.
 - Ideas credited to ddrescue, TestDisk/PhotoRec, DMDE, R-Studio, UFS Explorer (README.md lines 18–19, 238–243). "SectorForge refuses to write anything onto the drive it's reading from" (README.md lines 104–105).
 
 **Layering** (README.md "Layout" lines 224–236, confirmed in code):
+
 - `crates/sf-core` — engine: raw device access, resumable mapfile, imager, partition detection, drive listing + same-drive check, NTFS/FAT/exFAT/ext readers, carver (`crates/sf-core/src/lib.rs` module list, lines 5–18).
 - `crates/sf-cli` — thin CLI wrapper speaking the NDJSON contract v2 (`crates/sf-cli/src/lib.rs` header lines 1–3; `Command` enum lines 51–165).
 - `gui/src-tauri` — Tauri 2 shell; **never links sf-core on Linux**; runs `sf-cli --json` as a child process and parses stdout (`gui/src-tauri/src/cli.rs` header lines 1–2; `docs/cli-contract.md` lines 5–11).
-- Windows single-exe variant: the engine is embedded and the GUI runs a copy of *itself* as the child — `SectorForge.exe sf-cli <args>` (`gui/src-tauri/src/main.rs` lines 4–9; `EMBEDDED_ARG = "sf-cli"` cli.rs line 214; `ENGINE_EMBEDDED: bool = cfg!(windows)` line 218).
-- `gui/src` — React frontend; Zustand stores + a column-oriented `FileStore` held *outside* React state for million-row listings (`gui/src/store/recover.ts` lines 92–98).
+- Windows single-exe variant: the engine is embedded and the GUI runs a copy of _itself_ as the child — `SectorForge.exe sf-cli <args>` (`gui/src-tauri/src/main.rs` lines 4–9; `EMBEDDED_ARG = "sf-cli"` cli.rs line 214; `ENGINE_EMBEDDED: bool = cfg!(windows)` line 218).
+- `gui/src` — React frontend; Zustand stores + a column-oriented `FileStore` held _outside_ React state for million-row listings (`gui/src/store/recover.ts` lines 92–98).
 
 **Process model**:
+
 - One CLI child per job; job kinds `image|scan|carve|files|extract|hash|survey` (`gui/src/lib/contract.ts` line 44).
 - One job at a time in the UI (`gui/src/store/actions.ts` `begin()` lines 21–29: "Wait for the current {job} job to finish, or stop it first.").
 - Cancellation = killing the child (`docs/cli-contract.md` lines 29–32; `gui/src-tauri/src/cli.rs` `stop_job` lines 468–473). Reader threads drop buffered output when the run-id no longer matches (cli.rs lines 442–445), which also ends a pkexec'd child we may not signal.
 - The startup survey runs beside any user job (`gui/src/store/events.ts` lines 26–27).
 
 **Threading model**:
+
 - Engine itself is single-threaded for imaging/scan/carve (sequential passes).
 - `run_survey`: `std::thread::scope`, one thread per source (`crates/sf-cli/src/lib.rs` lines 511–535).
 - Tauri side: reader thread for child stdout + separate stderr-drain thread keeping a 16 KiB tail (`gui/src-tauri/src/cli.rs` `run_job` lines 389–466; `STDERR_KEEP` line 385).
@@ -48,12 +52,14 @@ Citation convention: paths relative to repo root; anchors are function/struct/co
 - GUI: file-row redraw throttled to 200 ms (`gui/src/store/events.ts` `FILES_REDRAW_MS` line 11); `file` events batched to the UI at 2000 rows / 80 ms (`gui/src-tauri/src/lib.rs` `BATCH_MAX`/`BATCH_EVERY` lines 50–51).
 
 **Error model** (summary; full section below):
+
 - Engine returns plain-English `String` errors from filesystem readers (e.g. `Ntfs::open` → "the NTFS boot sector can't be read", `crates/sf-core/src/ntfs/volume.rs` lines 84–90).
 - CLI wraps with anyhow; emits `{"event":"error","message":…}` + exit 1; clap usage errors → stderr, exit 2, no JSON (`crates/sf-cli/src/lib.rs` `run()` lines 730–740; contract lines 27–28).
 - GUI: one current error alert per screen + fallback "sf-cli stopped with exit code N." when a non-zero exit had no error event (`gui/src/store/events.ts` `onExit` lines 214–222).
 - Recovery reads never abort a file: unreadable bytes become zeros and are counted and reported ("partial" honestly — `crates/sf-core/src/reader.rs` header lines 1–8).
 
 **Persistence**:
+
 - The ddrescue-format mapfile is the only durable engine state: checkpointed ≥ every 5 s and at each pass end (`CHECKPOINT_INTERVAL` sf-cli lib.rs line 23; `Imager::with_checkpoint` imager.rs lines 72–99; atomic `.tmp`+`fsync`+rename with Windows retry, mapfile.rs `save` lines 212–238).
 - GUI session state is in-memory zustand only; across "Restart as Administrator", source/dest/map/screen survive via `--elevated --source … --screen …` argv round-trip (`gui/src-tauri/src/lib.rs` `Restore`/`restore_args`/`parse_restore` lines 400–440).
 - Large extraction selections spill to a temp ids file, removed on exit (`gui/src-tauri/src/lib.rs` `start_extract` lines 246–279). No database anywhere.
@@ -145,7 +151,7 @@ See the Named Feature Deep Dive — CLI `--deleted-only`, GUI "Only list deleted
 See the Named Feature Deep Dive — `crates/sf-core/src/ntfs/extract.rs`.
 
 **F-24 Imaging-map honesty plumbing.**
-`unreadable_from_map` (`crates/sf-core/src/reader.rs` lines 83–102) treats map ranges that aren't `finished` as unreadable *without touching the device*; overlapping files show `partial`; extracts get notes. GUI auto-applies the map when the recovery source is the Image screen's destination (`gui/src/lib/recoverlogic.ts` `mapForSource` lines 11–13; hint in RecoverScreen.tsx lines 110–114).
+`unreadable_from_map` (`crates/sf-core/src/reader.rs` lines 83–102) treats map ranges that aren't `finished` as unreadable _without touching the device_; overlapping files show `partial`; extracts get notes. GUI auto-applies the map when the recovery source is the Image screen's destination (`gui/src/lib/recoverlogic.ts` `mapForSource` lines 11–13; hint in RecoverScreen.tsx lines 110–114).
 
 ### Carving
 
@@ -214,20 +220,21 @@ Windows: unelevated start relaunches itself with the `runas` verb (UAC), waits, 
 Lookup: `SF_CLI_PATH` > beside own exe > repo `target/{debug,release}` > PATH (`resolve` cli.rs lines 192–203, tested order line 711). `cli_info` runs `version --json`; mismatch produces a fix-it banner (`interpret_version` lines 260–279: "…which speaks contract {c}, but this app needs contract 2. Put the sf-cli that came in the same download next to SectorForge, or point the SF_CLI_PATH environment variable at the right file.").
 
 **F-41 Large-selection plumbing.**
->200 ids go through a temp `--ids-file` (Windows ~32k cmdline limit), auto-deleted (`gui/src-tauri/src/lib.rs` lines 242–279). CLI parses ids-file with per-line errors: "--ids-file line {n}: \"{l}\" is not a file id" (recover.rs `read_ids_file` lines 281–289).
+
+> 200 ids go through a temp `--ids-file` (Windows ~32k cmdline limit), auto-deleted (`gui/src-tauri/src/lib.rs` lines 242–279). CLI parses ids-file with per-line errors: "--ids-file line {n}: \"{l}\" is not a file id" (recover.rs `read_ids_file` lines 281–289).
 
 **F-42 Dev bridge.**
 Debug-only loopback HTTP server (POST /invoke, GET /events as SSE) so the real elevated app can drive the UI in a plain browser tab; Origin-checked, loopback-only (src-tauri/src/devbridge.rs lines 1–115; "Release builds don't contain this module" line 7).
 
 ## The Named Feature Deep Dive
 
-**The named feature**: *"reconstructed files with their original directory structure preserved, containing only deleted files (not currently-existing files), as a post-scan option."*
+**The named feature**: _"reconstructed files with their original directory structure preserved, containing only deleted files (not currently-existing files), as a post-scan option."_
 
 **Verdict: the feature EXISTS, in three complementary layers** —
 (1) scan-time deleted/live classification with a post-index listing filter (`--deleted-only`);
-(2) a post-scan deleted-only *view* in the file browser ("Deleted only" filter, flat list);
+(2) a post-scan deleted-only _view_ in the file browser ("Deleted only" filter, flat list);
 (3) extraction that reconstructs the original directory tree from deleted entries exactly as for live ones.
-**Gap (stated plainly)**: there is no single "export deleted-only tree" button — the deleted-only *reconstruction* is achieved by activating the Deleted-only filter, selecting (all-shown), and pressing "Extract selected". No code path does deleted-only extraction in one step.
+**Gap (stated plainly)**: there is no single "export deleted-only tree" button — the deleted-only _reconstruction_ is achieved by activating the Deleted-only filter, selecting (all-shown), and pressing "Extract selected". No code path does deleted-only extraction in one step.
 
 ### 1. When during the scan is deleted vs live identified?
 
@@ -250,7 +257,7 @@ A **flag on the node**, not a separate list:
 - **Sequence-aware validation** (`Index::parent`, ntfs/mod.rs lines 126–137): the parent must exist, be a directory, and its current sequence must equal the stored one — **except a deleted parent may be exactly one sequence ahead**, because deletion bumps the sequence: `let same = p.seq == pseq || (!p.in_use && p.seq == pseq.wrapping_add(1));`.
 - **Recursive walk up the chain** (`Index::ancestry` lines 139–156) with two guards — chain length < 4096 and no repeated id (cycle protection) — producing `Ancestry::Rooted(Vec<u64>)` (ids from just below root down to the record) or `Ancestry::Orphaned(Vec<u64>)` when the chain breaks.
 - **Path strings are derived** (`Index::path` lines 158–174): join rooted-chain names with `/`; `None` for orphans. This is how a deleted folder `/OldStuff` and its deleted child `/OldStuff/inner/memo.txt` keep full original paths — sample `docs/contract-samples/files_deleted_only.ndjson` lines 6–9; contract-smoke.ps1 line 239 ("file in deleted folder keeps its path").
-- **GUI tree**: `FileStore.add(r)` splits the emitted `path` into `(dir, leaf)` (`splitPath` filestore.ts lines 45–50), interns the dir string into a shared `dirs[]` pool, and appends the entry index to `kids[dir]` — or `orphans[]` when `path == null` (lines 107–127). Folder view `list(dir)` is a cached folders-first, case-insensitive sort (lines 137–152). Deleted-only *view* is `search(filter)` — a flat whole-volume pass skipping non-deleted rows: `if (f.deletedOnly && !(this.flags[i] & F_DELETED)) continue;` (lines 165–178).
+- **GUI tree**: `FileStore.add(r)` splits the emitted `path` into `(dir, leaf)` (`splitPath` filestore.ts lines 45–50), interns the dir string into a shared `dirs[]` pool, and appends the entry index to `kids[dir]` — or `orphans[]` when `path == null` (lines 107–127). Folder view `list(dir)` is a cached folders-first, case-insensitive sort (lines 137–152). Deleted-only _view_ is `search(filter)` — a flat whole-volume pass skipping non-deleted rows: `if (f.deletedOnly && !(this.flags[i] & F_DELETED)) continue;` (lines 165–178).
 
 ### 4. How the option is presented post-scan (exact UI text and flow)
 
@@ -267,7 +274,7 @@ A **flag on the node**, not a separate list:
 - **Multiple deleted files sharing a parent**: no special case — each entry independently attaches to the same parent id / `kids[dir]`; extraction memoizes one output dir per folder id (`Writer.dirs: HashMap<u64, PathBuf>`, extract.rs lines 152–158, `dir_for` 216–238).
 - **Name collisions** (e.g. a deleted and a live `a.txt` in the same folder): extraction never overwrites — `target.exists() || self.written.contains(&target)` → retry as `name (id N)` with the suffix **before** the extension (`with_id_suffix`, sanitize.rs lines 66–71: `report (id 42).docx`); if that also collides or hits a directory, the item fails: "an output file with the same name already exists" (extract.rs lines 178–184). Test: deleted `a (id 32).txt` beside live `a.txt` (`ntfs/tests.rs` lines 375–376); a re-run never clobbers the user's own file (test `rerunning_extract_never_overwrites_a_different_file`, lines 425–435).
 - **Orphan roots**: get the id suffix so two orphaned "Documents" folders don't merge — `top_name` applies `with_id_suffix` when `chain.first() == Some(&id)` for `Ancestry::Orphaned` (extract.rs lines 199–207); output `_orphaned/orphan (id 23).txt` (test line 393). "An orphaned folder keeps its contents under it" (contract line 262).
-- **Directory collision on disk** (a same-named *file* where a folder must go): `dir_for` retries with the id-suffixed name (extract.rs lines 232–234).
+- **Directory collision on disk** (a same-named _file_ where a folder must go): `dir_for` retries with the id-suffixed name (extract.rs lines 232–234).
 - **Path traversal / hostile names**: every component passes `safe_component` — `\ / : * ? " < > |` and control chars → `_`; trailing dots/spaces → `_`; reserved Windows names (`CON`, `aux.txt`, `COM1`…) get a leading `_`; UTF-16 truncation to 240 units keeping the extension (`sanitize.rs` lines 11–62; tests lines 77–113). Extraction tests assert outputs `_CON` and `__` (`ntfs/tests.rs` lines 395–396).
 - **Symlink/junction escape inside the output folder**: `Writer::make_dir` canonicalizes each created directory and refuses when it resolves outside `out` — "{} leads outside the output folder" (extract.rs lines 240–252).
 - **NTFS metadata pollution**: records 0–15 (`$MFT` etc.) and anything inside `$Extend` are never listed — `FIRST_USER_RECORD = 16` (mod.rs line 25); `is_listed` rejects chains containing `EXTEND` (11) (lines 176–185). Extracting a folder pulls only listed children (`plan()` filter, extract.rs line 145; test `root_extracts_everything_but_metadata` lines 416–422 asserts no `$MFT` output).
@@ -299,22 +306,22 @@ A **flag on the node**, not a separate list:
 3. **SafeReader fault-tolerant reads** (`reader.rs`): zero-fill + count; `RangeSet` merged half-open ranges with binary-search intersection (`partition_point`, lines 71–77); map holes skipped without device reads (wear saving); failed reads binary-split down to configurable granularity (sector = exact; 64 KiB for device-mode carving).
 4. **NTFS MFT sweep + $ATTRIBUTE_LIST resolution** (`ntfs/volume.rs`, `record.rs`): batch reads (`for_each_record`, one sweep per 1024 records); fixup validation with explicit zero-sector rejection (record.rs lines 33–36); mirror fallback for $MFT; attribute-list entries validated by back-reference (`base_ref` + seq match, volume.rs lines 254–259).
 5. **Ancestry/path reconstruction with sequence-aware parent validation and orphan classification**
-(`ntfs/mod.rs` `parent`/`ancestry`/`path`) — reusable for any id/parent-ref tree,
-incl. the "deleted parent is seq+1" rule and cycle guards. This is the heart of structure-preserving deleted recovery.
-6. **Recoverability assessment** (`ntfs/mod.rs` `assess` + `volume.rs` `damage`; fat `damage`/`assess`; ext `assess`): (located, unreadable, reused) triple vs init_size; unreadable bitmap bits default to *allocated* (pessimistic honesty).
+   (`ntfs/mod.rs` `parent`/`ancestry`/`path`) — reusable for any id/parent-ref tree,
+   incl. the "deleted parent is seq+1" rule and cycle guards. This is the heart of structure-preserving deleted recovery.
+6. **Recoverability assessment** (`ntfs/mod.rs` `assess` + `volume.rs` `damage`; fat `damage`/`assess`; ext `assess`): (located, unreadable, reused) triple vs init_size; unreadable bitmap bits default to _allocated_ (pessimistic honesty).
 7. **FAT multi-copy table repair** (`fat/mod.rs` `load_table` lines 182–241): per-sector fallback to the second FAT copy; unreadable → 0xFF (reads as end-of-chain/allocated).
 8. **FAT deleted-directory free-cluster walk + exFAT NoFatChain/valid-length handling** (`DirSrc::Free`; `Loc{contiguous, valid}`).
 9. **ext deleted-name slack scanning** (`parse_dir`/`deleted_entry`): validates inode range, rec_len alignment, name bytes (no NUL/slash), ftype byte 1..7; skips hashed-directory index entries masquerading as slack (lines 396–399).
 10. **The carver** (`carve/mod.rs`, `probe.rs`, `formats.rs`):
-16 MiB scan chunks with 1 KiB header over-read; per-candidate `Probe` (1 MiB sliding window, bounded reads relative to file start)
-so parsers walk structures sector-agnostically; `identify` structural validation; `measure` end detection; claimed-region skip;
-bounded `unknown_end` next-header scan; `max_size()` false-positive caps per kind (formats.rs lines 293–310);
-`search_limit()` footer-search bounds (1 GiB for pdf/zip/ps/xz, lines 326–332).
+    16 MiB scan chunks with 1 KiB header over-read; per-candidate `Probe` (1 MiB sliding window, bounded reads relative to file start)
+    so parsers walk structures sector-agnostically; `identify` structural validation; `measure` end detection; claimed-region skip;
+    bounded `unknown_end` next-header scan; `max_size()` false-positive caps per kind (formats.rs lines 293–310);
+    `search_limit()` footer-search bounds (1 GiB for pdf/zip/ps/xz, lines 326–332).
 11. **Deterministic carve naming**: files named by header sector (`f{:07}`), so re-carving the same range reproduces identical names.
 12. **NDJSON child-process protocol + contract handshake + batched file events** (`sf-cli` `Out`/`Throttle`; tauri `cli.rs` typed `Event` enum `#[serde(tag = "event")]` with unknown-field tolerance and malformed-line logging "skipped malformed line: …" line 449; `lib.rs` batching 2000 rows / 80 ms).
 13. **Job slots with run-ids** (`cli.rs` `Slot = Arc<Mutex<Option<(u64, Child)>>>`, `NEXT_RUN_ID`):
-a finished run's reader thread can never claim a newer run's process (lines 380–466) —
-the correct pattern for kill/resume UIs.
+    a finished run's reader thread can never claim a newer run's process (lines 380–466) —
+    the correct pattern for kill/resume UIs.
 14. **Same-drive refusal via backing resolution** (`drives/mod.rs` `backing_of_source`/`backing_of_output`/`existing_ancestor`): maps a not-yet-existing output path to its nearest existing ancestor, then to physical disks; refuses when undecidable.
 
 ## UX Surface Map
@@ -324,12 +331,12 @@ the correct pattern for kill/resume UIs.
 - **Image**: Source/Destination/Map fields with hints; system-drive red notice + confirmation checkbox; retry-only toggle; presets; Start/Resume/Pause ("This map is part done; Resume carries on where it stopped."); tiles Rescued%/Bad/Pending/Current pass; health map; "What happens when you press Start" 3-step explainer (ImageScreen.tsx lines 27–125).
 - **Partitions**: deep-scan checkbox ("reads the entire drive, slow, finds partitions missing from the table" — REQUIREMENTS.md lines 143–144); results table + disk-layout bar + confidence badges; "No partitions were found." empty state (REQUIREMENTS.md lines 145–157; PartitionsScreen.tsx enumerated).
 - **Recover**: source defaults to the Image destination until edited; map-in-use hint; live-drive warning Notice;
-tabs **"Browse files" / "Carve by file type"** (RecoverScreen.tsx lines 16–19, 110–123).
-Files tab: partition picker (unusable fs → "No readable filesystem: use carving", FilesTab.tsx line 52), deleted-only checkbox,
-List files/Stop, progress "Reading the file table: X of Y", done/stopped/error states
-("Stopped early. N entries were read, so the list is incomplete." — FilesTab lines 96–103).
-Carve tab: type checkboxes + Select all/none, "Search in" (partition or whole source), Save to, Start carving/Stop,
-results list Type/Saved as/Size/Position on source/State (CarveTab.tsx).
+  tabs **"Browse files" / "Carve by file type"** (RecoverScreen.tsx lines 16–19, 110–123).
+  Files tab: partition picker (unusable fs → "No readable filesystem: use carving", FilesTab.tsx line 52), deleted-only checkbox,
+  List files/Stop, progress "Reading the file table: X of Y", done/stopped/error states
+  ("Stopped early. N entries were read, so the list is incomplete." — FilesTab lines 96–103).
+  Carve tab: type checkboxes + Select all/none, "Search in" (partition or whole source), Save to, Start carving/Stop,
+  results list Type/Saved as/Size/Position on source/State (CarveTab.tsx).
 - **Verify**: fingerprint list with match/differ badges + Copy (VerifyScreen.tsx lines 123–127).
 - **Console**: timestamps + job tags + `$`/out/err/rows/exit line kinds; Copy all; unseen counter (Console.tsx).
 - **Dialogs/pickers**: in-app file/folder pickers (FilePicker component, 202 lines, enumerated) with free-space checks; confirmReadDrive dialog "Read the drive directly?" (api.ts lines 82–89).
@@ -364,7 +371,7 @@ results list Type/Saved as/Size/Position on source/State (CarveTab.tsx).
 
 - **Engine unit tests are in-module** beside each algorithm (imager, mapfile, reader, sanitize, partitions, ntfs, fat, ext, carve `tests.rs`), driven by `FakeBlockDevice` — an in-memory BlockDevice with `mark_bad` ranges and a read counter (`crates/sf-core/src/block_device.rs` lines 34–95).
 - **Hand-built hostile NTFS volume** (`ntfs/tests.rs` `build()` lines 209–296): fragmented MFT, torn record, reused parent record, reused clusters, deleted folder with deleted child, orphan, DOS alias, $ATTRIBUTE_LIST extension, sparse run, compressed flag, `CON`/`..` names, deleted duplicate name — asserted in `lists_paths_deletion_and_recoverability` and `extracts_files_folders_orphans_and_hostile_names` (lines 306–435).
-- **Real Windows NTFS fixture**: `tests/fixtures/ntfs-small.vhd.gz` + `ntfs-small.manifest.json` (per-file SHA-256 recorded *before* deletion); generated by an elevated PowerShell script formatting a 16 MiB VHD with Windows' own NTFS driver, creating hard links (to force `$ATTRIBUTE_LIST`), fragmented/sparse/compressed files, then deleting a photo and the whole `OldStuff` tree (`tests/fixtures/make-ntfs-fixture.ps1`). The integration test (`tests/ntfs_fixture.rs`) checks every recovered file byte-for-byte against the manifest and asserts the deleted folder tree is recreated (line 90).
+- **Real Windows NTFS fixture**: `tests/fixtures/ntfs-small.vhd.gz` + `ntfs-small.manifest.json` (per-file SHA-256 recorded _before_ deletion); generated by an elevated PowerShell script formatting a 16 MiB VHD with Windows' own NTFS driver, creating hard links (to force `$ATTRIBUTE_LIST`), fragmented/sparse/compressed files, then deleting a photo and the whole `OldStuff` tree (`tests/fixtures/make-ntfs-fixture.ps1`). The integration test (`tests/ntfs_fixture.rs`) checks every recovered file byte-for-byte against the manifest and asserts the deleted folder tree is recreated (line 90).
 - **Carve tests** (`carve/tests.rs`, 973 lines; 40+ synthetic format builders): `recovers_every_format_exactly`, nested-zip EOCD, missing-end → incomplete, map holes → incomplete-but-written, read errors → incomplete, no carving inside claimed files, types/range filters, `docx` filter skipping plain zips, unknown types rejected, header-only formats bounded by next header, every type id belongs to exactly one registry entry, random data ≠ file, near-miss headers rejected (test names, lines 697–942).
 - **Loop-device integration** (Linux, `#[ignore]`d): `tests/linux_loopdev.rs` + `scripts/linux-loopdev-test.sh` — 512/4096-byte logical sectors, O_DIRECT, unaligned SafeReader reads, byte-for-byte full-image comparison.
 - **Contract smoke**: `scripts/contract-smoke.ps1` builds synthetic disks (real JPEG/PNG/GIF/ZIP/DOCX/PDF bytes from Windows encoders), runs every v2 command and its error paths, validates NDJSON shape field-by-field and exit codes; `-Samples` writes real CLI stdout into `docs/contract-samples/` (lines 1–10, 196–276). The GUI parser test then requires **every line of every real sample to parse** (`gui/src-tauri/src/cli.rs` test `every_line_of_real_cli_output_parses`, lines 556–586) — a double-sided contract check.
@@ -376,7 +383,7 @@ results list Type/Saved as/Size/Position on source/State (CarveTab.tsx).
 - `LICENSE` (21 lines, read in full): **MIT License, "Copyright (c) 2026 terra seraph"** — standard MIT grant (use/copy/modify/merge/publish/distribute/sublicense/sell) + "AS IS" warranty disclaimer. Confirmed by README badge (line 5: `License: MIT`) and `Cargo.toml` line 9 (`license = "MIT"`).
 - **No NOTICE / THIRD_PARTY / THIRD_PARTY_NOTICES files exist** in the tracked tree (verified against `git ls-files` — only `LICENSE` at root).
 - Third-party code visible is ordinary crates only (clap, serde_json, anyhow, sha2, thiserror, windows-sys, libc, tauri, tauri-plugin-dialog — per the three `Cargo.toml` files read) — all permissive-compatible. `Cargo.lock` files (root, `gui/src-tauri`) recorded for existence only.
-- **Implications for a GPL-3.0-or-later target re-implementing from understanding**: MIT is GPL-compatible. Two clean strategies: (a) *study-only* — re-implement algorithms/UX from this document's understanding; no license obligation attaches to independently written code; (b) *port code* — keep SectorForge's MIT notice on the ported portions (e.g. mapfile parser, sanitize rules), which GPL-3.0-or-later fully satisfies (MIT may be included in GPL-3.0+ works with notice preservation). No field-of-use or additional restrictions exist anywhere in the repo.
+- **Implications for a GPL-3.0-or-later target re-implementing from understanding**: MIT is GPL-compatible. Two clean strategies: (a) _study-only_ — re-implement algorithms/UX from this document's understanding; no license obligation attaches to independently written code; (b) _port code_ — keep SectorForge's MIT notice on the ported portions (e.g. mapfile parser, sanitize rules), which GPL-3.0-or-later fully satisfies (MIT may be included in GPL-3.0+ works with notice preservation). No field-of-use or additional restrictions exist anywhere in the repo.
 
 ## Coverage
 

@@ -6,25 +6,25 @@
 
 ## Verification (independent parse-back, SectorForge parent semantics)
 
-| Check | Result |
-| --- | --- |
-| boot OEM magic | PASS |
-| boot geometry | PASS |
-| boot end mark 55AA | PASS |
-| boot CRC-32 | PASS |
-| boot $MFT LCN | PASS |
-| boot $MFTMirr LCN | PASS |
-| record 0 runs decode to MFT | PASS |
-| record 0 magic/fixup | PASS |
-| all 40 records parse + self-numbered | PASS |
-| every seeded record matches manifest (flags/seq/name/parent/content) | PASS |
-| deleted-only output files match expected (sanitized + orphaned + collisions) | PASS |
-| deleted-only dir nodes match expected (incl. empty deleted dir) | PASS |
-| orphan diagnostics are the intended ones | PASS |
-| deleted dir chain resolves via seq+1 (OldStuff/inner/memo.txt) | PASS |
-| $Bitmap allocated set matches ground truth | PASS |
-| deleted big.bin clusters are free (Excellent grade evidence) | PASS |
-| $MFTMirr mirrors records 0-3 | PASS |
+| Check                                                                        | Result |
+| ---------------------------------------------------------------------------- | ------ |
+| boot OEM magic                                                               | PASS   |
+| boot geometry                                                                | PASS   |
+| boot end mark 55AA                                                           | PASS   |
+| boot CRC-32                                                                  | PASS   |
+| boot $MFT LCN                                                                | PASS   |
+| boot $MFTMirr LCN                                                            | PASS   |
+| record 0 runs decode to MFT                                                  | PASS   |
+| record 0 magic/fixup                                                         | PASS   |
+| all 40 records parse + self-numbered                                         | PASS   |
+| every seeded record matches manifest (flags/seq/name/parent/content)         | PASS   |
+| deleted-only output files match expected (sanitized + orphaned + collisions) | PASS   |
+| deleted-only dir nodes match expected (incl. empty deleted dir)              | PASS   |
+| orphan diagnostics are the intended ones                                     | PASS   |
+| deleted dir chain resolves via seq+1 (OldStuff/inner/memo.txt)               | PASS   |
+| $Bitmap allocated set matches ground truth                                   | PASS   |
+| deleted big.bin clusters are free (Excellent grade evidence)                 | PASS   |
+| $MFTMirr mirrors records 0-3                                                 | PASS   |
 
 ## Deleted-only reconstructed tree (raw, SectorForge semantics)
 

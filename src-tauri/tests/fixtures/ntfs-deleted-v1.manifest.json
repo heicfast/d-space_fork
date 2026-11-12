@@ -357,12 +357,7 @@
       "is_dir": false,
       "namespace": 1,
       "storage": "nonresident",
-      "runs": [
-        [
-          2,
-          29
-        ]
-      ],
+      "runs": [[2, 29]],
       "size": 8192,
       "sha256": "7d6c652cd5da6934f721992fd7386bfeb4b9d694abe98607fd9b808a22bea11d",
       "created": {
@@ -384,12 +379,7 @@
       "is_dir": false,
       "namespace": 1,
       "storage": "nonresident",
-      "runs": [
-        [
-          2,
-          31
-        ]
-      ],
+      "runs": [[2, 31]],
       "size": 8192,
       "sha256": "b7b25ee29c1582594de51d5a74ad83b3a538b0d0adc36e8d51b07908fa73dab2",
       "created": {
@@ -466,9 +456,7 @@
       "25": "Docs",
       "30": "Empty"
     },
-    "deleted_only_empty_dirs": [
-      "Empty"
-    ],
+    "deleted_only_empty_dirs": ["Empty"],
     "keep_empty_folders": "Empty/ appears only when keep_empty_folders is on",
     "collision_rule": "same-name deleted files: lower record keeps the plain name, later records get ' (id N)' before the extension (SectorForge contract, FEATURE-MATRIX R-14)",
     "sanitization": {
