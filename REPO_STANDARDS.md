@@ -1,48 +1,51 @@
 # DiskWizard · Repo Standards
 
-> **Hedef konum:** `C:\Projeler\d-space\REPO_STANDARDS.md`
-> Reponun köğüne kopyalayıp commit'leyin. Sonraki düzenlemeler bu dosyaya bağlı kalmalı — değişiklik gerekirse burayı da güncelleyin.
+> **Target location:** repository root (`REPO_STANDARDS.md`).
+> Commit it to the repo root. Subsequent edits must keep this file
+> authoritative — when something changes, update it here too.
 >
-> **Snapshot:** 2026-05-14 (DiskWizard README + about/topics align sonrası)
+> **Snapshot:** 2026-11-12 (DiskWizard v0.4.0-beta — React frontend,
+> English-first product)
 
 ---
 
 ## 1. Locked GitHub metadata
 
-| Alan               | Değer                                                                                                                                                                                            |
+| Field              | Value                                                                                                                                                                                            |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Owner/Repo**     | `heicfast/d-space_fork`                                                                                                                                                                          |
 | **Visibility**     | public                                                                                                                                                                                           |
 | **Default branch** | `main`                                                                                                                                                                                           |
 | **License (SPDX)** | `GPL-3.0` (or-later)                                                                                                                                                                             |
-| **Description**    | `Smart disk analyzer and recovery platform for Windows — MFT-fast scanning, 0-100 safe-to-delete scoring, staging+undo guarantee with cross-volume two-phase commit. Tauri v2 + Vue 3 + Rust.`   |
+| **Description**    | `Windows data recovery wizard and safe disk cleanup — raw NTFS recovery engine, MFT-fast scanning, 0-100 safe-to-delete scoring, staging+undo guarantee with cross-volume two-phase commit. Tauri v2 + React 19 + Rust.` |
 | **Homepage**       | `https://github.com/heicfast/d-space_fork/releases`                                                                                                                                              |
-| **Topics (20)**    | `blake3, developer-tools, disk-analyzer, disk-space, disk-usage, filesystem, mft, ntfs, open-source, rust, safe-delete, sqlite, staging, storage, sunburst, tauri, tauri-v2, undo, vue, windows` |
+| **Topics (20)**    | `blake3, data-recovery, developer-tools, disk-analyzer, disk-space, disk-usage, filesystem, mft, ntfs, open-source, rust, safe-delete, sqlite, staging, storage, tauri, tauri-v2, undo, react, windows` |
 
-Değişiklik yaparsanız bu tabloyu güncelleyin + remote'a yansıtın.
+When any of this changes, update the table and mirror it to the remote.
 
 ---
 
-## 2. README iskeleti (DiskWizard template — kaynak: d-terminal)
+## 2. README skeleton (DiskWizard template)
 
-### 2.1 Bölüm sırası (kanonik)
+### 2.1 Section order (canonical)
 
-1. **Header** — center-aligned, başlık + İngilizce tagline + TR/EN alt-tagline + bilingual notice
+1. **Header** — center-aligned, title + tagline
 2. **🎬 Demo**
-3. **Badge row** — CI/Release/Downloads (varsa) → License → Status → Platform → Tech → DiskWizard
-4. **📌 Kısaca** (TR) + collapsible `🇬🇧 At a glance` (EN)
-5. **🆕 Yenilikler / What's done so far**
-6. **🎯 Vizyon / Vision** (opsiyonel)
-7. **✨ Öne Çıkan Özellikler / Key Features**
-8. **🛠️ Teknoloji / Tech Stack**
-9. **🗺️ Yol Haritası / Roadmap**
-10. **📥 Kurulum / Installation** + **🚀 İlk Adımlar / Quick Start**
-11. **🛡️ Güvenlik Tarama / Security Scan Results** (release varsa)
-12. **🤝 Katkı / Contributing**
-13. **🎨 DiskWizard Ailesi / DiskWizard Family**
-14. **💖 Sponsorlar / Sponsors**
-15. **❤️ Destekle / Support**
-16. **📜 Lisans / License**
+3. **Badge row** — CI/Release/Downloads (when present) → License →
+   Status → Platform → Tech → DiskWizard
+4. **📌 At a glance**
+5. **🆕 What's new / What's done so far**
+6. **🎯 Vision** (optional)
+7. **✨ Key Features**
+8. **🛠️ Tech Stack**
+9. **🗺️ Roadmap**
+10. **📥 Installation** + **🚀 Quick Start**
+11. **🛡️ Security Scan Results** (when a release exists)
+12. **🤝 Contributing**
+13. **🎨 DiskWizard Family**
+14. **💖 Sponsors**
+15. **❤️ Support**
+16. **📜 License**
 
 ### 2.2 Header pattern
 
@@ -53,12 +56,9 @@ Değişiklik yaparsanız bu tabloyu güncelleyin + remote'a yansıtın.
 
 # DiskWizard
 
-**Smart disk analyzer and recovery platform for Windows**
+**Windows data recovery wizard and safe disk cleanup**
 
-_MFT-hızlı tarama, güvenli silme skorlaması, garantili undo_
 _MFT-fast scanning, safe-to-delete scoring, guaranteed undo_
-
-🌐 **TR · EN** — ...
 
 </div>
 ```
@@ -66,64 +66,82 @@ _MFT-fast scanning, safe-to-delete scoring, guaranteed undo_
 ### 2.3 Badge row
 
 ```
-[CI] [Release] [Downloads]                       (varsa)
+[CI] [Release] [Downloads]                       (when present)
 [License: GPL-3.0+]
-[Status: alpha/MVP/stable — gerçek duruma göre]
+[Status: alpha/beta/stable — matching the actual state]
 [Platform: Windows 10/11]
-[Tauri v2] [Vue 3] [Rust stable] [SQLite] [BLAKE3]
+[Tauri v2] [React 19] [Rust stable] [SQLite] [BLAKE3]
 [DiskWizard]
 ```
 
-### 2.4 Bilingual yapı
+### 2.4 Language
 
-- Ana akış TR + `<details><summary>🇬🇧 ...</summary>` ile EN
-- Teknik terimler (MFT, NTFS, two-phase commit) açıklamasız geçer — hedef kitle geliştirici/teknik kullanıcı
+- **English is the default and primary language** of the product, the
+  README, commit messages, code comments and CI. The UI offers a
+  manual switch to 简体中文.
+- Technical terms (MFT, NTFS, two-phase commit) pass without
+  explanation — the audience is developers and technical users.
 
 ---
 
 ## 3. Tech stack & status
 
-- **Status:** v0.x — README'deki en güncel sürüm rozeti ile senkron
-- **Core:** Tauri v2 (Rust + WebView2)
-- **Frontend:** Vue 3
-- **Storage:** SQLite (scan cache, staging ledger)
+- **Status:** v0.x — in sync with the newest version badge in the
+  README
+- **Core:** Tauri v2 (Rust + WebView2), `requireAdministrator`
+  manifest (raw volume access)
+- **Frontend:** React 19 + TypeScript + Vite, connector architecture
+  (real IPC bridge by default; mock is an explicit test/dev opt-in)
+- **Storage:** SQLite (scan cache, staging ledger, sessions)
 - **Hashing:** BLAKE3
-- **Filesystem:** MFT direct read (NTFS), staging+undo cross-volume two-phase commit
-- **Target:** Windows 10 1809+ ve Windows 11
-- **Visualization:** Sunburst chart
+- **Filesystem:** MFT direct read (NTFS) incl. deleted records;
+  staging+undo cross-volume two-phase commit
+- **Target:** Windows 10 1809+ and Windows 11 only
+- **Visualization:** squarified treemap (Size Map), result tree
 
 ---
 
-## 4. Lisans
+## 4. License
 
-- **GPL-3.0-or-later** (SPDX: `GPL-3.0`). README badge'i ve `LICENSE` dosyası tutarlı.
+- **GPL-3.0-or-later** (SPDX: `GPL-3.0`). The README badge and the
+  `LICENSE` file stay consistent.
 
 ---
 
-## 5. Commit mesaj stili
+## 5. Commit message style
 
 Conventional commits:
 
 - `feat(readme): ...`, `fix(readme): ...`, `docs(readme): ...`
 - `chore: ...` — config / FUNDING / dependency bump
-- `feat(<area>): ...`, `fix(<area>): ...` — kod (scanner, staging, ui, ...)
+- `feat(<area>): ...`, `fix(<area>): ...` — code (recovery, scan,
+  staging, ui, connector, ...)
 
-Dil: TR veya EN; tutarlı.
-
----
-
-## 6. Dosya hijyeni
-
-- Adı `:` veya `\` içeren dosyalar **commit'lenmez**.
-- **Zorunlu:** `README.md`, `LICENSE`, `.github/FUNDING.yml`
-- **Tercih edilen:** `.gitignore`, `docs/`
-- Push öncesi `git status` kontrol.
+Language: English.
 
 ---
 
-## 7. Repo-spesifik notlar
+## 6. File hygiene
 
-- **Safe-to-delete scoring (0-100)** — README'deki algoritmaya dair claim'ler kodla senkron tutulmalı. Skor formülü değiştiyse README'de "v2 scoring rubric" gibi versiyonlanmalı.
-- **Staging + undo garantisi** — cross-volume two-phase commit'in claim'i README'de; bozulması major bump tetikler.
-- **Release hijyeni** — her release sonrası homepage URL'i `/releases/tag/vX.Y.Z` yerine `/releases` olarak tut (latest'i göstersin).
-- **MFT direct read** — admin yetkisi gerektirir; README'de "Quick Start"ta açıkça belirtilir.
+- Files whose names contain `:` or `\` are **never committed**.
+- **Mandatory:** `README.md`, `LICENSE`, `.github/FUNDING.yml`
+- **Preferred:** `.gitignore`, `docs/`
+- `git status` review before every push.
+
+---
+
+## 7. Repo-specific notes
+
+- **Safe-to-delete scoring (0-100)** — algorithm claims in the README
+  must stay in sync with the code. If the scoring formula changes,
+  version it in the README (e.g. "v2 scoring rubric").
+- **Staging + undo guarantee** — the cross-volume two-phase commit
+  claim is in the README; breaking it triggers a major bump.
+- **Release hygiene** — after every release keep the homepage URL at
+  `/releases` (not `/releases/tag/vX.Y.Z`) so it shows the latest.
+- **MFT direct read / recovery** — requires administrator privileges;
+  stated explicitly in the README Quick Start (the app manifests
+  `requireAdministrator` and shows the UAC prompt at launch).
+- **Connector rule** — production builds ship the REAL tauri
+  connector only (`VITE_CONNECTOR=tauri` in the release workflow);
+  a mock-connector build must never ship.

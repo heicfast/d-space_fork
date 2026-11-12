@@ -1,40 +1,46 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# D-Space Release Checklist
+# DiskWizard Release Checklist
 
-Master mimari Bölüm 18.2 (Kod İmzalama) + 21.4 (Otomatik Güncelleme) + 18.4
-(EDR/AV Sertifikasyon). Stable release öncesi tamamlanması gereken adımlar.
+Master architecture chapters 18.2 (code signing) + 21.4
+(auto-update) + 18.4 (EDR/AV certification). Steps that must be
+completed before a stable release.
 
-> **Alpha (v0.1.x):** unsigned MSI/NSIS, updater kapalı, SmartScreen
-> "publisher unknown" uyarısı kabul. Kullanıcı README'den uyarılır.
+> **Alpha (v0.1.x):** unsigned MSI/NSIS, updater off, SmartScreen
+> "publisher unknown" warning accepted. Users are warned in the
+> README.
 >
-> **Beta (v0.2.x):** code signing cert + signtool + updater key.
+> **Beta (v0.2.x+):** updater active with a real Ed25519 keypair
+> (DONE — the key lives in GitHub Secrets, the public key in
+> `tauri.conf.json`); binaries still unsigned.
 >
-> **Stable (v1.0):** EV cert (SmartScreen reputation), Tauri updater feed,
-> auto-update kanalları (Stable/Beta/Nightly), VirusTotal monitoring.
+> **Stable (v1.0):** EV certificate (SmartScreen reputation), Tauri
+> updater feed, auto-update channels (Stable/Beta/Nightly),
+> VirusTotal monitoring.
 
 ---
 
-## 1. Code Signing (Bölüm 18.2)
+## 1. Code Signing (chapter 18.2)
 
-### 1.1 Sertifika tipi seçimi
+### 1.1 Certificate type selection
 
-| Tip                             | Maliyet   | SmartScreen davranışı                              | Tavsiye           |
-| ------------------------------- | --------- | -------------------------------------------------- | ----------------- |
-| **Self-signed**                 | ücretsiz  | "publisher unknown" + kırmızı uyarı                | Sadece geliştirme |
-| **OV (Organization Validated)** | ~$200/yıl | "publisher unknown" 30-90 günlük reputation süresi | v0.2 beta         |
-| **EV (Extended Validation)**    | ~$400/yıl | "publisher unknown" YOK (instant trust)            | **Stable v1.0**   |
+| Type                            | Cost      | SmartScreen behavior                                 | Recommendation     |
+| ------------------------------- | --------- | ---------------------------------------------------- | ------------------ |
+| **Self-signed**                 | free      | "publisher unknown" + red warning                    | Development only   |
+| **OV (Organization Validated)** | ~$200/yr  | "publisher unknown", 30–90 day reputation build-up   | v0.5 beta          |
+| **EV (Extended Validation)**    | ~$400/yr  | NO "publisher unknown" (instant trust)               | **Stable v1.0**    |
 
-EV cert sağlayıcıları: DigiCert, Sectigo, GlobalSign, SSL.com. EV ile
-HSM-bound token gelir (USB dongle veya cloud HSM); özel anahtar export
-edilemez.
+EV certificate providers: DigiCert, Sectigo, GlobalSign, SSL.com. EV
+comes with an HSM-bound token (USB dongle or cloud HSM); the private
+key cannot be exported.
 
-### 1.2 signtool entegrasyonu
+### 1.2 signtool integration
 
-`tauri-action` MSI/NSIS üretir. Sign için ek adım:
+`tauri-action` produces the MSI/NSIS bundles. Signing is an extra
+step:
 
 ```yaml
-# .github/workflows/release.yml içine eklenecek (v0.2)
+# to be added to .github/workflows/release.yml (v0.5)
 - name: Sign MSI/NSIS
   if: ${{ env.SIGNING_ENABLED == 'true' }}
   run: |
@@ -46,164 +52,171 @@ edilemez.
     SIGNING_ENABLED: ${{ secrets.SIGNING_ENABLED }}
 ```
 
-EV cert HSM gerektirir — runner üzerinde HSM bridge (Azure Key Vault,
-SignPath.io, Garantir vb.) kullanılır. **Self-hosted Windows runner** EV
-imza için tek pratik yol.
+EV certificates require an HSM — on a runner this means an HSM bridge
+(Azure Key Vault, SignPath.io, etc.). A **self-hosted Windows runner**
+is the only practical route for EV signing.
 
-### 1.3 Imza doğrulama
+### 1.3 Signature verification
 
 ```powershell
-Get-AuthenticodeSignature .\D-Space-0.1.0-x64.msi
+Get-AuthenticodeSignature .\DiskWizard_0.4.0_x64_en-US.msi
 ```
 
-`SignatureType` = `Authenticode` + `IsOSBinary` = `False` + `StatusMessage`
-= `Signature verified` olmalı.
+Expect `SignatureType` = `Authenticode`, `IsOSBinary` = `False`,
+`StatusMessage` = `Signature verified`.
 
 ---
 
-## 2. Auto-Updater (Bölüm 21.4) — Sprint 3.6 ile etkin
+## 2. Auto-Updater (chapter 21.4) — active since v0.2
 
-### 2.1 Plugin kurulumu ✅ (Sprint 3.6, commit feat(updater))
+### 2.1 Plugin setup ✅ (done)
 
 ```bash
-# Bir kez yapıldı, manifest'lere yapışmış durumda:
+# Done once, pinned in the manifests:
 pnpm add @tauri-apps/plugin-updater @tauri-apps/plugin-process
 cargo add tauri-plugin-updater tauri-plugin-process --manifest-path src-tauri/Cargo.toml
 ```
 
-`src-tauri/src/lib.rs` build hook'a `tauri_plugin_updater::Builder::new().build()` +
-`tauri_plugin_process::init()` zaten ekli. Capability dosyasında
-`updater:default` + `process:default` izinleri açık.
+`src-tauri/src/lib.rs` registers `tauri_plugin_updater::Builder::new
+().build()` + `tauri_plugin_process::init()` in the build hook. The
+capability file grants `updater:default` + `process:default`.
 
-### 2.2 Ed25519 key gen — **maintainer'ın yapması gereken son adım**
+### 2.2 Ed25519 keypair ✅ (done for the fork channel)
 
 ```bash
-# Tek seferlik, lokal makinede:
-pnpm tauri signer generate -w ~/.dspace/updater-private.key
-# 1) Public key çıktısını kopyala → src-tauri/tauri.conf.json
-#    plugins.updater.pubkey alanına yapıştır
-# 2) Private key içeriğini GitHub Secret olarak ekle:
+# One-time, on the local machine:
+pnpm tauri signer generate -w ~/.diskwizard/updater-private.key
+# 1) Copy the public key output → src-tauri/tauri.conf.json
+#    plugins.updater.pubkey
+# 2) Store the private key as GitHub Secrets:
 #    Settings → Secrets and variables → Actions:
-#      TAURI_SIGNING_PRIVATE_KEY          ← private key dosya içeriği
-#      TAURI_SIGNING_PRIVATE_KEY_PASSWORD ← keygen sırasında girilen şifre
-# 3) Bu adım yapılmadan ilk v0.2 tag'i atılırsa: imzasız bundle çıkar,
-#    istemci `signature verification failed` raporlar (UI'da
-#    "İmza doğrulanamadı" mesajı).
+#      TAURI_SIGNING_PRIVATE_KEY          ← private key file content
+#      TAURI_SIGNING_PRIVATE_KEY_PASSWORD ← the password chosen at keygen
 ```
 
-**Mevcut placeholder pubkey:** `tauri.conf.json`'da `REPLACE_BEFORE_RELEASE`
-işaretli geçici Ed25519 değeri var. v0.2.0-beta tag'inden önce maintainer
-bunu gerçek pubkey ile değiştirmeli.
+This is done for the `heicfast/d-space_fork` channel (new keypair
+generated 2026-11-07; secrets set; `latest.json` + `.sig` artifacts
+verified on the v0.3.0-beta release). Rotating the key later requires
+a transition note for users on the old channel (treat the fork build
+as a separate installation).
 
-### 2.3 tauri.conf.json plugins.updater (mevcut)
+### 2.3 tauri.conf.json plugins.updater (current)
 
 ```jsonc
 {
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/heicfast/d-space_fork/releases/latest/download/latest.json",
+        "https://github.com/heicfast/d-space_fork/releases/latest/download/latest.json"
       ],
-      "pubkey": "<v0.2 öncesi: pnpm tauri signer generate çıktısı>",
-      "windows": { "installMode": "passive" },
-    },
-  },
-}
-```
-
-### 2.4 latest.json (otomatik)
-
-`tauri-action` release workflow'da `includeUpdaterJson: true` aktif —
-her release'e şu formatta `latest.json` ekler:
-
-```json
-{
-  "version": "v0.2.0",
-  "notes": "Release notes",
-  "pub_date": "2026-06-01T00:00:00Z",
-  "platforms": {
-    "windows-x86_64": {
-      "signature": "<Ed25519 signature>",
-      "url": "https://github.com/.../releases/download/v0.2.0/D-Space_0.2.0_x64-setup.exe"
+      "pubkey": "<real Ed25519 public key — set>",
+      "windows": { "installMode": "passive" }
     }
   }
 }
 ```
 
-İstemci `tauri.conf.json` endpoint'inden son JSON'u indirir, signature
-pubkey ile doğrular, kullanıcıya UpdateNotification modal'ı gösterir,
-"İndir ve kur" → `downloadAndInstall` + `relaunch()`.
+### 2.4 latest.json (automatic)
 
-### 2.5 UI akışı (`src/components/UpdateNotification.vue`)
+The release workflow runs `tauri-action` with `includeUpdaterJson:
+true` — every release gains a `latest.json`:
 
-Header'da küçük "⤓ Güncelleme kontrol et" butonu. Tıklayınca:
+```json
+{
+  "version": "v0.4.0",
+  "notes": "Release notes",
+  "pub_date": "2026-11-12T00:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "<Ed25519 signature>",
+      "url": "https://github.com/.../releases/download/v0.4.0-beta/DiskWizard_0.4.0_x64-setup.exe"
+    }
+  }
+}
+```
 
-- Güncelleme yok → "✔ Güncel sürüm"
-- Güncelleme var → modal: yeni sürüm + notlar + "İndir ve kur" / "Kapat"
-- İndirme sırasında progress bar (event.Started.contentLength →
-  event.Progress.chunkLength toplamı)
-- İmza/ağ/diğer hatalar i18n'li mesaja çevrilir (`update.errorVerify` vb.)
+The client fetches the latest JSON from the endpoint in
+`tauri.conf.json`, verifies the signature against the pubkey, shows
+the update dialog, and on confirm runs `downloadAndInstall` +
+`relaunch()`.
 
-### 2.6 Kanal stratejisi (v1.0+)
+### 2.5 UI flow (`src/components/UpdateDialog.tsx`)
 
-- **Stable** — varsayılan endpoint, GA sürümler
-- **Beta** — `pre-release: true` GitHub releases (şu an v0.2.0-beta burada)
-- **Nightly** — günlük build, ayrı feed (v1.0)
+A small update button in the app shell. On click:
 
-Kullanıcı kanal seçimi `settings.update_channel`.
+- No update → "up to date" notice
+- Update available → dialog: new version + notes + "download and
+  install" / "close"
+- Download progress bar (event.Started.contentLength → sum of
+  event.Progress.chunkLength)
+- Signature/network/other errors map to i18n'd messages
+
+### 2.6 Channel strategy (v1.0+)
+
+- **Stable** — default endpoint, GA releases
+- **Beta** — GitHub prereleases (current: v0.4.0-beta)
+- **Nightly** — daily builds, separate feed (v1.0)
+
+User channel choice via `settings.update_channel`.
 
 ---
 
 ## 3. SmartScreen Reputation Building
 
-EV cert satın alındıktan sonra bile bazı durumlarda SmartScreen ilk
-indirmelerde uyarı verir. Reputation building süresi (~2-4 hafta):
+Even after buying an EV certificate SmartScreen can warn on the
+first downloads. Reputation build-up (~2–4 weeks):
 
-1. EV cert ile imzalı release yayınla
+1. Publish an EV-signed release
 2. Microsoft submission portal: SmartScreen reputation request
-3. VirusTotal taraması: 0/70 false positive
-4. İlk 1000 indirme süresince hızlı sorun raporu kanalı açık tut
-5. AV vendor whitelisting (Bölüm 18.4):
+3. VirusTotal scan: 0/70 false positives
+4. Keep a fast issue-report channel open through the first 1000
+   downloads
+5. AV vendor whitelisting (chapter 18.4):
    - BitDefender — submit
    - Kaspersky — submit
    - Symantec — submit
-   - Defender'ın kendi telemetrisi reputation building'i otomatik yürütür
+   - Defender builds reputation automatically from its own telemetry
 
 ---
 
 ## 4. Pre-Release Quality Gate
 
-Her release tag (`v*.*.*`) push'undan önce manuel checklist:
+Manual checklist before pushing any release tag (`v*.*.*`):
 
 - [ ] `cargo test --lib` 100% pass
-- [ ] `cargo clippy -- -D warnings` warning sıfır
-- [ ] `cargo fmt --check` diff sıfır
-- [ ] `pnpm test` (Vitest) tüm suite pass
-- [ ] `pnpm run build` vue-tsc + vite hata sıfır
-- [ ] `cargo audit` (v0.2) — `cargo install cargo-audit && cargo audit`
-      güvenlik açığı sıfır
-- [ ] Bundle size delta < %5 (önceki release ile)
-- [ ] `docs/DISCOVERY_LOG.md` güncel
-- [ ] Manuel smoke test: Hızlı + Standart mod tarama, drilldown 4 görsel
-      mod geçişi, staging + undo + permanent delete (test fixture'ı), tray
-      menü
-- [ ] `docs/THREAT_MODEL.md` riskler güncel
-- [ ] CHANGELOG.md (v0.2'den itibaren) — version bump
+- [ ] `cargo test --lib --features vss` 100% pass
+- [ ] `cargo clippy --lib --no-deps -- -D warnings` zero warnings
+      (default + vss)
+- [ ] `cargo fmt --all -- --check` zero diff
+- [ ] `pnpm test:coverage` full suite pass over thresholds
+- [ ] `pnpm build` error-free (tsc + vite)
+- [ ] `pnpm bundle:check` within budget
+- [ ] Version gate: tag semver core equals `tauri.conf.json` version
+- [ ] `cargo audit` (v0.5) — `cargo install cargo-audit && cargo
+      audit` zero vulnerabilities
+- [ ] Bundle size delta < 5% vs the previous release
+- [ ] `docs/DISCOVERY_LOG.md` current
+- [ ] Manual smoke test: install (UAC prompt) → scan (quick + full)
+      → recovery preview → recovery job → staging → undo →
+      permanent delete (test fixture) → update check → tray menu
+- [ ] `docs/THREAT_MODEL.md` risks current
+- [ ] CHANGELOG.md — version bump entry written
 
 ---
 
-## 5. Bölüm 35 Cloud Connector Dayanıklılığı (özet)
+## 5. Chapter 35 Cloud Connector Resilience (summary)
 
-Bölüm 35'te detaylı; alpha kapsamı için kısa not:
+Detailed in chapter 35; short note for the current scope:
 
-- **Yol A** (premium): D-Space Cloud endpoint — staging buluta yedek
-  (Bölüm 26.5 trait stub)
-- **Yol B** (default, free): manuel klasör scan fallback — OneDrive/
-  Dropbox/Google Drive yerel klasörü taranır
-- **Hibrit** (Bölüm 35.3): yerel scan + opsiyonel bulut sync — kullanıcı
-  network maliyetini görür
-- **Cert revoke hazırlığı** (Bölüm 35.4): bulut endpoint cert revoke
-  edilirse 30 gün grace period, kullanıcıya offline downgrade önerilir
+- **Route A** (premium): cloud backup endpoint — staging backed up to
+  the cloud (chapter 26.5 trait stub)
+- **Route B** (default, free): manual folder scan fallback — the
+  local OneDrive/Dropbox/Google Drive folder is scanned
+- **Hybrid** (chapter 35.3): local scan + optional cloud sync — the
+  user sees the network cost
+- **Cert-revoke readiness** (chapter 35.4): if the cloud endpoint
+  certificate is revoked, a 30-day grace period applies and the user
+  is offered an offline downgrade
 
-Faz 2H'ta gerçek bulut entegrasyonu; şu sprint'te yalnızca trait
-rezervasyonu (Bölüm 26.5).
+Real cloud integration is out of current scope; only the trait
+reservation exists (chapter 26.5).
