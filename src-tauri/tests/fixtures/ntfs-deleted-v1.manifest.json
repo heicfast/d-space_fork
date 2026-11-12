@@ -1,0 +1,488 @@
+{
+  "fixture_version": 1,
+  "generator": "src-tauri/tests/generators/make_ntfs_fixture.py (run: python3 src-tauri/tests/generators/make_ntfs_fixture.py)",
+  "determinism": "all content from fixed strings or random.Random(record) \u2014 byte-identical on every regeneration",
+  "image": {
+    "path": "src-tauri/tests/fixtures/ntfs-deleted-v1.bin",
+    "size": 2097152,
+    "sha256": "48f788f681e1f58e31cfbd4e1e7acec71e8a0ae958d1f36ca4064a09808db530",
+    "geometry": {
+      "sector": 512,
+      "cluster": 4096,
+      "mft_record": 1024,
+      "clusters": 512,
+      "mft_lcn": 16,
+      "mftmirr_lcn": 26,
+      "bitmap_lcn": 27
+    }
+  },
+  "records": [
+    {
+      "record": 16,
+      "name": "alpha.txt",
+      "parent_record": 5,
+      "parent_seq_stored": 1,
+      "seq": 1,
+      "in_use": true,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 46,
+      "sha256": "db812c936d17bef4a3bf958664965fdf75c26c83675e95ce6b6c473242ee181e",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 17,
+      "name": "LiveDir",
+      "parent_record": 5,
+      "parent_seq_stored": 1,
+      "seq": 1,
+      "in_use": true,
+      "is_dir": true,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 0,
+      "sha256": null,
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 18,
+      "name": "bravo.txt",
+      "parent_record": 17,
+      "parent_seq_stored": 1,
+      "seq": 1,
+      "in_use": true,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 20,
+      "sha256": "6def0e1728a0a89d11884cce5918f6088aee527d553c0eee5f56447400eba8cc",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 19,
+      "name": "OldStuff",
+      "parent_record": 5,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": true,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 0,
+      "sha256": null,
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 20,
+      "name": "inner",
+      "parent_record": 19,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": true,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 0,
+      "sha256": null,
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 21,
+      "name": "memo.txt",
+      "parent_record": 20,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 35,
+      "sha256": "7db9decae83093eb16131a9ef20b5d767cbf1577a95d1f2c6746912bf135b490",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 22,
+      "name": "old-report.txt",
+      "parent_record": 19,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 66,
+      "sha256": "994b2b8daa09119aecf31136d3aefbecbdffcf46999f6a11c8e67cdde3d38b1e",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 23,
+      "name": "gone-parent.txt",
+      "parent_record": 60,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 27,
+      "sha256": "b6d463a7da96ba5e8b965e5b37d5907099fa92f40581f5048a24a36354af82dc",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 24,
+      "name": "a.txt",
+      "parent_record": 25,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 12,
+      "sha256": "bc5e323f7d6d11dd205f0429a8d32cc021c8d60db31ffc88e4c0f46241be7711",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 25,
+      "name": "Docs",
+      "parent_record": 5,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": true,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 0,
+      "sha256": null,
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 26,
+      "name": "a.txt",
+      "parent_record": 25,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 26,
+      "sha256": "73a6b608c9059c418d63cb4f196361729df8dd14041919be243384b9fbcd3142",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 27,
+      "name": "live-doc.txt",
+      "parent_record": 25,
+      "parent_seq_stored": 1,
+      "seq": 1,
+      "in_use": true,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 35,
+      "sha256": "a53953a31124c1c8d70b7e4e8e10c8698c6d76360aa2e2b569bdecc08fa5cfa2",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 28,
+      "name": "b@d:na?me*.txt",
+      "parent_record": 5,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 18,
+      "sha256": "54531b73d8731f4414b6ef1b8ae710e25db87e43ceacdb825ca45a0689de88af",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 29,
+      "name": "CON.txt",
+      "parent_record": 5,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 26,
+      "sha256": "2e2ee7f973d719f8b0729ad0d2517967b7fd890e5487f244cf9d321e9d8fd9ca",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 30,
+      "name": "Empty",
+      "parent_record": 5,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": true,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 0,
+      "sha256": null,
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 31,
+      "name": "big.bin",
+      "parent_record": 5,
+      "parent_seq_stored": 1,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "nonresident",
+      "runs": [
+        [
+          2,
+          29
+        ]
+      ],
+      "size": 8192,
+      "sha256": "7d6c652cd5da6934f721992fd7386bfeb4b9d694abe98607fd9b808a22bea11d",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 32,
+      "name": "live-big.bin",
+      "parent_record": 5,
+      "parent_seq_stored": 1,
+      "seq": 1,
+      "in_use": true,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "nonresident",
+      "runs": [
+        [
+          2,
+          31
+        ]
+      ],
+      "size": 8192,
+      "sha256": "b7b25ee29c1582594de51d5a74ad83b3a538b0d0adc36e8d51b07908fa73dab2",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 33,
+      "name": "reused-evidence.txt",
+      "parent_record": 19,
+      "parent_seq_stored": 99,
+      "seq": 2,
+      "in_use": false,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 65,
+      "sha256": "240f7e866e0eafa2711379066bb176202ed8a133a4cff2cb747243e56ed058e9",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    },
+    {
+      "record": 34,
+      "name": "a.txt",
+      "parent_record": 25,
+      "parent_seq_stored": 1,
+      "seq": 1,
+      "in_use": true,
+      "is_dir": false,
+      "namespace": 1,
+      "storage": "resident",
+      "runs": null,
+      "size": 25,
+      "sha256": "abcff54db63f00e262698a02fbc1739d17d1ac64db96814d85c2ef03160b020b",
+      "created": {
+        "filetime": 134129448000000000,
+        "iso": "2026-01-15T10:00:00+00:00"
+      },
+      "modified": {
+        "filetime": 134184834000000000,
+        "iso": "2026-03-20T12:30:00+00:00"
+      }
+    }
+  ],
+  "expected": {
+    "deleted_only_rooted": {
+      "21": "OldStuff/inner/memo.txt",
+      "22": "OldStuff/old-report.txt",
+      "24": "Docs/a.txt",
+      "26": "Docs/a (id 26).txt",
+      "31": "big.bin",
+      "28": "b@d_na_me_.txt",
+      "29": "_CON.txt"
+    },
+    "deleted_only_orphaned": {
+      "23": "_orphaned/gone-parent.txt (id 23)",
+      "33": "_orphaned/reused-evidence.txt (id 33)"
+    },
+    "deleted_only_dirs": {
+      "19": "OldStuff",
+      "20": "OldStuff/inner",
+      "25": "Docs",
+      "30": "Empty"
+    },
+    "deleted_only_empty_dirs": [
+      "Empty"
+    ],
+    "keep_empty_folders": "Empty/ appears only when keep_empty_folders is on",
+    "collision_rule": "same-name deleted files: lower record keeps the plain name, later records get ' (id N)' before the extension (SectorForge contract, FEATURE-MATRIX R-14)",
+    "sanitization": {
+      "28": "b@d:na?me*.txt -> b@d_na_me_.txt",
+      "29": "CON.txt -> _CON.txt"
+    },
+    "seq_rules": "deleted parent resolves when parent.seq == stored_seq or parent.seq == stored_seq + 1 (deletion bump); rec 33 stores seq 99 vs actual 2 -> orphaned, content intact",
+    "grade_expectation": {
+      "31": "Excellent \u2014 all data clusters free in $Bitmap"
+    }
+  },
+  "bitmap_ground_truth": {
+    "allocated": "0-28, 31-32",
+    "free": "29-30 (deleted big.bin), 33-511"
+  },
+  "system_records": "0-15 minimal spec-shaped (see ntfs_fixture.py); records 35-39 dead-but-valid; parser scope = MFT-walking recovery engines, not Windows mounting"
+}

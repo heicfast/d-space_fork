@@ -99,3 +99,26 @@
 **Gate lifted:** with this push the feature matrix is committed — implementation waves may begin. Wave order and row mapping are in the matrix §6; the P0 set is the implementation priority list.
 
 **Next:** T4 — the seeded validation fixture (deterministic disk image + seed manifest + ground-truth expectations, versioned in-repo), then Wave 1 (pin PRESENT P0 contracts with tests) and Wave 2 onward per the matrix.
+
+---
+
+## 2026-11-12 — T4: seeded NTFS validation fixture (deterministic, versioned)
+
+**Done this unit:** `src-tauri/tests/fixtures/ntfs-deleted-v1.bin` — a 2 MiB spec-shaped minimal NTFS built by a committed deterministic generator (`src-tauri/tests/generators/make_ntfs_fixture.py` + `ntfs_fixture.py`, pure Python, no OS filesystem tooling needed — the sandbox has no mkntfs/mtools). Ground truth lives in `src-tauri/tests/fixtures/ntfs-deleted-v1.manifest.json` (per-record: name, parent ref + stored seq, seq, in-use flag, storage, runs, size, sha256, timestamps) plus expected deleted-only outputs.
+
+**Constraint recorded honestly:** mkntfs/mkfs.vfat/mtools/qemu-img are unavailable in the session sandbox and there is no root/fuse, so the fixture is hand-built NTFS (boot sector with valid CRC-32; MFT records 0–39 with correct USA fixups; $FILE_NAME/$DATA/$INDEX_ROOT/$BITMAP/$MFTMirr; non-resident runlists; allocation bitmap with known free/allocated ground truth). Index trees are empty INDEX_ROOTs and system files are minimal — the fixture targets MFT-walking recovery parsers (the target-engine class), not Windows mounting. A VHDX-wrapped variant for real-Windows end-to-end validation remains Wave 6/8 work on the Windows runners (matches the repo's own phase-4.3 roadmap item).
+
+**Scenario encoded (the FEATURE-MATRIX §1.3 acceptance cases):**
+
+- Deleted directory chain `OldStuff/inner/memo.txt` (+ `old-report.txt`) — parents deleted with sequence bumps, children store the pre-deletion sequence → resolves only under the SectorForge seq+1 rule (FS-08/X-04).
+- `Docs/` deleted dir containing two deleted same-name `a.txt` records (24, 26) plus a live `live-doc.txt` and a live `a.txt` (rec 34) → deleted-only outputs `Docs/a.txt` + `Docs/a (id 26).txt`; full-tree extraction additionally proves the ` (id N)` collision contract against the live name.
+- Orphans: `gone-parent.txt` (parent record 60 never existed) and `reused-evidence.txt` (parent seq mismatch — stored 99 vs actual 2) → `_orphaned/<name> (id N)` outputs with intact content.
+- Hostile name `b@d:na?me*.txt` → `b@d_na_me_.txt`; reserved `CON.txt` → `_CON.txt` (R-15 sanitization contract).
+- Empty deleted dir `Empty/` → keep_empty_folders marker case.
+- Non-resident deleted `big.bin` (8192 B over 2 clusters left FREE in $Bitmap → Excellent-grade evidence) and live `live-big.bin` (allocated clusters).
+
+**Verification (evidence: `worklog/VALIDATION/T4-fixture-report.md`):** an independent parse-back parser (in the generator, implementing the SectorForge parent semantics from understanding) re-reads the image — boot CRC, record-0 runlist, all 40 records with fixup application and self-numbering, per-record manifest parity including content SHA-256, deleted-only tree with orphan diagnostics, $Bitmap allocated-set ground truth, $MFTMirr equality — **17/17 checks PASS**, and regeneration is byte-identical (determinism check).
+
+**Rust toolchain note:** the session sandbox has no system Rust; a toolchain was installed under the session workspace and a background `cargo test --lib --no-run` compile of the engine was started to determine whether the crate builds on Linux (parsing core is cross-platform; volume access is `cfg(windows)`-gated). Outcome will be recorded in the next worklog entry; engine test runs land on the repo's windows-latest CI either way.
+
+**Next:** Wave 1 per the matrix — pin the PRESENT P0 contracts with tests (FS-01..FS-04, FS-07, D-01/D-02) against this fixture, then FS-08 (sequence-aware parent validation, the top P0 correctness gap), then the Wave 5 named-feature delta.
