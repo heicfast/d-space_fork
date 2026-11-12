@@ -79,3 +79,23 @@
 **Spot-verification by session lead (Grep, all passed):** SectorForge `--deleted-only` arg flow (`crates/sf-cli/src/lib.rs`, `gui/src-tauri/src/lib.rs`), "Deleted only"/"Only list deleted files" strings, `_orphaned/` + `(id N)` outputs in tests; target `rel_path_for` (`jobs.rs:339`), `keep_empty_folders` (`jobs.rs:77,250`), `origins` filter (`contract.ts:285`); ntfs-recover `scan_chunk` (`scanner.rs:314`); Sleuth Kit `seqend_off` (`tsk/fs/ntfs_dent.cpp`); TestDisk `psearchn.c`/`phbf.c`/`sessionp.c` present.
 
 **Next:** T3 — Agent H consolidates the seven sheets into `worklog/FEATURE-MATRIX.md` (the gate document); session lead reviews, corrects, and pushes it. Implementation waves begin only after the matrix is pushed.
+
+---
+
+## 2026-11-12 — T3: FEATURE-MATRIX.md committed as the gate document
+
+**Done this unit:** Agent H consolidated the seven Phase 0 sheets into `worklog/FEATURE-MATRIX.md` (385 lines). The session lead reviewed it in full (Named Feature Contract §1, matrix rows, stats, discrepancy resolution, wave plan, reverse-traceability appendix) before this push.
+
+**Matrix summary:**
+
+- **136 rows** across 11 categories (Partition 12 / FS 21 / Recovery 17 / Carving 12 / Data model 10 / UX 14 / Output 9 / Persistence 9 / Performance 9 / Error 9 / Edge 14).
+- Target status: **PRESENT 60 / PARTIAL 18 / MISSING 58 / N-A 1** (EFS half of FS-21 — decryption needs account keys; stays Poor + honest note).
+- Priority: **P0 25 / P1 60 / P2 41 / P3 10**.
+- Every row carries reference citations carried forward from the sheets; the TARGET column was independently re-verified against the target's code by Agent H (✓V marks); two sheet-vs-code discrepancies found and resolved code-wins (no parent-sequence validation exists anywhere — recorded MISSING/P0; keep-empty default anchor drift).
+- Licensing table recorded: TestDisk (GPLv2+) and Sleuth Kit (CPL-1.0 core) demand strict no-code-copy re-implementation; SectorForge/Halim/mft-rescue (MIT) and ntfs-recover (0BSD) permissive — but the session rule is behavioral re-implementation with citation for ALL references regardless.
+
+**Named Feature Contract (§1 of the matrix — the Wave 5 spec):** SectorForge's exact observable contract is pinned with citations (scan-time classification per engine; `--deleted-only` emission filter; "Deleted only" checkbox + "Only list deleted files (quicker on very large volumes)" pre-run option; sequence-aware parent validation where a deleted parent may be exactly seq+1; Rooted/Orphaned ancestry with cycle guards; `_orphaned/<name> (id N)` outputs; ` (id N)` collision suffix before the extension; sanitization incl. reserved names and UTF-16 240-unit cap). The target's current contract is graded and the closing delta is a 10-item list (U-01 deleted-only toggle, U-02 pre-run option, deleted-only tree presentation, R-13 `_orphaned/` bucket, R-14 ` (id N)` collisions, R-15 sanitization, U-05/U-06/U-07 option toggles, one-click "Recover deleted tree", E-09 honest `report.verified`, acceptance tests mirroring SectorForge's pins).
+
+**Gate lifted:** with this push the feature matrix is committed — implementation waves may begin. Wave order and row mapping are in the matrix §6; the P0 set is the implementation priority list.
+
+**Next:** T4 — the seeded validation fixture (deterministic disk image + seed manifest + ground-truth expectations, versioned in-repo), then Wave 1 (pin PRESENT P0 contracts with tests) and Wave 2 onward per the matrix.
