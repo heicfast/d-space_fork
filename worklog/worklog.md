@@ -46,3 +46,36 @@
 - The named feature (deleted-only reconstructed tree as a post-scan option) is therefore expected to be **PARTIAL** in the target; Agent A must grade it precisely and Agent B must extract SectorForge's exact contract for the delta.
 
 **Next:** T2 — parallel agents A–G produce the seven Phase 0 context sheets in `worklog/` (pushed before any code change), then T3 consolidates `worklog/FEATURE-MATRIX.md` as the gate document. Nothing is implemented before the matrix is committed and pushed.
+
+---
+
+## 2026-11-12 — T2: Phase 0 context sheets (Agents A–G, parallel)
+
+**Done this unit:** seven parallel read-agents produced the Phase 0 context sheets (2,232 lines total). No repository code was touched; only `worklog/` grew. Load-bearing citations were independently spot-verified with Grep by the session lead before this push (all passed; details below).
+
+| Sheet | Lines | License found | Coverage reported by agent |
+| --- | --- | --- | --- |
+| TARGET-STATE.md | 359 | GPL-3.0-or-later (target) | 41 files read fully, 32 partially, ~240 enumerated (assets/locks/mock/docs) of 311 |
+| SECTORFORGE-FEATURES.md | 389 | MIT | 68 fully, 4 partially, ~120 enumerated of 197 |
+| HALIM-FEATURES.md | 307 | MIT | 60 fully of 62 (2 binaries existence-only) |
+| TESTDISK-FEATURES.md | 384 | GPLv2-or-later | 30 fully + ~20 partially of 793 (subsystem-exhaustive; 353-format registry enumerated) |
+| SLEUTHKIT-FEATURES.md | 400 | CPL-1.0 core / Apache-2.0 bindings (+ islands) | 22 fully + ~18 partially of 959 (subsystem-exhaustive) |
+| NTFS-RECOVER-FEATURES.md | 241 | 0BSD | 24 of 25 files fully (Cargo.lock partial) |
+| MFT-RESCUE-FEATURES.md | 152 | MIT | 8 of 8 fully |
+
+**Licensing conclusion (recorded for the matrix):** target is GPL-3.0-or-later. SectorForge (MIT), Halim (MIT), ntfs-recover (0BSD), mft-rescue (MIT) are permissive — still re-implemented from understanding per SOP, never copied verbatim. TestDisk (GPLv2+) and Sleuth Kit (CPL-1.0 core) require strict behavioral re-implementation from documented understanding with citation; no code copying. Both constraints are compatible with the harvest SOP.
+
+**Headline findings (full detail in the sheets):**
+
+1. **The named feature EXISTS in SectorForge and is graded PARTIAL in the target.** SectorForge contract (verified): deleted/live classified at scan time (NTFS MFT flags bit 0 in `crates/sf-core/src/ntfs/record.rs`, FAT 0xE5, exFAT type-bit-7); post-scan emission filter `--deleted-only` skips `in_use` records (`crates/sf-cli/src/recover.rs`); GUI surfaces it twice — a post-scan "Deleted only" checkbox (`gui/src/screens/recover/FileBrowser.tsx`) and a pre-run "Only list deleted files (quicker on very large volumes)" option (`gui/src/screens/recover/FilesTab.tsx`); parent-reference tree with sequence-aware validation (deleted parent allowed at seq+1, cycle guard, `Rooted` vs `Orphaned` classification); extraction recreates the original hierarchy, orphans land in `_orphaned/<name> (id N)`, collisions get ` (id N)` before the extension — pinned by `crates/sf-core/src/ntfs/tests.rs` (`Docs/a (id 32).txt`, `_orphaned/orphan (id 23).txt`).
+   Target delta (verified in `src-tauri/src/recovery/jobs.rs`, `src/connector/contract.ts`, `src/stores/filter-store.ts`): engine-side `origins:["deleted"]` filtering and `rel_path_for` deleted-ancestor path reconstruction + `keep_empty_folders` already exist, but **the UI offers no deleted-only post-scan view/option** (only an "Existing" origin toggle), `keep_empty_folders` defaults off with no UI control, and there is no single "export the deleted-only reconstructed tree" surface. This delta is the P0 named-feature work.
+2. Target gap list (Agent A, top items): no carving engine (raw-all reserved), no partition-table reconstruction/write-back, no journal replay, no $MFTMirr→$MFT restore, no crash-resume (sessions save only on complete/cancel), no CSV/JSON/report export, `verified:true` hardcoded in the job report, `dw_pick_directory` ignores hint args.
+3. TestDisk deep assets for Waves 3–4: 353-format signature registry with 256-bucket dispatch, blockwise carving with paranoid levels and brute-force fragment repair (`src/phbf.c`), GPT backup validation/rewrite, MBR/EBR chain reconstruction, deep-scan candidate ladder, `photorec.ses` checkpoint format.
+4. Sleuth Kit deep assets: linear INDX scan for deleted names, deleted-name-from-directory-slack rule, fixup verify/swap, signed-delta runlist decoder, $OrphanFiles pass, gap-filling unallocated volumes, blkls carving input semantics.
+5. ntfs-recover (0BSD) supplies the both-$MFT-and-$MFTMirr-broken path: full-disk FILE-magic sweep at record-aligned boundaries, 3-tier record numbering, delta-grouping fragment reconstruction, in-place record-0 patch (`--fix-mirror`).
+6. mft-rescue honest finding: $LogFile replay, $UsnJrnl analysis, and MFT slack carving are **absent** from that repo (README overclaims); its real value is the imager (sector-retry salvage, JSON checkpoint/resume) and path/orphan taxonomy.
+7. Halim Recovery value: health-scoring rubric (55/35/10 with forced-Red rule), FAT32 deleted-directory harvesting, 8 structural carving validators, safe-writer semantics, natural-language filter.
+
+**Spot-verification by session lead (Grep, all passed):** SectorForge `--deleted-only` arg flow (`crates/sf-cli/src/lib.rs`, `gui/src-tauri/src/lib.rs`), "Deleted only"/"Only list deleted files" strings, `_orphaned/` + `(id N)` outputs in tests; target `rel_path_for` (`jobs.rs:339`), `keep_empty_folders` (`jobs.rs:77,250`), `origins` filter (`contract.ts:285`); ntfs-recover `scan_chunk` (`scanner.rs:314`); Sleuth Kit `seqend_off` (`tsk/fs/ntfs_dent.cpp`); TestDisk `psearchn.c`/`phbf.c`/`sessionp.c` present.
+
+**Next:** T3 — Agent H consolidates the seven sheets into `worklog/FEATURE-MATRIX.md` (the gate document); session lead reviews, corrects, and pushes it. Implementation waves begin only after the matrix is pushed.
