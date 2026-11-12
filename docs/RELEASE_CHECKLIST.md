@@ -153,8 +153,11 @@ A small update button in the app shell. On click:
 
 ### 2.6 Channel strategy (v1.0+)
 
-- **Stable** — default endpoint, GA releases
-- **Beta** — GitHub prereleases (current: v0.4.0-beta)
+- **Beta** — the channel's public **Latest** release (GitHub
+  `releases/latest` never resolves to a prerelease, and the updater
+  endpoint would 404 while no stable release exists — so betas must
+  publish as Latest; alpha/rc stay flagged prerelease)
+- **Stable** — same endpoint, GA versions (v1.0+)
 - **Nightly** — daily builds, separate feed (v1.0)
 
 User channel choice via `settings.update_channel`.

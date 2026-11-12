@@ -295,3 +295,32 @@ that can run them).
 
 **Reference:** commits 0aef2a3 (fix) and 48ce42e (English string
 pass) on `heicfast/d-space_fork` main.
+
+## #008 — Updater endpoint 404 while all releases are prereleases
+
+Date: 2026-11-12 · Related chapter: 21.4 · Type: gotcha
+
+**Finding:** The updater endpoint
+`https://github.com/heicfast/d-space_fork/releases/latest/download/latest.json`
+returned 404 after the v0.4.0-beta release. GitHub's `releases/latest`
+resolves only to the most recent **non-prerelease, non-draft**
+release — and every release on the channel was flagged prerelease by
+the conditional `prerelease: contains(alpha|beta|rc)` logic added in
+v0.3.0. The v0.3.0-beta updater suffered the same silent failure:
+its verification had checked the release's direct asset URL, not the
+endpoint resolution path an installed app actually takes.
+
+**Impact:** Installed apps could never discover an update — the
+updater reported a network error on every check while the channel
+published prereleases only.
+
+**Decision:** Betas publish as the channel's public **Latest**
+release; the prerelease flag now applies only to alpha/rc (internal
+builds). The already-published v0.4.0-beta release flag was flipped
+via the API and the endpoint verified to resolve (HTTP 200) with a
+signature-bearing latest.json. When a stable line begins with v1.0,
+stable releases naturally take over `releases/latest`; a separate
+beta feed is a documented v1.0+ channel-strategy item.
+
+**Reference:** release workflow change + RELEASE_CHECKLIST §2.6 +
+CHANGELOG v0.4.0-beta stabilization section, 2026-11-12.

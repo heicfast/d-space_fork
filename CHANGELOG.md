@@ -100,6 +100,14 @@ and the D-Space feature set returns inside the new design language.
   explanations translated (30 files, ~280 strings). The UI, logs and
   rule panel are now fully English regardless of locale; only the
   deliberate UTF-16 decode fixture keeps non-ASCII data
+- **Updater endpoint repaired** — betas now publish as the channel's
+  "Latest" release (prerelease flag only for alpha/rc). Root cause:
+  GitHub's `releases/latest` never resolves to a prerelease, so the
+  configured `releases/latest/download/latest.json` endpoint 404'd
+  while every release was flagged prerelease — installed apps could
+  never find an update (this also silently broke the v0.3.0-beta
+  updater). The published v0.4.0-beta release flag was flipped
+  accordingly and the feed verified reachable.
 
 ### Numbers
 

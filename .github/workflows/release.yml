@@ -84,7 +84,11 @@ jobs:
             - Builds are unsigned (EV certificate is a v1.0 roadmap item) — SmartScreen may warn on first run. Verify the SHA-256 checksums on the release assets.
             - Licensed under GPL-3.0-or-later.
           releaseDraft: false
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          # Betas publish as the channel's "Latest" release: GitHub's
+          # releases/latest never resolves to a prerelease, and the updater
+          # endpoint below 404s while no stable release exists. Alpha/rc
+          # (internal builds) stay flagged as prereleases.
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'rc') }}
           includeUpdaterJson: true
 
       - name: Generate checksums
