@@ -1,9 +1,9 @@
-# D-Space · Repo Standards
+# DiskWizard · Repo Standards
 
 > **Hedef konum:** `C:\Projeler\d-space\REPO_STANDARDS.md`
 > Reponun köğüne kopyalayıp commit'leyin. Sonraki düzenlemeler bu dosyaya bağlı kalmalı — değişiklik gerekirse burayı da güncelleyin.
 >
-> **Snapshot:** 2026-05-14 (D Brand README + about/topics align sonrası)
+> **Snapshot:** 2026-05-14 (DiskWizard README + about/topics align sonrası)
 
 ---
 
@@ -23,13 +23,13 @@ Değişiklik yaparsanız bu tabloyu güncelleyin + remote'a yansıtın.
 
 ---
 
-## 2. README iskeleti (D Brand template — kaynak: d-terminal)
+## 2. README iskeleti (DiskWizard template — kaynak: d-terminal)
 
 ### 2.1 Bölüm sırası (kanonik)
 
 1. **Header** — center-aligned, başlık + İngilizce tagline + TR/EN alt-tagline + bilingual notice
 2. **🎬 Demo**
-3. **Badge row** — CI/Release/Downloads (varsa) → License → Status → Platform → Tech → D Brand
+3. **Badge row** — CI/Release/Downloads (varsa) → License → Status → Platform → Tech → DiskWizard
 4. **📌 Kısaca** (TR) + collapsible `🇬🇧 At a glance` (EN)
 5. **🆕 Yenilikler / What's done so far**
 6. **🎯 Vizyon / Vision** (opsiyonel)
@@ -39,7 +39,7 @@ Değişiklik yaparsanız bu tabloyu güncelleyin + remote'a yansıtın.
 10. **📥 Kurulum / Installation** + **🚀 İlk Adımlar / Quick Start**
 11. **🛡️ Güvenlik Tarama / Security Scan Results** (release varsa)
 12. **🤝 Katkı / Contributing**
-13. **🎨 D Brand Ailesi / D Brand Family**
+13. **🎨 DiskWizard Ailesi / DiskWizard Family**
 14. **💖 Sponsorlar / Sponsors**
 15. **❤️ Destekle / Support**
 16. **📜 Lisans / License**
@@ -49,9 +49,9 @@ Değişiklik yaparsanız bu tabloyu güncelleyin + remote'a yansıtın.
 ```markdown
 <div align="center">
 
-<img src="<icon-path>" width="128" alt="D-Space logo" />
+<img src="<icon-path>" width="128" alt="DiskWizard logo" />
 
-# D-Space
+# DiskWizard
 
 **Smart disk analyzer and recovery platform for Windows**
 
@@ -71,7 +71,7 @@ _MFT-fast scanning, safe-to-delete scoring, guaranteed undo_
 [Status: alpha/MVP/stable — gerçek duruma göre]
 [Platform: Windows 10/11]
 [Tauri v2] [Vue 3] [Rust stable] [SQLite] [BLAKE3]
-[D Brand]
+[DiskWizard]
 ```
 
 ### 2.4 Bilingual yapı

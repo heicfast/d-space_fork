@@ -1,11 +1,11 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# D-Space — Sonraki Oturum Yol Planı
+# DiskWizard — Sonraki Oturum Yol Planı
 
-> **Son güncelleme:** 2026-11-07 — v0.3.0-beta: beş dallı kod inceleme dalgası + tüm bulgu düzeltmeleri + USN watcher prod wire + updater zinciri fix
-> **Şu anki sürüm:** `v0.3.0-beta` (0.3.0 — heicfast/d-space_fork kanalı)
-> **Hedef:** v0.4.0 → `v1.0.0-stable`
-> **Test sayısı:** 159 Rust (+9 vss-gated) + 34 frontend + 6 e2e web
+> **Son güncelleme:** 2026-11-12 — v0.4.0-beta: DiskWizard merge (Recovery Wizard React UI + gerçek recovery motoru, mock eradikasyonu, admin manifest, cleanup özellik seti)
+> **Şu anki sürüm:** `v0.4.0-beta` (0.4.0 — heicfast/d-space_fork kanalı)
+> **Hedef:** v0.5.0 → `v1.0.0-stable`
+> **Test sayısı:** ~170 Rust (+9 vss-gated) + 197 frontend + 12 e2e
 
 Bu doküman bir sonraki oturum başlar başlamaz açılacak. Akış:
 

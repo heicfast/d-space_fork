@@ -1,8 +1,89 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
-# D-Space Changelog
+# DiskWizard Changelog
 
-Spec v1.4 dondurulmuş. Implementation farkı `docs/DISCOVERY_LOG.md`'de.
+Spec v1.4 dondurulmuş (D-Space lineage). Implementation farkı
+`docs/DISCOVERY_LOG.md`'de.
+
+## [v0.4.0-beta] — 2026-11-12
+
+**DiskWizard.** The Recovery Wizard React UI becomes the product
+frontend (replacing the Vue app), wired end-to-end to the real engine —
+the mock simulated backend is eradicated from every production surface,
+and the D-Space feature set returns inside the new design language.
+
+### Product
+
+- Rebrand to **DiskWizard** (com.heicfast.diskwizard): English-first UI
+  (manual language switch to 简体中文), custom window chrome, original
+  emblem, all corpus-derived branding (incl. the EaseUS-named app
+  string) removed; activation/licensing surfaces deleted
+- `requireAdministrator` manifest — the UAC prompt at launch replaces
+  every scan dying with ACCESS_DENIED (raw volume access, MFT engine,
+  deleted-file recovery, VSS and repair all need elevation)
+- New sidebar: Data Recovery · Advanced Features · **Disk Cleanup** ·
+  File Backup
+
+### The real recovery engine (`src-tauri/src/recovery/`)
+
+- **Unified MFT walk** — one pass collects live AND deleted records;
+  deleted entries keep data-run maps; $Bitmap cluster-allocation
+  reader; pause/resume/cancel with partial results
+- **Confidence grading** — cluster-reuse model (excellent/good/fair/
+  poor); fresh record re-parse + allocation re-check at read and
+  recovery time (stale scan state never recovers wrong bytes)
+- **Server-side results** — filters (category/date/size/extension/
+  origin/search), 5 sort keys, pagination with totals, path tree with
+  the Lost Path branch, 8-category type tree; cleanup scores ride on
+  node attributes
+- **Verified recovery jobs** — collision policy, folder rebuild,
+  Blake3 verify-on-write, per-file progress events, honest failure
+  codes (record-reused, clusters-overwritten, unsupported-encoding)
+- **Bounded previews** — image (≤8 MiB, header-parsed dimensions),
+  text (UTF-16LE/UTF-8 detect), hex (≤64 KiB); deleted files read
+  through their data runs
+- **Sessions** — scans persist to compact `.dws` binaries (SQLite
+  registry, migration 0004); completed and cancelled scans auto-save
+- **Health** — SMART via ATA pass-through (fixture-tested sector
+  parser), physical-drive mapping, honest health-unavailable
+- **Volume repair** — NTFS boot/backup + $MFT/$MFTMirr dry-run
+  findings; consent-gated apply with undo log (non-system volumes)
+- **Lost partitions** — GPT/MBR layout parsing, unallocated-gap boot
+  probing, and the whole MFT engine running over lost volumes via an
+  offset reader
+
+### UI (React 19, connector-driven)
+
+- Real IPC bridge over 46 `dw_*` commands; 27 wiring tests pin every
+  command name, argument casing and result mapping; connector default
+  is the real engine (mock is an explicit test/dev opt-in)
+- Size Map squarified treemap view; cleanup-score pills; staging from
+  the results context menu
+- Cleanup Bin (restore, conflict resolution, typed-phrase permanent
+  delete with DoD wipe, expired batch with threshold abort), Duplicate
+  Finder, Size Snapshots with two-select deltas, user rules in Settings
+- Volume Repair page (mock per-file dropzone deleted), Lost Partition
+  Rescue from real disk layouts, Home quick targets via the native
+  folder picker and real special folders
+- Auto-updater dialog (Ed25519-signed passive install + relaunch),
+  close-while-busy guard, tray scan hand-off and full-disk alert toasts
+
+### Engine housekeeping
+
+- English error/tray strings; DiskWizard data folders
+  (`%LOCALAPPDATA%\DiskWizard\{db,staging,sessions}`); single-instance
+  plugin; superseded commands removed (internals + tests retained)
+- CI: merged pipeline — Rust fmt/clippy/tests (default + vss) and the
+  full frontend gate stack on every push; blocking e2e smoke +
+  tauri-debug link; release workflow gains a version-match gate and
+  builds with the REAL connector only
+
+### Numbers
+
+197 frontend unit tests (+ wiring suite) · 12 e2e smoke · ~170 Rust
+engine tests (incl. ~40 new recovery tests, executing on Windows CI) ·
+coverage 81.8/62.4/70.7/82.8 over 70/60/70/70 thresholds · bundle
+143/327 KB gzip (budget 200/500)
 
 ## [v0.3.0-beta] — 2026-11-07
 

@@ -110,3 +110,31 @@ neededBytes? }` — **the overlap refusal is hard**: the UI cannot proceed
   by resume), `out-of-space`, `permission-denied`, `corrupt-session`.
 - Preview payloads are deterministic SVG/byte/text generations; failures
   carry diagnostic reason keys.
+
+---
+
+## Addendum — 2026-11-12 (DiskWizard v0.4.0-beta: the bridge is real)
+
+The engine-integration session happened. Status of every domain:
+
+| Domain               | Implementation                                                                                                                                                                                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Devices              | `dw_devices_list` — drive enumeration + pre-flight + IOCTL hardware probe; wire models map in `tauri-connector.ts`                                                                                                                                                    |
+| Scan                 | `dw_scan_start/state/pause/resume/cancel` — stage machine (volume-analysis → quick-index⇄deep-walk → tree-build), weighted monotonic progress on `dw-scan-progress`, path-scope validation (hard `scan-scope-invalid`), lost-partition targets (`lp:<disk>:<offset>`) |
+| Results              | `dw_results_tree/query/count` + `dw_node_detail` — server-side filters/sorts/pagination over the unified (existing + deleted + lost-path) tree                                                                                                                        |
+| Preview              | `dw_preview` / `dw_thumbnail` — image (header-parsed dimensions) / text (UTF-16LE + UTF-8) / hex; deleted files read through fresh data runs                                                                                                                          |
+| Sessions             | `dw_session_save/list/load` — compact `.dws` binaries + SQLite rows; scans auto-save on completion/cancel                                                                                                                                                             |
+| Recovery             | `dw_recover_start/cancel/state/items/report` — collision policy, folder rebuild, Blake3 verify-on-write, honest item failure codes, `dw-recovery-progress` events                                                                                                     |
+| Health               | `dw_disk_health` — SMART via ATA pass-through (SATA); NVMe degrades to `health-unavailable`                                                                                                                                                                           |
+| Repair               | `dw_repair_dry_run/apply/undo_log/undo` — NTFS boot/backup + $MFT/$MFTMirr checks, typed `REPAIR` consent, undo log, non-system volumes only                                                                                                                          |
+| System               | `dw_app_info`, `dw_mount_points`, `dw_validate_destination`, `dw_pick_directory` (native dialog), `dw_open_path`, `dw_disk_layouts`, `dw_special_folders`                                                                                                             |
+| Cleanup (new domain) | staging/undo/conflict/permanent-delete/expired, rules CRUD, duplicates (BLAKE3), snapshots + deltas, USN quick search, settings KV                                                                                                                                    |
+
+Contract extensions in this release: `CleanupDomain` (10th domain), the
+`network` device kind, `DiskLayout`/`LostPartition`/`SpecialFolders` on
+the system domain, `deletedFound` on scan progress, nullable image
+preview dimensions, optional `note` on health/repair payloads.
+
+The 27 wiring tests in `tests/tauri-connector.test.ts` pin every command
+name, argument casing and result mapping — rename anything on either
+side and they fail before runtime does.
