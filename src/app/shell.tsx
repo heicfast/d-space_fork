@@ -2,9 +2,11 @@ import * as React from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
+import { toast } from 'sonner';
 import {
+  DownloadIcon,
   HelpCircleIcon,
-  KeyRoundIcon,
   LanguagesIcon,
   MenuIcon,
   MoonIcon,
@@ -12,15 +14,23 @@ import {
   PanelLeftOpenIcon,
   RefreshCcwIcon,
   SettingsIcon,
-  ShoppingCartIcon,
   SunIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatBytes } from '@/lib/format';
 import { useTheme } from './theme';
 import { useScanSessionStore } from '@/stores/scan-session-store';
 import { useUiStore } from '@/stores/ui-store';
 import { DevPanel, PerfOverlay } from '@/features/dev-panel/dev-panel';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,26 +39,33 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/menus';
 import { AboutDialog } from '@/features/settings-about/about-dialog';
-import { ActivationDialog } from '@/features/settings-about/activation-dialog';
-import { setLocale, SUPPORTED_LOCALES } from '@/i18n';
+import { UpdateDialog } from '@/features/settings-about/update-dialog';
+import { i18next, setLocale, SUPPORTED_LOCALES } from '@/i18n';
 import { WindowControls } from '@/components/ui/window-controls';
 import {
-  BrandBriefcaseLogo,
+  BrandDiskWizardLogo,
+  SidebarCleanupBinIcon,
   SidebarChronoSnapIcon,
+  SidebarDuplicatesIcon,
   SidebarFileRepairIcon,
   SidebarHardwareDiskIcon,
   SidebarLostPartitionIcon,
   SidebarMoreToolsIcon,
   SidebarSdCardIcon,
+  SidebarSnapshotsIcon,
 } from '@/components/ui/brand-icons';
 import { isTauriRuntime } from '@/lib/runtime';
+import { useStartScan } from '@/queries/scan';
 
 /**
- * App shell (reference: landing-baseline_53c354a9.png) — #EBF2FF ice-blue
- * outer window frame, custom title bar with briefcase-plus emblem, robot
- * mascot helper popover ("Hi! Guess you need:"), orange Buy Now pill, key
- * activation modal trigger, 3-group left sidebar (Data Recovery, Advanced
- * Features, File Backup), and white rounded-tl-2xl content card.
+ * App shell — #EBF2FF ice-blue outer window frame, custom title bar with
+ * the DiskWizard emblem, language + three-lines menu (Settings, Theme,
+ * Check for Updates, About), 4-group left sidebar (Data Recovery,
+ * Advanced Features, Disk Cleanup, File Backup), and the white
+ * rounded-tl-2xl content card.
+ *
+ * Desktop-shell integrations (no-ops in the browser): the tray "Scan C:"
+ * hand-off, tray full-disk alert toasts, and the close-while-busy guard.
  */
 
 const NAV_DATA_RECOVERY = [
@@ -97,21 +114,108 @@ const NAV_BACKUP = [
   },
 ] as const;
 
+const NAV_CLEANUP = [
+  {
+    to: '/cleanup',
+    icon: SidebarCleanupBinIcon,
+    labelKey: 'sidebar.cleanupBin',
+    end: false,
+  },
+  {
+    to: '/duplicates',
+    icon: SidebarDuplicatesIcon,
+    labelKey: 'sidebar.duplicateFinder',
+    end: false,
+  },
+  {
+    to: '/snapshots',
+    icon: SidebarSnapshotsIcon,
+    labelKey: 'sidebar.sizeSnapshots',
+    end: false,
+  },
+] as const;
+
 export function WizardShell(): React.JSX.Element {
   const { t } = useTranslation();
   const { resolved, setMode } = useTheme();
   const active = useScanSessionStore((s) => s.active);
+  const recoveryActiveJobId = useScanSessionStore((s) => s.recoveryActiveJobId);
   const navigate = useNavigate();
   const location = useLocation();
   const [aboutOpen, setAboutOpen] = React.useState(false);
-  const [activationOpen, setActivationOpen] = React.useState(false);
+  const [updateOpen, setUpdateOpen] = React.useState(false);
+  const [closeGuardOpen, setCloseGuardOpen] = React.useState(false);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const mainRef = React.useRef<HTMLElement | null>(null);
+  const startScan = useStartScan();
 
   React.useEffect(() => {
     mainRef.current?.focus({ preventScroll: true });
   }, [location.pathname]);
+
+  // Desktop-shell event bridge: tray "Scan C:" hand-off + full-disk alerts.
+  React.useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const unlisteners: Array<Promise<() => void>> = [];
+    unlisteners.push(
+      listen<string>('tray-scan-request', (event) => {
+        const letter = (event.payload ?? 'C').replace(/[^A-Za-z]/g, '').toUpperCase() || 'C';
+        toast.info(t('tray.scanRequested', { drive: letter }));
+        startScan.mutate(
+          { targetId: `vol:${letter}` },
+          {
+            onSuccess: ({ scanId }) => {
+              void navigate(`/scan/vol:${letter}/live?scanId=${scanId}`);
+            },
+          },
+        );
+      }),
+    );
+    unlisteners.push(
+      listen<{
+        drive_letter: string;
+        volume_label: string;
+        usage_percent: number;
+        total_bytes: number;
+        free_bytes: number;
+      }>('tray-monitor-alert', (event) => {
+        toast.warning(
+          t('tray.alertBody', {
+            drive: event.payload.drive_letter,
+            percent: event.payload.usage_percent,
+            free: formatBytes(event.payload.free_bytes, i18next.language),
+            total: formatBytes(event.payload.total_bytes, i18next.language),
+          }),
+          { description: t('tray.alertTitle') },
+        );
+      }),
+    );
+    return () => {
+      for (const p of unlisteners) void p.then((fn) => fn());
+    };
+  }, [navigate, startScan, t]);
+
+  // Close-while-busy guard: confirm before interrupting a scan or a
+  // running recovery job (desktop shell only).
+  React.useEffect(() => {
+    if (!isTauriRuntime()) return;
+    const confirmedClose = false;
+    const promise = getCurrentWindow().onCloseRequested((event) => {
+      const busy = active !== null || recoveryActiveJobId !== null;
+      if (!busy || confirmedClose) return;
+      event.preventDefault();
+      setCloseGuardOpen(true);
+    });
+    return () => {
+      void promise.then((fn) => fn());
+    };
+  }, [active, recoveryActiveJobId]);
+
+  const confirmClose = (): void => {
+    setCloseGuardOpen(false);
+    void getCurrentWindow().destroy();
+  };
 
   const inExplorerFlow =
     location.pathname.startsWith('/scan/') || location.pathname.startsWith('/results');
@@ -137,36 +241,13 @@ export function WizardShell(): React.JSX.Element {
         onDoubleClick={onTitleBarDoubleClick}
       >
         <div className="flex items-center gap-2">
-          <BrandBriefcaseLogo className="size-5" />
+          <BrandDiskWizardLogo className="size-5" />
           <span className="text-[12.5px] font-semibold tracking-tight text-[#1E293B] dark:text-foreground">
             {t('app.name')}
           </span>
         </div>
 
         <div className="flex items-center gap-1.5">
-          {/* Orange Buy Now Pill / Cart Button */}
-          <button
-            type="button"
-            onClick={() => setActivationOpen(true)}
-            className="inline-flex h-6 items-center gap-1 rounded-full bg-gradient-to-r from-[#FF7A2F] to-[#FF4D00] px-2.5 text-[11px] font-semibold text-white shadow-2xs transition-all hover:from-[#F26518] hover:to-[#E03E00] active:scale-[var(--press-scale)] focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ShoppingCartIcon className="size-3" aria-hidden />
-            <span>{t('activation.buyPill')}</span>
-          </button>
-
-          {/* Key Icon — Opens Activate EaseUS Data Recovery Wizard Modal */}
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t('activation.open')}
-            title={t('activation.open')}
-            data-testid="header-activate-trigger"
-            className="size-7 text-[#475569] hover:bg-[#DCE8FF] hover:text-[#0F172A] dark:text-foreground-secondary dark:hover:bg-surface-hover dark:hover:text-foreground"
-            onClick={() => setActivationOpen(true)}
-          >
-            <KeyRoundIcon className="size-3.5" aria-hidden />
-          </Button>
-
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -214,6 +295,10 @@ export function WizardShell(): React.JSX.Element {
                   {resolved === 'dark' ? t('settings.themeLight') : t('settings.themeDark')}
                 </span>
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setUpdateOpen(true)}>
+                <DownloadIcon className="size-3.5" aria-hidden />
+                <span>{t('update.check')}</span>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setAboutOpen(true)}>
                 <HelpCircleIcon className="size-3.5" aria-hidden />
@@ -252,6 +337,11 @@ export function WizardShell(): React.JSX.Element {
 
                 <SidebarSection label={t('sidebar.advanced')} collapsed={sidebarCollapsed} />
                 {NAV_ADVANCED.map((item) => (
+                  <SidebarLink key={item.to} {...item} collapsed={sidebarCollapsed} />
+                ))}
+
+                <SidebarSection label={t('sidebar.diskCleanup')} collapsed={sidebarCollapsed} />
+                {NAV_CLEANUP.map((item) => (
                   <SidebarLink key={item.to} {...item} collapsed={sidebarCollapsed} />
                 ))}
 
@@ -352,7 +442,27 @@ export function WizardShell(): React.JSX.Element {
 
       {import.meta.env.DEV ? <DevSurfaces /> : null}
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
-      <ActivationDialog open={activationOpen} onOpenChange={setActivationOpen} />
+      <UpdateDialog open={updateOpen} onOpenChange={setUpdateOpen} />
+      <Dialog open={closeGuardOpen} onOpenChange={setCloseGuardOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{t('closeGuard.title')}</DialogTitle>
+            <DialogDescription>
+              {recoveryActiveJobId !== null
+                ? t('closeGuard.recoveryBody')
+                : t('closeGuard.scanBody')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setCloseGuardOpen(false)}>
+              {t('closeGuard.wait')}
+            </Button>
+            <Button variant="danger" onClick={confirmClose}>
+              {t('closeGuard.leave')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

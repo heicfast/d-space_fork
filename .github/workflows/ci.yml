@@ -35,7 +35,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "src-tauri -> target"
+          workspaces: 'src-tauri -> target'
 
       - name: Format check
         run: cargo fmt --all -- --check
@@ -63,7 +63,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "src-tauri -> target"
+          workspaces: 'src-tauri -> target'
 
       - name: Clippy with vss feature (deny warnings)
         run: cargo clippy --lib --no-deps --features vss -- -D warnings
@@ -114,7 +114,7 @@ jobs:
       - name: Knip
         run: pnpm knip
         env:
-          KNIP_DISABLE_RAW_TRANSFER: "1"
+          KNIP_DISABLE_RAW_TRANSFER: '1'
 
       - name: Copy-paste detection
         run: pnpm jscpd
@@ -128,8 +128,8 @@ jobs:
       - name: Bundle budget
         run: pnpm bundle:check
         env:
-          BUDGET_MAIN_KB: "200"
-          BUDGET_TOTAL_KB: "500"
+          BUDGET_MAIN_KB: '200'
+          BUDGET_TOTAL_KB: '500'
 
       - name: Rust shell check (engine compiles with the UI)
         run: cargo check --manifest-path src-tauri/Cargo.toml

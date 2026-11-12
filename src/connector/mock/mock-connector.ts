@@ -17,6 +17,7 @@ import type {
   DestinationValidation,
   Device,
   DiskHealth,
+  DiskLayout,
   DriverStatus,
   MockScenarioId,
   MountPoint,
@@ -40,13 +41,17 @@ import type {
   ScanState,
   SessionMeta,
   SmartAttribute,
+  SpecialFolders,
   SortDirection,
   SortField,
   SystemDomain,
   TreeNode,
   TreePage,
   Volume,
+  CleanupDomain,
+  IndexHit,
 } from '../contract';
+import { createMockCleanup } from './mock-cleanup';
 import { fixturesFor } from './fixtures';
 import { NodeSpace } from './node-space';
 import { mulberry32, randBell, randInt } from './rng';
@@ -161,6 +166,7 @@ interface ScanRuntime {
   bytesTotal: number;
   filesFound: number;
   dataFound: number;
+  deletedFound: number;
   errors: number;
   badSectors: BadSectorRange[];
   eta: number | null;
@@ -393,6 +399,7 @@ export class MockConnector {
         bytesTotal,
         filesFound: 0,
         dataFound: 0,
+        deletedFound: 0,
         errors: 0,
         badSectors: this.scenario === 'bad-sectors' ? this.makeBadSectorMap(bytesTotal) : [],
         eta: null,
@@ -550,11 +557,13 @@ export class MockConnector {
     const stats = rt.space.stats(rt.scopeMask);
     if (rt.status === 'completed') {
       rt.filesFound = stats.files;
+      rt.deletedFound = Math.floor(stats.files * 0.31);
       rt.dataFound = stats.size;
       this.autoSaveSession(rt);
     } else {
       const curve = 1 - Math.exp(-3.4 * rt.overall);
       rt.filesFound = Math.floor(stats.files * curve);
+      rt.deletedFound = Math.floor(stats.files * 0.31 * curve);
       rt.dataFound = Math.floor(stats.size * curve);
     }
 
@@ -593,6 +602,7 @@ export class MockConnector {
       bytesTotal: rt.bytesTotal,
       filesFound: rt.filesFound,
       dataFoundBytes: rt.dataFound,
+      deletedFound: rt.deletedFound ?? 0,
       errors: rt.errors,
       badSectorMap: rt.badSectors,
       etaSeconds: rt.eta,
@@ -1566,6 +1576,48 @@ ${lines.join('')}
       return this.mountPoints();
     },
 
+    listDiskLayouts: async (): Promise<DiskLayout[]> => {
+      await latency(200, 80);
+      // Synthetic GPT disk with one lost NTFS volume in unallocated space.
+      return [
+        {
+          diskNo: 2,
+          sizeBytes: 64 * 1024 * 1024 * 1024,
+          sectorSize: 512,
+          style: 'gpt',
+          partitions: [
+            {
+              index: 0,
+              kind: 'Microsoft basic data',
+              startByte: 1024 * 1024,
+              sizeBytes: 20 * 1024 * 1024 * 1024,
+              label: 'Data (E:)',
+            },
+          ],
+          lostPartitions: [
+            {
+              id: 'lp:2:32212254720',
+              diskNo: 2,
+              startByte: 32212254720,
+              sizeBytes: 30 * 1024 * 1024 * 1024,
+              probableFs: 'ntfs',
+              note: 'Unallocated area with a valid boot sector',
+            },
+          ],
+        },
+      ];
+    },
+
+    getSpecialFolders: async (): Promise<SpecialFolders> => {
+      await latency(20);
+      return {
+        recycleBin: 'C:\\$Recycle.Bin',
+        desktop: 'C:\\Users\\dev\\Desktop',
+        documents: 'C:\\Users\\dev\\Documents',
+        downloads: 'C:\\Users\\dev\\Downloads',
+      };
+    },
+
     openPath: async (path: string): Promise<void> => {
       await latency(30);
       void path;
@@ -1579,6 +1631,81 @@ ${lines.join('')}
       );
     },
   };
+
+  /** D-Space cleanup features (mock: in-memory, deterministic). */
+  readonly cleanup: CleanupDomain = createMockCleanup({
+    scanFileNames: (scanId: string): string[] | null => {
+      const rt = this.scans.get(scanId);
+      if (!rt) return null;
+      const target = rt.target;
+      const volId = 'volumes' in target ? (target.volumes[0]?.id ?? null) : target.id;
+      if (!volId) return null;
+      const space = this.nodeSpaces.get(volId);
+      if (!space) return null;
+      const page = space.query(
+        {
+          nodeId: null,
+          treeMode: 'path',
+          search: null,
+          categories: null,
+          dateFrom: null,
+          dateTo: null,
+          sizeMinBytes: null,
+          sizeMaxBytes: null,
+          extensions: null,
+          origins: null,
+          hideEmptyFiles: false,
+        },
+        { field: 'size', direction: 'desc' },
+        0,
+        2000,
+        null,
+      );
+      return page.nodes.map((n) => n.name);
+    },
+    scanDriveLetter: (scanId: string): string | null => {
+      const rt = this.scans.get(scanId);
+      if (!rt) return null;
+      const target = rt.target;
+      if ('letter' in target && target.letter) return target.letter;
+      for (const d of this.deviceList) {
+        if (d.volumes.some((v) => v.id === rt.params.targetId) || d.id === rt.params.targetId) {
+          return d.volumes[0]?.letter ?? null;
+        }
+      }
+      return null;
+    },
+    searchLatest: (query: string, limit: number): IndexHit[] => {
+      // Search the largest available space (deterministic pick: first).
+      const space = this.nodeSpaces.values().next().value;
+      if (!space) return [];
+      const page = space.query(
+        {
+          nodeId: null,
+          treeMode: 'path',
+          search: query,
+          categories: null,
+          dateFrom: null,
+          dateTo: null,
+          sizeMinBytes: null,
+          sizeMaxBytes: null,
+          extensions: null,
+          origins: null,
+          hideEmptyFiles: false,
+        },
+        { field: 'name', direction: 'asc' },
+        0,
+        limit,
+        null,
+      );
+      return page.nodes.map((n) => ({
+        volumeId: 'vol:C',
+        name: n.name,
+        fullPath: n.path ?? null,
+        isDir: false,
+      }));
+    },
+  });
 
   private mountPoints(): MountPoint[] {
     return this.deviceList

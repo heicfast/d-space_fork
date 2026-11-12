@@ -13,6 +13,9 @@ import { RepairPage } from '@/features/repair/repair-page';
 import { SettingsPage } from '@/features/settings-about/settings-page';
 import { LostPartitionPage } from '@/features/lost-partition/lost-partition-page';
 import { ResultsRoute } from '@/features/results-explorer/results-route';
+import { CleanupPage } from '@/features/cleanup/cleanup-page';
+import { DuplicatesPage } from '@/features/duplicates/duplicates-page';
+import { SnapshotsPage } from '@/features/snapshots/snapshots-page';
 
 /**
  * Router (ADR-001): React Router v7 data mode with a HASH history — hash
@@ -39,6 +42,9 @@ export const router = createHashRouter([
       { path: 'repair', element: <RepairPage /> },
       { path: 'settings', element: <SettingsPage /> },
       { path: 'lost-partition', element: <LostPartitionPage /> },
+      { path: 'cleanup', element: <CleanupPage /> },
+      { path: 'duplicates', element: <DuplicatesPage /> },
+      { path: 'snapshots', element: <SnapshotsPage /> },
       { path: '*', element: <ResultsPageFallback /> },
     ],
   },

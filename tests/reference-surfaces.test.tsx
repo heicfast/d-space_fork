@@ -10,7 +10,6 @@ import { HealthPage } from '@/features/health/health-page';
 import { BackupPage } from '@/features/backup/backup-page';
 import { RepairPage } from '@/features/repair/repair-page';
 import { LostPartitionPage } from '@/features/lost-partition/lost-partition-page';
-import { ActivationDialog } from '@/features/settings-about/activation-dialog';
 import '@/i18n';
 
 function wrap(ui: React.ReactElement, initialPath = '/'): ReturnType<typeof render> {
@@ -50,14 +49,10 @@ describe('reference UI surfaces and sidebar', () => {
     expect(screen.queryByRole('button', { name: /recovery assistant/i })).toBeNull();
   });
 
-  it('renders the Activate dialog with Paste bubble, Activate CTA, and Buy a License Now button', async () => {
-    wrap(<ActivationDialog open onOpenChange={() => undefined} />);
-    expect(
-      await screen.findByRole('dialog', { name: /activate easeus data recovery wizard/i }),
-    ).toBeVisible();
-    expect(screen.getByText('Paste')).toBeVisible();
-    expect(screen.getByRole('button', { name: /^activate$/i })).toBeVisible();
-    expect(screen.getByRole('button', { name: /buy a license now/i })).toBeVisible();
+  it('renders no activation or licensing surface anywhere in the shell', () => {
+    wrap(<WizardShell />);
+    expect(screen.queryByText(/buy now/i)).toBeNull();
+    expect(screen.queryByTestId('header-activate-trigger')).toBeNull();
   });
 
   it('renders the SD Card page with SD/MMC/MS PRO row, SDR/SSR/DVR columns, and Search for Lost Data CTA', () => {

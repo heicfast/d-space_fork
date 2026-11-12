@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { MockConnector } from '@/connector/mock/mock-connector';
-import { createTauriConnector } from '@/connector/tauri/tauri-connector';
 import { scanPhaseOf } from '@/connector/contract';
 import type { ResultsFilter, ScanStage } from '@/connector/contract';
 
@@ -560,10 +559,5 @@ describe('MockConnector — health & repair', () => {
   });
 });
 
-describe('Tauri stub adapter', () => {
-  it('throws NotImplementedError on every domain', async () => {
-    const stub = createTauriConnector();
-    await expect(async () => stub.devices.listDevices()).rejects.toThrow(/not implemented/i);
-    await expect(async () => stub.system.getAppInfo()).rejects.toThrow(/CONNECTOR-CONTRACT/i);
-  });
-});
+// The real Tauri adapter's command wiring is covered by
+// tests/tauri-connector.test.ts (mocked invoke/listen, no Tauri runtime).

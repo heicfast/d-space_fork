@@ -6,7 +6,12 @@ import { cn } from '@/lib/utils';
  * reference desktop recovery suite chrome, sidebar, and landing cards.
  */
 
-export function BrandBriefcaseLogo({ className }: { className?: string }): React.JSX.Element {
+/**
+ * DiskWizard emblem — a disk platter with a recovery spark. Original
+ * geometry (no corpus reference): rounded squircle in the brand blue
+ * gradient, platter ellipse, read-head arc, and a four-point spark.
+ */
+export function BrandDiskWizardLogo({ className }: { className?: string }): React.JSX.Element {
   return (
     <svg
       viewBox="0 0 36 36"
@@ -16,7 +21,7 @@ export function BrandBriefcaseLogo({ className }: { className?: string }): React
     >
       <defs>
         <linearGradient
-          id="brand-bg"
+          id="dw-brand-bg"
           x1="0"
           y1="0"
           x2="36"
@@ -27,15 +32,134 @@ export function BrandBriefcaseLogo({ className }: { className?: string }): React
           <stop offset="100%" stopColor="#1677FF" />
         </linearGradient>
       </defs>
-      <path
-        d="M13 6.5C13 5.11929 14.1193 4 15.5 4H20.5C21.8807 4 23 5.11929 23 6.5V8H13V6.5Z"
-        fill="#0958D9"
+      <rect x="2" y="2" width="32" height="32" rx="9" fill="url(#dw-brand-bg)" />
+      <ellipse cx="18" cy="19.5" rx="10.5" ry="7" fill="#0958D9" />
+      <ellipse
+        cx="18"
+        cy="19.5"
+        rx="10.5"
+        ry="7"
+        fill="none"
+        stroke="#BAD4FF"
+        strokeWidth="1.4"
       />
-      <rect x="3" y="7" width="30" height="25" rx="6" fill="url(#brand-bg)" />
-      <rect x="3" y="7" width="30" height="11" rx="6" fill="#69B1FF" fillOpacity="0.28" />
+      <ellipse cx="18" cy="19.5" rx="3.2" ry="2.1" fill="#E6F4FF" />
       <path
-        d="M16.2 13.5H19.8V17.7H24V21.3H19.8V25.5H16.2V21.3H12V17.7H16.2V13.5Z"
-        fill="white"
+        d="M8.5 9.5C10.8 7.4 14.2 6 18 6C21.8 6 25.2 7.4 27.5 9.5"
+        fill="none"
+        stroke="#E6F4FF"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path
+        d="M27.2 12.4L28.1 14.6L30.3 15.5L28.1 16.4L27.2 18.6L26.3 16.4L24.1 15.5L26.3 14.6L27.2 12.4Z"
+        fill="#FFD666"
+      />
+    </svg>
+  );
+}
+
+/** Cleanup Bin — a tray with an undo arrow (safe delete + 24h restore). */
+export function SidebarCleanupBinIcon({
+  className,
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className={cn('size-5 shrink-0', className)}
+      aria-hidden
+    >
+      <path
+        d="M4 7h16l-1.2 12.1a2 2 0 0 1-2 1.9H7.2a2 2 0 0 1-2-1.9L4 7Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M3 7h18M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <path
+        d="M10 15.5c-1.2-1-1.2-2.5 0-3.4M14 15.5c1.2-1 1.2-2.5 0-3.4"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Duplicate Finder — two overlapping documents. */
+export function SidebarDuplicatesIcon({
+  className,
+}: {
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className={cn('size-5 shrink-0', className)}
+      aria-hidden
+    >
+      <rect
+        x="8"
+        y="3.5"
+        width="12"
+        height="15"
+        rx="2.2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M16 20.2A1.8 1.8 0 0 1 14.2 22H6.2A2.2 2.2 0 0 1 4 19.8V8.2A1.7 1.7 0 0 1 5.7 6.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+      <path
+        d="M11 9.5h6M11 13h6"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/** Size Snapshots — a camera with a growth arrow (time-dimension deltas). */
+export function SidebarSnapshotsIcon({ className }: { className?: string }): React.JSX.Element {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className={cn('size-5 shrink-0', className)}
+      aria-hidden
+    >
+      <rect
+        x="3"
+        y="7"
+        width="18"
+        height="13"
+        rx="2.5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M8.5 7l1.2-2h4.6l1.2 2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="13.5" r="3.4" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M17.5 4.5l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8.8-1.9Z"
+        fill="currentColor"
       />
     </svg>
   );

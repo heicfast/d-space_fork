@@ -1,11 +1,14 @@
 /**
  * Connector factory — the ONLY place that decides which backend the UI talks to.
  *
- * VITE_CONNECTOR=mock (default) → deterministic simulator
- * VITE_CONNECTOR=tauri          → real IPC adapter (currently a loud stub)
+ * VITE_CONNECTOR=tauri (default) → the real DiskWizard engine (dw_* commands)
+ * VITE_CONNECTOR=mock            → deterministic simulator (tests, browser dev,
+ *                                  e2e smoke builds — must never ship)
  *
- * Components and views import from src/queries — never from here directly
- * (enforced by eslint boundaries + scripts/arch-lint.mjs).
+ * The default is the REAL connector: a production build can never silently
+ * bundle the simulator. Components and views import from src/queries —
+ * never from here directly (enforced by eslint boundaries +
+ * scripts/arch-lint.mjs).
  */
 
 import type { MockScenarioId, RecoveryConnector, ScenarioControl } from './contract';
@@ -16,7 +19,7 @@ export type ConnectorMode = 'mock' | 'tauri';
 
 export function connectorMode(): ConnectorMode {
   const v = (import.meta.env as { readonly VITE_CONNECTOR?: unknown }).VITE_CONNECTOR;
-  return v === 'tauri' ? 'tauri' : 'mock';
+  return v === 'mock' ? 'mock' : 'tauri';
 }
 
 /**

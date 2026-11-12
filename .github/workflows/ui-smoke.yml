@@ -46,7 +46,7 @@ jobs:
       - name: Run e2e
         run: pnpm e2e
         env:
-          CI: "true"
+          CI: 'true'
 
       - name: Upload smoke screens
         if: always()

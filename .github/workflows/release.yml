@@ -8,7 +8,7 @@ name: Release
 on:
   push:
     tags:
-      - "v*.*.*"
+      - 'v*.*.*'
 
 concurrency:
   group: release-${{ github.ref }}
@@ -51,7 +51,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "src-tauri -> target"
+          workspaces: 'src-tauri -> target'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -64,7 +64,7 @@ jobs:
           VITE_CONNECTOR: tauri
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "DiskWizard ${{ github.ref_name }}"
+          releaseName: 'DiskWizard ${{ github.ref_name }}'
           releaseBody: |
             DiskWizard — Windows data recovery wizard and safe disk cleanup.
 

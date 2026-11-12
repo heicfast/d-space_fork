@@ -58,6 +58,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    // Unit/component tests always run against the deterministic simulator.
+    env: {
+      VITE_CONNECTOR: 'mock',
+    },
     setupFiles: ['./tests/setup.ts'],
     include: ['tests/**/*.test.{ts,tsx}'],
     css: false,

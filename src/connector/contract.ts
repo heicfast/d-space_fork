@@ -25,7 +25,7 @@ export type FileCategoryId =
 /** Recovery-condition grades come from the connector; the UI never re-grades. */
 export type ConfidenceGrade = 'excellent' | 'good' | 'fair' | 'poor' | 'unknown';
 
-export type DeviceKind = 'internal' | 'usb' | 'sd' | 'optical' | 'virtual';
+export type DeviceKind = 'internal' | 'usb' | 'sd' | 'optical' | 'network' | 'virtual';
 export type VolumeFs =
   | 'ntfs'
   | 'fat32'
@@ -184,6 +184,8 @@ export interface ScanProgressEvent {
   readonly bytesTotal: number;
   readonly filesFound: number;
   readonly dataFoundBytes: number;
+  /** Recoverable (deleted) entries found so far — the recovery headline. */
+  readonly deletedFound: number;
   readonly errors: number;
   readonly badSectorMap: readonly BadSectorRange[];
   readonly etaSeconds: number | null;
@@ -329,8 +331,9 @@ export type PreviewPayload =
   | {
       readonly kind: 'image';
       readonly dataUrl: string;
-      readonly width: number;
-      readonly height: number;
+      /** Pixel dimensions when the engine could parse the header; null otherwise. */
+      readonly width: number | null;
+      readonly height: number | null;
       readonly bounded: boolean;
     }
   | {
@@ -515,6 +518,8 @@ export interface DiskHealth {
   readonly reallocatedSectors: number | null;
   readonly pendingSectors: number | null;
   readonly attributes: readonly SmartAttribute[];
+  /** Engine-side honest limitation notes (e.g. NVMe health passthrough). */
+  readonly note?: string;
 }
 
 export interface HealthDomain {
@@ -546,6 +551,8 @@ export interface RepairDryRun {
   readonly deviceId: string;
   readonly findings: readonly RepairFinding[];
   readonly canApply: boolean;
+  /** Engine-side honest limitation notes (e.g. system-volume repairs blocked). */
+  readonly note?: string;
 }
 
 export interface RepairUndoEntry {
@@ -601,9 +608,50 @@ export interface DestinationValidation {
   readonly neededBytes: number | null;
 }
 
+/** One partition (or unallocated gap) on a physical disk. */
+export interface DiskPartition {
+  readonly index: number;
+  readonly kind: string;
+  readonly startByte: number;
+  readonly sizeBytes: number;
+  readonly label: string | null;
+}
+
+/** A lost volume found in unallocated space (boot sector detected). */
+export interface LostPartition {
+  /** Stable scan target id (`lp:<disk>:<offset>`). */
+  readonly id: string;
+  readonly diskNo: number;
+  readonly startByte: number;
+  readonly sizeBytes: number;
+  readonly probableFs: string;
+  readonly note: string | null;
+}
+
+export interface DiskLayout {
+  readonly diskNo: number;
+  readonly sizeBytes: number;
+  readonly sectorSize: number;
+  readonly style: 'gpt' | 'mbr' | 'unknown';
+  readonly partitions: readonly DiskPartition[];
+  readonly lostPartitions: readonly LostPartition[];
+}
+
+/** Well-known quick-target folders (Recycle Bin, Desktop, ...). */
+export interface SpecialFolders {
+  readonly recycleBin: string | null;
+  readonly desktop: string | null;
+  readonly documents: string | null;
+  readonly downloads: string | null;
+}
+
 export interface SystemDomain {
   getDriverStatus(): Promise<DriverStatus>;
   getAppInfo(): Promise<AppInfo>;
+  /** Physical disk layouts incl. lost-partition candidates (admin). */
+  listDiskLayouts(): Promise<readonly DiskLayout[]>;
+  /** Well-known folders for the Home quick targets. */
+  getSpecialFolders(): Promise<SpecialFolders>;
   validateDestination(
     path: string,
     sourceDeviceId: string,
@@ -625,6 +673,181 @@ export interface SystemDomain {
 }
 
 // ---------------------------------------------------------------------------
+// Cleanup — the D-Space safety features carried into DiskWizard
+// ---------------------------------------------------------------------------
+
+/** A file/folder staged for deletion (recoverable for 24h). */
+export interface CleanupStagedItem {
+  readonly id: number;
+  readonly originalPath: string;
+  readonly stagedPath: string;
+  readonly sizeBytes: number;
+  readonly stagedAt: Iso8601;
+  readonly expiresAt: Iso8601;
+  readonly isDir: boolean;
+  /** 'normal' = same-volume atomic rename; 'cross_volume' = verified copy. */
+  readonly fallbackTier: 'normal' | 'cross_volume';
+}
+
+export interface CleanupFileSnapshot {
+  readonly path: string;
+  readonly sizeBytes: number;
+  readonly modifiedAt: Iso8601;
+  readonly blake3First4kbHex: string | null;
+  readonly isDir: boolean;
+}
+
+export type CleanupUndoOutcome =
+  | { readonly kind: 'restored'; readonly originalPath: string }
+  | { readonly kind: 'idempotent'; readonly originalPath: string }
+  | {
+      readonly kind: 'conflict';
+      readonly originalPath: string;
+      readonly staged: CleanupFileSnapshot;
+      readonly target: CleanupFileSnapshot;
+    };
+
+export type CleanupUndoResolution = 'overwrite' | 'rename' | 'keep_both' | 'cancel';
+
+export interface CleanupExpiredItem {
+  readonly id: number;
+  readonly originalPath: string;
+  readonly sizeBytes: number;
+  readonly expiredAt: Iso8601;
+  readonly isDir: boolean;
+  readonly ageSeconds: number;
+}
+
+export interface CleanupReport {
+  readonly deleted: number;
+  readonly failed: number;
+  readonly totalBytes: number;
+  readonly elapsedMs: number;
+  readonly abortedThreshold: boolean;
+}
+
+export interface CleanupPermanentResult {
+  readonly id: number;
+  readonly originalPath: string;
+  readonly stagedPath: string;
+  readonly sizeBytes: number;
+  readonly deletedAt: Iso8601;
+  readonly blake3First4kbHex: string | null;
+  readonly isDir: boolean;
+}
+
+/** A user-defined safe-cleanup scoring rule. */
+export interface CleanupRule {
+  readonly id: number;
+  readonly pattern: string;
+  readonly patternType: 'name' | 'extension';
+  readonly score: number;
+  readonly explanation: string;
+  readonly enabled: boolean;
+  readonly createdAt: Iso8601;
+  readonly updatedAt: Iso8601;
+}
+
+export interface DuplicateGroup {
+  readonly hashHex: string;
+  readonly sizeBytes: number;
+  readonly paths: readonly string[];
+}
+
+export interface DuplicatesResult {
+  readonly driveLetter: string;
+  readonly scannedFiles: number;
+  readonly filteredSmall: number;
+  readonly candidatePairs: number;
+  readonly hashErrors: number;
+  readonly groups: readonly DuplicateGroup[];
+  readonly stats: {
+    readonly groupCount: number;
+    readonly redundantBytes: number;
+    readonly elapsedMs: number;
+  };
+}
+
+/** Size snapshot of a volume (directory-level, captured from a scan). */
+export interface CleanupSnapshotMeta {
+  readonly id: number;
+  readonly volumeId: string;
+  readonly capturedAt: Iso8601;
+  readonly totalSizeBytes: number;
+  readonly fileCount: number;
+  readonly dirCount: number;
+  readonly entryCount: number;
+}
+
+export interface SnapshotDeltaEntry {
+  readonly path: string;
+  readonly fromSize: number;
+  readonly toSize: number;
+  readonly deltaBytes: number;
+}
+
+export interface SnapshotDelta {
+  readonly fromId: number;
+  readonly toId: number;
+  readonly fromCapturedAt: Iso8601;
+  readonly toCapturedAt: Iso8601;
+  readonly netChangeBytes: number;
+  readonly totalChangedPaths: number;
+  readonly added: readonly { path: string; sizeBytes: number }[];
+  readonly removed: readonly { path: string; sizeBytes: number }[];
+  readonly grew: readonly SnapshotDeltaEntry[];
+  readonly shrunk: readonly SnapshotDeltaEntry[];
+}
+
+/** Quick-search hit from the live USN index (Everything-like). */
+export interface IndexHit {
+  readonly volumeId: string;
+  readonly name: string;
+  readonly fullPath: string | null;
+  readonly isDir: boolean;
+}
+
+export interface CleanupDomain {
+  /** Stage a file/folder for deletion (atomic move; 24h undo window). */
+  stagePath(path: string): Promise<CleanupStagedItem>;
+  listStaging(): Promise<readonly CleanupStagedItem[]>;
+  undoStaging(id: number): Promise<CleanupUndoOutcome>;
+  undoResolve(id: number, resolution: CleanupUndoResolution): Promise<CleanupUndoOutcome>;
+  permanentDelete(
+    id: number,
+    confirmPhrase: string,
+    secureWipe: boolean,
+  ): Promise<CleanupPermanentResult>;
+  listExpired(): Promise<readonly CleanupExpiredItem[]>;
+  cleanupExpired(ratePerSec: number, force: boolean): Promise<CleanupReport>;
+
+  listRules(): Promise<readonly CleanupRule[]>;
+  addRule(
+    pattern: string,
+    patternType: 'name' | 'extension',
+    score: number,
+    explanation: string,
+  ): Promise<CleanupRule>;
+  deleteRule(id: number): Promise<void>;
+  toggleRule(id: number, enabled: boolean): Promise<void>;
+
+  findDuplicates(
+    scanId: string,
+    opts?: { readonly minSizeBytes?: number; readonly sizeOnly?: boolean },
+  ): Promise<DuplicatesResult>;
+
+  captureSnapshot(scanId: string): Promise<CleanupSnapshotMeta>;
+  listSnapshots(): Promise<readonly CleanupSnapshotMeta[]>;
+  snapshotDelta(from: number, to: number): Promise<SnapshotDelta>;
+  cleanupSnapshots(retainDays?: number): Promise<number>;
+
+  searchIndex(query: string, limit?: number): Promise<readonly IndexHit[]>;
+
+  getSetting(key: string): Promise<string | null>;
+  setSetting(key: string, value: string): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
 // The connector
 // ---------------------------------------------------------------------------
 
@@ -638,6 +861,8 @@ export interface RecoveryConnector {
   readonly health: HealthDomain;
   readonly repair: RepairDomain;
   readonly system: SystemDomain;
+  /** D-Space cleanup features (staging/undo, rules, duplicates, snapshots). */
+  readonly cleanup: CleanupDomain;
 }
 
 /** Dev-panel scenario control (mock-only surface; real connector throws). */

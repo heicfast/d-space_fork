@@ -127,21 +127,13 @@ pub struct RecoveryReportWire {
     pub status: JobStatus,
     pub started_at_unix: i64,
     pub finished_at_unix: i64,
-    pub succeeded: Vec<String>,
-    pub failed: Vec<JobFailureWire>,
-    pub skipped: Vec<String>,
+    pub succeeded: Vec<JobItemWire>,
+    pub failed: Vec<JobItemWire>,
+    pub skipped: Vec<JobItemWire>,
     pub total_bytes_written: u64,
     pub verified: bool,
     pub processed_total: u64,
     pub truncated_item_lists: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct JobFailureWire {
-    pub node_id: String,
-    pub name: String,
-    pub code: String,
 }
 
 /// A running or finished recovery job.
@@ -407,7 +399,7 @@ fn run_job_inner<R: tauri::Runtime>(
     let start = std::time::Instant::now();
     let mut written_total: u64 = 0;
     let mut succeeded: Vec<String> = Vec::new();
-    let mut failed: Vec<JobFailureWire> = Vec::new();
+    let mut failed: Vec<JobItemWire> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
 
     let total = job
@@ -760,28 +752,35 @@ pub fn items_wire(job: &Arc<RecoveryJob>, offset: usize, limit: usize) -> Vec<Jo
         .collect()
 }
 
+fn item_wire(i: &JobItem) -> JobItemWire {
+    JobItemWire {
+        node_id: i.node_id.to_string(),
+        name: i.name.clone(),
+        size_bytes: i.size_bytes,
+        state: i.state,
+        error_code: i.error_code.clone(),
+        saved_as: i.saved_as.clone(),
+    }
+}
+
 pub fn report_wire(job: &Arc<RecoveryJob>) -> RecoveryReportWire {
     let guard = job.items.lock().unwrap_or_else(|p| p.into_inner());
-    let succeeded: Vec<String> = guard
+    let succeeded: Vec<JobItemWire> = guard
         .iter()
         .filter(|i| i.state == ItemState::Done)
-        .map(|i| i.saved_as.clone().unwrap_or_else(|| i.rel_path.clone()))
+        .map(item_wire)
         .take(REPORT_LIST_CAP)
         .collect();
-    let failed: Vec<JobFailureWire> = guard
+    let failed: Vec<JobItemWire> = guard
         .iter()
         .filter(|i| i.state == ItemState::Failed)
-        .map(|i| JobFailureWire {
-            node_id: i.node_id.to_string(),
-            name: i.name.clone(),
-            code: i.error_code.clone().unwrap_or_else(|| "unknown".into()),
-        })
+        .map(item_wire)
         .take(REPORT_LIST_CAP)
         .collect();
-    let skipped: Vec<String> = guard
+    let skipped: Vec<JobItemWire> = guard
         .iter()
         .filter(|i| i.state == ItemState::Skipped)
-        .map(|i| i.rel_path.clone())
+        .map(item_wire)
         .take(REPORT_LIST_CAP)
         .collect();
     let truncated = guard.len() > REPORT_LIST_CAP;

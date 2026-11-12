@@ -9,14 +9,16 @@ export type AppLocale = (typeof SUPPORTED_LOCALES)[number];
 const STORAGE_KEY = 'rw.ui.locale';
 
 function detectLocale(): AppLocale {
+  // DiskWizard is English-first: the stored choice wins, everything else
+  // starts in English. Chinese is a first-class manual switch, never an
+  // automatic override (predictable first-run language for support).
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === 'en' || stored === 'zh-CN') return stored;
   } catch {
     /* storage unavailable */
   }
-  const nav = typeof navigator !== 'undefined' ? navigator.language : 'en';
-  return nav.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
+  return 'en';
 }
 
 void i18next.use(initReactI18next).init({

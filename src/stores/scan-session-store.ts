@@ -11,16 +11,20 @@ interface ScanSessionState {
   known: Record<string, ActiveScan>;
   /** Route-intent helpers for the celebration → results handoff. */
   celebrationSeenFor: string | null;
+  /** The recovery job currently writing files (close-guard signal). */
+  recoveryActiveJobId: string | null;
   setActiveScan: (scan: ActiveScan) => void;
   markScanStopped: () => void;
   setActiveStatus: (scanId: string, status: 'completed' | 'cancelled' | 'failed') => void;
   markCelebrationSeen: (scanId: string) => void;
+  setRecoveryActiveJob: (jobId: string | null) => void;
 }
 
 export const useScanSessionStore = create<ScanSessionState>((set, get) => ({
   active: null,
   known: {},
   celebrationSeenFor: null,
+  recoveryActiveJobId: null,
   setActiveScan: (scan) =>
     set((state) => ({
       active: scan,
@@ -46,4 +50,5 @@ export const useScanSessionStore = create<ScanSessionState>((set, get) => ({
     }
   },
   markCelebrationSeen: (scanId) => set({ celebrationSeenFor: scanId }),
+  setRecoveryActiveJob: (jobId) => set({ recoveryActiveJobId: jobId }),
 }));
